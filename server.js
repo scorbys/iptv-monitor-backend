@@ -41,27 +41,27 @@ const internationalChannels = [
 ];
 
 const localChannels = [
-  { id: 27, channelNumber: 1, channelName: 'DW TV', category: 'News', ipMulticast: '238.5.2.222', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Deutsche_Welle_symbol_2012.svg/200px-Deutsche_Welle_symbol_2012.svg.png' },
-  { id: 28, channelNumber: 2, channelName: 'Biznet Lifestyle', category: 'ETC', ipMulticast: '238.5.2.200', logo: 'https://via.placeholder.com/200x100/purple/ffffff?text=Biznet+Lifestyle' },
-  { id: 29, channelNumber: 3, channelName: 'Biznet Kids', category: 'ETC', ipMulticast: '238.5.2.50', logo: 'https://via.placeholder.com/200x100/ff9900/ffffff?text=Biznet+Kids' },
-  { id: 30, channelNumber: 4, channelName: 'DAAI TV', category: 'ETC', ipMulticast: '238.5.2.33', logo: 'https://via.placeholder.com/200x100/0066cc/ffffff?text=DAAI+TV' },
-  { id: 31, channelNumber: 5, channelName: 'Magna TV', category: 'ETC', ipMulticast: '238.5.2.21', logo: 'https://via.placeholder.com/200x100/cc0066/ffffff?text=Magna+TV' },
-  { id: 32, channelNumber: 6, channelName: 'Sony', category: 'ETC', ipMulticast: '238.5.2.17', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c4/Sony_logo.svg/200px-Sony_logo.svg.png' },
-  { id: 33, channelNumber: 7, channelName: 'Trans TV', category: 'ETC', ipMulticast: '238.5.2.15', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Trans_TV_2013.svg/200px-Trans_TV_2013.svg.png' },
-  { id: 34, channelNumber: 8, channelName: 'Jak TV', category: 'ETC', ipMulticast: '238.5.2.31', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/JakTV_logo.svg/200px-JakTV_logo.svg.png' },
-  { id: 35, channelNumber: 9, channelName: 'GTV 4', category: 'News', ipMulticast: '238.5.2.225', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/GTV_%282017%29.svg/200px-GTV_%282017%29.svg.png' },
-  { id: 36, channelNumber: 10, channelName: 'O Channel', category: 'News', ipMulticast: '238.5.2.32', logo: 'https://via.placeholder.com/200x100/ff0000/ffffff?text=O+Channel' },
-  { id: 37, channelNumber: 11, channelName: 'Bali TV', category: 'ETC', ipMulticast: '238.5.2.34', logo: 'https://via.placeholder.com/200x100/ff6600/ffffff?text=Bali+TV' },
-  { id: 38, channelNumber: 12, channelName: 'JTV', category: 'ETC', ipMulticast: '238.5.2.229', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/JTV_%28Indonesia%29_logo.svg/200px-JTV_%28Indonesia%29_logo.svg.png' },
-  { id: 39, channelNumber: 13, channelName: 'Indosiar', category: 'ETC', ipMulticast: '238.5.2.14', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Indosiar_2015.svg/200px-Indosiar_2015.svg.png' },
-  { id: 40, channelNumber: 14, channelName: 'TVRI', category: 'ETC', ipMulticast: '238.5.2.10', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/eb/TVRILogo2019.svg/200px-TVRILogo2019.svg.png' },
-  { id: 41, channelNumber: 15, channelName: 'Kompas TV', category: 'ETC', ipMulticast: '238.5.2.18', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/97/Kompas_TV_%282017%29.svg/200px-Kompas_TV_%282017%29.svg.png' },
-  { id: 42, channelNumber: 16, channelName: 'Trans 7', category: 'ETC', ipMulticast: '238.5.2.16', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Trans_7_2013.svg/200px-Trans_7_2013.svg.png' },
-  { id: 43, channelNumber: 17, channelName: 'Metro TV', category: 'ETC', ipMulticast: '238.5.2.11', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Metro_TV.svg/200px-Metro_TV.svg.png' },
-  { id: 44, channelNumber: 18, channelName: 'JTV', category: 'ETC', ipMulticast: '238.5.2.21', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/JTV_%28Indonesia%29_logo.svg/200px-JTV_%28Indonesia%29_logo.svg.png' },
-  { id: 45, channelNumber: 19, channelName: 'Rajawali TV', category: 'ETC', ipMulticast: '238.5.2.30', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/RTV_%28Indonesia%29_logo.svg/200px-RTV_%28Indonesia%29_logo.svg.png' },
-  { id: 46, channelNumber: 20, channelName: 'NET HD', category: 'ETC', ipMulticast: '238.5.2.19', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/NET._Logo.svg/200px-NET._Logo.svg.png' },
-  { id: 47, channelNumber: 21, channelName: 'Moji', category: 'ETC', ipMulticast: '238.5.2.32', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Moji_logo.svg/200px-Moji_logo.svg.png' }
+  { id: 27, channelNumber: 27, channelName: 'DW TV', category: 'News', ipMulticast: '238.5.2.222', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Deutsche_Welle_symbol_2012.svg/200px-Deutsche_Welle_symbol_2012.svg.png' },
+  { id: 28, channelNumber: 28, channelName: 'Biznet Lifestyle', category: 'ETC', ipMulticast: '238.5.2.200', logo: 'https://via.placeholder.com/200x100/purple/ffffff?text=Biznet+Lifestyle' },
+  { id: 29, channelNumber: 29, channelName: 'Biznet Kids', category: 'ETC', ipMulticast: '238.5.2.50', logo: 'https://via.placeholder.com/200x100/ff9900/ffffff?text=Biznet+Kids' },
+  { id: 30, channelNumber: 30, channelName: 'DAAI TV', category: 'ETC', ipMulticast: '238.5.2.33', logo: 'https://via.placeholder.com/200x100/0066cc/ffffff?text=DAAI+TV' },
+  { id: 31, channelNumber: 31, channelName: 'Magna TV', category: 'ETC', ipMulticast: '238.5.2.21', logo: 'https://via.placeholder.com/200x100/cc0066/ffffff?text=Magna+TV' },
+  { id: 32, channelNumber: 32, channelName: 'Sony', category: 'ETC', ipMulticast: '238.5.2.17', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c4/Sony_logo.svg/200px-Sony_logo.svg.png' },
+  { id: 33, channelNumber: 33, channelName: 'Trans TV', category: 'ETC', ipMulticast: '238.5.2.15', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Trans_TV_2013.svg/200px-Trans_TV_2013.svg.png' },
+  { id: 34, channelNumber: 34, channelName: 'Jak TV', category: 'ETC', ipMulticast: '238.5.2.31', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/JakTV_logo.svg/200px-JakTV_logo.svg.png' },
+  { id: 35, channelNumber: 35, channelName: 'GTV 4', category: 'News', ipMulticast: '238.5.2.225', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/GTV_%282017%29.svg/200px-GTV_%282017%29.svg.png' },
+  { id: 36, channelNumber: 36, channelName: 'O Channel', category: 'News', ipMulticast: '238.5.2.32', logo: 'https://via.placeholder.com/200x100/ff0000/ffffff?text=O+Channel' },
+  { id: 37, channelNumber: 37, channelName: 'Bali TV', category: 'ETC', ipMulticast: '238.5.2.34', logo: 'https://via.placeholder.com/200x100/ff6600/ffffff?text=Bali+TV' },
+  { id: 38, channelNumber: 38, channelName: 'JTV', category: 'ETC', ipMulticast: '238.5.2.229', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/JTV_%28Indonesia%29_logo.svg/200px-JTV_%28Indonesia%29_logo.svg.png' },
+  { id: 39, channelNumber: 39, channelName: 'Indosiar', category: 'ETC', ipMulticast: '238.5.2.14', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Indosiar_2015.svg/200px-Indosiar_2015.svg.png' },
+  { id: 40, channelNumber: 40, channelName: 'TVRI', category: 'ETC', ipMulticast: '238.5.2.10', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/eb/TVRILogo2019.svg/200px-TVRILogo2019.svg.png' },
+  { id: 41, channelNumber: 41, channelName: 'Kompas TV', category: 'ETC', ipMulticast: '238.5.2.18', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/97/Kompas_TV_%282017%29.svg/200px-Kompas_TV_%282017%29.svg.png' },
+  { id: 42, channelNumber: 42, channelName: 'Trans 7', category: 'ETC', ipMulticast: '238.5.2.16', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Trans_7_2013.svg/200px-Trans_7_2013.svg.png' },
+  { id: 43, channelNumber: 43, channelName: 'Metro TV', category: 'ETC', ipMulticast: '238.5.2.11', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Metro_TV.svg/200px-Metro_TV.svg.png' },
+  { id: 44, channelNumber: 44, channelName: 'JTV', category: 'ETC', ipMulticast: '238.5.2.21', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/JTV_%28Indonesia%29_logo.svg/200px-JTV_%28Indonesia%29_logo.svg.png' },
+  { id: 45, channelNumber: 45, channelName: 'Rajawali TV', category: 'ETC', ipMulticast: '238.5.2.30', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/RTV_%28Indonesia%29_logo.svg/200px-RTV_%28Indonesia%29_logo.svg.png' },
+  { id: 46, channelNumber: 46, channelName: 'NET HD', category: 'ETC', ipMulticast: '238.5.2.19', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/69/NET._Logo.svg/200px-NET._Logo.svg.png' },
+  { id: 47, channelNumber: 47, channelName: 'Moji', category: 'ETC', ipMulticast: '238.5.2.32', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Moji_logo.svg/200px-Moji_logo.svg.png' }
 ];
 
 // Store channel status in memory
