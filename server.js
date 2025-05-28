@@ -59,7 +59,7 @@ const localChannels = [
   { id: 42, channelNumber: 42, channelName: 'Trans 7', category: 'ETC', ipMulticast: '238.5.2.16', logo: 'https://upload.wikimedia.org/wikipedia/commons/9/96/Logo_Trans7.png' },
   { id: 43, channelNumber: 43, channelName: 'Metro TV', category: 'ETC', ipMulticast: '238.5.2.11', logo: 'https://logotyp.us/file/metro-tv.svg' },
   { id: 44, channelNumber: 44, channelName: 'JTV', category: 'ETC', ipMulticast: '238.5.2.21', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/JTV_%28Indonesian_TV_channel%29_2022.svg/640px-JTV_%28Indonesian_TV_channel%29_2022.svg.png' },
-  { id: 45, channelNumber: 45, channelName: 'Rajawali TV', category: 'ETC', ipMulticast: '238.5.2.30', logo: 'https://upload.wikimedia.org/wikipedia/commons/3/3c/Rajawali_TV_logo.svg' },
+  { id: 45, channelNumber: 45, channelName: 'Rajawali TV', category: 'ETC', ipMulticast: '238.5.2.30', logo: 'https://upload.wikimedia.org/wikipedia/id/5/5a/Rajawali_Televisi.svg' },
   { id: 46, channelNumber: 46, channelName: 'NET HD', category: 'ETC', ipMulticast: '238.5.2.19', logo: 'https://upload.wikimedia.org/wikipedia/commons/0/0e/NET_HD_logo.svg' },
   { id: 47, channelNumber: 47, channelName: 'Moji', category: 'ETC', ipMulticast: '238.5.2.32', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Moji_blue.svg' }
 ];
