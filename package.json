@@ -19,9 +19,12 @@
   "description": "Backend API for IPTV Channel Monitoring System",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "csv-parser": "^3.2.0",
+    "express": "^5.1.0",
+    "mongodb": "^6.16.0"
   },
   "devDependencies": {
+    "@types/node": "^22.15.29",
     "nodemon": "^3.1.10"
   }
 }
