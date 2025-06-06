@@ -396,7 +396,7 @@ app.post('/api/channels/:id/check', async (req, res) => {
 });
 
 // Get channel dashboard stats
-app.get('/api/channel/dashboard/stats', async (req, res) => {
+app.get('/api/channels/dashboard/stats', async (req, res) => {
   try {
     const allChannels = await getAllChannelsFromDB();
     const internationalChannels = await getInternationalChannels();
