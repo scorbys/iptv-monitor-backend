@@ -25,9 +25,9 @@ const tvStatus = new Map();
 // Configuration for TV status simulation
 const TV_STATUS_CONFIG = {
   USE_DUMMY_STATUS: true, // Set to false for real connectivity checks
-  ONLINE_PROBABILITY: 0.85, // 85% chance of being online
+  ONLINE_PROBABILITY: 0.93, // 93% chance of being online
   RESPONSE_TIME_RANGE: { min: 5, max: 150 }, // Response time in ms
-  UPDATE_INTERVAL: 30000 // 30 seconds
+  UPDATE_INTERVAL: 120000 // 2 minutes in milliseconds
 };
 
 // Function to check multicast connectivity
