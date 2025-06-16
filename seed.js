@@ -168,7 +168,7 @@ const channels = {
       channelName: 'Travel Channel',
       category: 'ETC',
       ipMulticast: '238.5.2.206',
-      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/Travel_Channel_Logo.svg/200px-Travel_Channel_Logo.svg.png'
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/2018_Travel_Channel_logo.svg/1280px-2018_Travel_Channel_logo.svg.png'
     },
     { 
       id: 22,
@@ -234,7 +234,7 @@ const channels = {
       channelName: 'Biznet Kids',
       category: 'ETC',
       ipMulticast: '238.5.2.50',
-      logo: 'https://www.biznetnetworks.com/assets/images/logo-biznet-kids.png'
+      logo: 'https://biznethome.net/wp-content/uploads/2024/09/Kids-Biznet-Home-Kids.jpg'
     },
     {
       id: 30,
@@ -250,7 +250,7 @@ const channels = {
       channelName: 'Magna TV',
       category: 'ETC',
       ipMulticast: '238.5.2.21',
-      logo: 'https://upload.wikimedia.org/wikipedia/commons/4/4f/Magna_Channel_logo.svg'
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/8/83/MagnaChannel.png'
     },
     {
       id: 32,
@@ -370,7 +370,7 @@ const channels = {
       channelName: 'NET HD',
       category: 'ETC',
       ipMulticast: '238.5.2.112',
-      logo: 'https://upload.wikimedia.org/wikipedia/commons/0/0e/NET_HD_logo.svg'
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/8/89/MDTV_logo.svg'
     },
     {
       id: 47,

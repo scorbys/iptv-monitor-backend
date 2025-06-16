@@ -22,6 +22,14 @@ const channelStatus = new Map();
 // Store TV status in memory
 const tvStatus = new Map();
 
+// Configuration for TV status simulation
+const TV_STATUS_CONFIG = {
+  USE_DUMMY_STATUS: true, // Set to false for real connectivity checks
+  ONLINE_PROBABILITY: 0.85, // 85% chance of being online
+  RESPONSE_TIME_RANGE: { min: 5, max: 150 }, // Response time in ms
+  UPDATE_INTERVAL: 30000 // 30 seconds
+};
+
 // Function to check multicast connectivity
 async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000) {
   return new Promise((resolve) => {
@@ -102,8 +110,30 @@ async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000
   });
 }
 
-// Function to check TV device connectivity via ping or HTTP request
+// Function to generate dummy TV status
+function generateDummyTVStatus() {
+  const isOnline = Math.random() < TV_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const responseTime = isOnline 
+    ? Math.floor(Math.random() * (TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1)) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
+    : null;
+  
+  return {
+    status: isOnline ? 'online' : 'offline',
+    responseTime,
+    error: isOnline ? null : 'Device unreachable'
+  };
+}
+
+// Function to check TV device connectivity
 async function checkTVConnectivity(ipAddress, timeout = 5000) {
+  // Use dummy status if configured
+  if (TV_STATUS_CONFIG.USE_DUMMY_STATUS) {
+    // Add small delay to simulate network checking
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 200));
+    return generateDummyTVStatus();
+  }
+
+  // Original real connectivity check
   return new Promise((resolve) => {
     const startTime = Date.now();
     
@@ -217,7 +247,7 @@ async function checkAllTVsStatus() {
       }
     }
     
-    console.log(`Checked status for ${allTVs.length} TV devices`);
+    console.log(`Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? ' (using dummy status)' : ''}`);
   } catch (error) {
     console.error('Error checking TV status:', error);
   }
@@ -693,18 +723,76 @@ app.get('/api/hospitality/dashboard/stats', async (req, res) => {
   }
 });
 
+// Configuration endpoint to toggle dummy status
+app.post('/api/config/tv-status-mode', async (req, res) => {
+  try {
+    const { useDummyStatus } = req.body;
+    
+    if (typeof useDummyStatus === 'boolean') {
+      TV_STATUS_CONFIG.USE_DUMMY_STATUS = useDummyStatus;
+      
+      // Clear existing status to force refresh
+      tvStatus.clear();
+      
+      // Restart status checks with new mode
+      await checkAllTVsStatus();
+      
+      res.json({
+        success: true,
+        message: `TV status mode changed to ${useDummyStatus ? 'dummy' : 'real'} connectivity checks`,
+        config: {
+          useDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
+          onlineProbability: TV_STATUS_CONFIG.ONLINE_PROBABILITY,
+          responseTimeRange: TV_STATUS_CONFIG.RESPONSE_TIME_RANGE
+        }
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid parameter. useDummyStatus must be a boolean'
+      });
+    }
+  } catch (error) {
+    console.error('Error updating TV status mode:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating TV status mode',
+      error: error.message
+    });
+  }
+});
+
+// Get current configuration
+app.get('/api/config', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      tvStatus: {
+        useDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
+        onlineProbability: TV_STATUS_CONFIG.ONLINE_PROBABILITY,
+        responseTimeRange: TV_STATUS_CONFIG.RESPONSE_TIME_RANGE,
+        updateInterval: TV_STATUS_CONFIG.UPDATE_INTERVAL
+      }
+    }
+  });
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     message: 'IPTV Monitoring API is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    config: {
+      tvDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS
+    }
   });
 });
 
 // Start server
 app.listen(port, async () => {
   console.log(`IPTV Monitoring API server running on http://localhost:${port}`);
+  console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
   console.log('Starting initial channel status check...');
   
   // Initialize status checks after server starts
@@ -717,8 +805,13 @@ app.listen(port, async () => {
   }
 });
 
-// Periodic status checks
+// Periodic status checks with dynamic interval for TVs
 setInterval(checkAllChannelsStatus, 120000); // Every 2 minutes for channels
-setInterval(checkAllTVsStatus, 180000); // Every 3 minutes for TVs
+setInterval(() => {
+  // Only run periodic checks if using dummy status or if explicitly configured
+  if (TV_STATUS_CONFIG.USE_DUMMY_STATUS) {
+    checkAllTVsStatus();
+  }
+}, TV_STATUS_CONFIG.UPDATE_INTERVAL); // Configurable interval for TVs
 
 module.exports = app;
