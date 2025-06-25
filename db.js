@@ -694,7 +694,6 @@ async function bulkInsertChromecastDevices(devicesData) {
 module.exports = {
   // Database connection
   connectDB,
-  updateConnectedDB,
 
   // Chromecast functions
   getChromecastDevices,
