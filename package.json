@@ -18,10 +18,14 @@
   "license": "ISC",
   "description": "Backend API for IPTV Channel Monitoring System",
   "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
+    "dotenv": "^16.5.0",
     "express": "^5.1.0",
-    "mongodb": "^6.16.0"
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.29",

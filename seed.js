@@ -32,7 +32,7 @@ const channels = {
       channelName: 'NHK World',
       category: 'ETC',
       ipMulticast: '238.5.2.125',
-      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/NHK_World.svg/1200px-NHK_World.svg.png'
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/NHK_World.svg/250px-NHK_World.svg.png'
     },
     { 
       id: 5,
@@ -64,7 +64,7 @@ const channels = {
       channelName: 'RT Rusia',
       category: 'News',
       ipMulticast: '238.5.2.128',
-      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/Russia-today-logo.svg/200px-Russia-today-logo.svg.png'
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/Russia-today-logo.svg/250px-Russia-today-logo.svg.png'
     },
     { 
       id: 9,
