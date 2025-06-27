@@ -12,8 +12,7 @@ const {
   getChromecastDevices,
   getChromecastDeviceById,
   createUser,
-  authenticateUser,
-  updateChromecastDeviceStatus
+  authenticateUser
 } = require('./db');
 
 const app = express();
@@ -27,8 +26,8 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
-    'https://iptv-backend-prod.up.railway.app/api/channels',
-    'https://iptv-monitor2.vercel.app/'
+    'https://iptv-backend-prod.up.railway.app',
+    'https://iptv-monitor2.vercel.app'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
