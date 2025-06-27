@@ -116,7 +116,7 @@ app.post('/api/auth/login', async (req, res) => {
       // Generate JWT token
       const token = jwt.sign(
         { 
-          userId: result.user.id,
+          userId: result.user.userId,
           email: result.user.email,
           username: result.user.username
         },
@@ -137,7 +137,7 @@ app.post('/api/auth/login', async (req, res) => {
       res.json({
         success: true,
         user: {
-          id: result.user.id,
+          id: result.user.userId,
           username: result.user.username,
           email: result.user.email
         },
