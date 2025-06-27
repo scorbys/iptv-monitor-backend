@@ -5,6 +5,13 @@ import { createUser }  from '../../../db';
 const JWT_SECRET = new TextEncoder().encode('Pec@tu2024++');
 
 export async function POST(request) {
+  const headers = {
+    'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
+  };
+
   try {
     const { username, email, password } = await request.json();
 
@@ -45,7 +52,7 @@ export async function POST(request) {
 
     // Create JWT token
     const token = await new SignJWT({
-      userId: createResult.userId,
+      userId: createResult.userId.toString(),
       username: username,
       email: email
     })
@@ -73,12 +80,34 @@ export async function POST(request) {
       maxAge: 7 * 24 * 60 * 60 // 7 days
     });
 
+    // Set CORS headers
+    Object.entries(headers).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
     return response;
   } catch (error) {
-    console.error('Register API error:', error);
-    return NextResponse.json(
+    // handle error with CORS headers
+    const errorResponse = NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
     );
+    
+    Object.entries(headers).forEach(([key, value]) => {
+      errorResponse.headers.set(key, value);
+    });
   }
+}
+
+// Tambahkan OPTIONS handler untuk preflight requests
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Credentials': 'true',
+    },
+  });
 }

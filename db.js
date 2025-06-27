@@ -401,7 +401,7 @@ async function authenticateUser(identifier, password) {
     return {
       success: true,
       user: {
-        id: user._id.toString(), // Pastikan ID dikembalikan sebagai string
+        userId: user._id.toString(), // Pastikan ID dikembalikan sebagai string
         username: user.username,
         email: user.email
       }
