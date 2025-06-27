@@ -4,6 +4,13 @@ import { authenticateUser } from '../../../db';
 
 const JWT_SECRET = new TextEncoder().encode('Pec@tu2024++');
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Credentials': 'true',
+};
+
 export async function POST(request) {
   try {
     const { identifier, password } = await request.json();
@@ -16,14 +23,26 @@ export async function POST(request) {
       );
     }
 
+    // Set CORS headers
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+
     // Authenticate user
     const authResult = await authenticateUser(identifier, password);
     
     if (!authResult.success) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { success: false, error: authResult.error },
         { status: 401 }
       );
+      
+      // Set CORS headers
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      
+      return response;
     }
 
     // Create JWT token
@@ -52,6 +71,11 @@ export async function POST(request) {
       maxAge: 7 * 24 * 60 * 60 // 7 days
     });
 
+    // Set CORS headers
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
     return response;
   } catch (error) {
     console.error('Login API error:', error);
@@ -59,5 +83,20 @@ export async function POST(request) {
       { success: false, error: 'Internal server error' },
       { status: 500 }
     );
+
+    // Set CORS headers for error response
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+
+    return response;
   }
+}
+
+// OPTIONS handler for preflight requests
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders,
+  });
 }
