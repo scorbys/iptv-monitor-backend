@@ -19,14 +19,17 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'Pec@tu2024++';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('JWT_SECRET environment variable is required');
+  process.exit(1);
+}
 
 // CORS Configuration
 app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
-    'https://iptv-monitor-backend-production.up.railway.app',
     'https://iptv-monitor2.vercel.app'
   ],
   credentials: true,
@@ -47,7 +50,8 @@ app.use((req, res, next) => {
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
-  const token = req.cookies.token;
+  const token = req.cookies.token || 
+    (req.headers.authorization && req.headers.authorization.split(' ')[1]);
 
   if (!token) {
     return res.status(401).json({
@@ -92,6 +96,12 @@ const CHROMECAST_STATUS_CONFIG = {
   RESPONSE_TIME_RANGE: { min: 10, max: 200 }, // Response time in ms
   UPDATE_INTERVAL: 120000 // 2 minutes in milliseconds
 };
+
+// Protected API Routes - Apply authentication middleware
+app.use('/api/channels', authenticateToken);
+app.use('/api/hospitality', authenticateToken);
+app.use('/api/chromecast', authenticateToken);
+app.use('/api/config', authenticateToken);
 
 // Login endpoint
 app.post('/api/auth/login', async (req, res) => {
@@ -314,11 +324,18 @@ app.use((req, res) => {
   });
 });
 
-// Protected API Routes - Apply authentication middleware
-app.use('/api/channels', authenticateToken);
-app.use('/api/hospitality', authenticateToken);
-app.use('/api/config', authenticateToken);
 
+// Function database coonection check
+async function checkDatabaseConnection() {
+  try {
+    const testChannel = await getInternationalChannels();
+    console.log('✅ Database connection successful');
+    return true;
+  } catch (error) {
+    console.error('❌ Database connection failed:', error.message);
+    return false;
+  }
+}
 // Function to check multicast connectivity
 async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000) {
   return new Promise((resolve) => {
@@ -1539,10 +1556,15 @@ app.get('/api/health', (req, res) => {
 
 // Start server
 app.listen(port, async () => {
-  console.log(`IPTV Monitoring API server running on http://localhost:${port}`);
-  console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-  console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  const dbConnected = await checkDatabaseConnection();
+  if (!dbConnected) {
+    console.error('Failed to connect to database. Exiting...');
+    process.exit(1);
+  }
+  
   console.log('Starting initial status checks...');
+  // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
   
   // Initialize status checks after server starts
   try {
