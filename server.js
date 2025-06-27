@@ -26,7 +26,7 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
-    'https://iptv-backend-prod.up.railway.app',
+    'https://iptv-monitor-backend-production.up.railway.app',
     'https://iptv-monitor2.vercel.app'
   ],
   credentials: true,
