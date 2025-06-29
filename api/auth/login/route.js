@@ -17,31 +17,33 @@ export async function POST(request) {
 
     // Validate input
     if (!identifier || !password) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { success: false, error: 'Email/username and password are required' },
         { status: 400 }
       );
-    }
 
-    // Set CORS headers
+      // Set CORS headers - INI YANG HILANG
       Object.entries(corsHeaders).forEach(([key, value]) => {
         response.headers.set(key, value);
       });
 
+      return response;
+    }
+
     // Authenticate user
     const authResult = await authenticateUser(identifier, password);
-    
+
     if (!authResult.success) {
       const response = NextResponse.json(
         { success: false, error: authResult.error },
         { status: 401 }
       );
-      
+
       // Set CORS headers
       Object.entries(corsHeaders).forEach(([key, value]) => {
         response.headers.set(key, value);
       });
-      
+
       return response;
     }
 
@@ -79,12 +81,12 @@ export async function POST(request) {
     return response;
   } catch (error) {
     console.error('Login API error:', error);
-    return NextResponse.json(
+    const response = NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
     );
 
-    // Set CORS headers for error response
+    // Set CORS headers for error response - INI JUGA YANG HILANG
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
