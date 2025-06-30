@@ -57,9 +57,12 @@ export async function middleware(request) {
 
 export const config = {
   matcher: [
-    '/channel/:path*',
-    '/chromecast/:path*',
-    '/hospitality/:path*',
+    '/channel',
+    '/channel/(.*)',
+    '/chromecast', 
+    '/chromecast/(.*)',
+    '/hospitality',
+    '/hospitality/(.*)',
     '/login',
     '/register'
   ],
