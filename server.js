@@ -25,30 +25,6 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
-// Handle preflight requests FIRST
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://iptv-monitor2.vercel.app'
-  ];
-
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.header('Access-Control-Allow-Credentials', 'true');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  next();
-});
-
 // CORS Configuration
 app.use(cors({
   origin: function (origin, callback) {
@@ -69,7 +45,8 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200 // TAMBAHKAN INI untuk kompatibilitas browser lama
 }));
 
 // Middleware
@@ -131,12 +108,6 @@ const CHROMECAST_STATUS_CONFIG = {
   RESPONSE_TIME_RANGE: { min: 10, max: 200 }, // Response time in ms
   UPDATE_INTERVAL: 120000 // 2 minutes in milliseconds
 };
-
-// Protected API Routes - Apply authentication middleware
-app.use('/api/channels', authenticateToken);
-app.use('/api/hospitality', authenticateToken);
-app.use('/api/chromecast', authenticateToken);
-app.use('/api/config', authenticateToken);
 
 // Login endpoint
 app.post('/api/auth/login', async (req, res) => {
@@ -713,7 +684,7 @@ async function checkAllChromecastsStatus() {
 // API Routes for Channels
 
 // Get all channels with status
-app.get('/api/channels', async (req, res) => {
+app.get('/api/channels', authenticateToken, async (req, res) => {
   try {
     const { type, sortBy, sortOrder } = req.query;
 
@@ -796,7 +767,7 @@ app.get('/api/channels', async (req, res) => {
 });
 
 // Get channel by ID
-app.get('/api/channels/:id', async (req, res) => {
+app.get('/api/channels/:id', authenticateToken, async (req, res) => {
   try {
     const channelId = parseInt(req.params.id);
     const allChannels = await getAllChannelsFromDB();
@@ -883,7 +854,7 @@ app.post('/api/channels/:id/check', async (req, res) => {
 });
 
 // Get channel dashboard stats
-app.get('/api/channels/dashboard/stats', async (req, res) => {
+app.get('/api/channels/dashboard/stats', authenticateToken, async (req, res) => {
   try {
     const allChannels = await getAllChannelsFromDB();
     const internationalChannels = await getInternationalChannels();
@@ -938,7 +909,7 @@ app.get('/api/channels/dashboard/stats', async (req, res) => {
 // API Routes for TV Hospitality
 
 // Get all hospitality TVs with status
-app.get('/api/hospitality/tvs', async (req, res) => {
+app.get('/api/hospitality/tvs', authenticateToken, async (req, res) => {
   try {
     const { status, search, sortBy = 'roomNo', sortOrder = 'asc' } = req.query;
 
@@ -1014,7 +985,7 @@ app.get('/api/hospitality/tvs', async (req, res) => {
 });
 
 // Get specific TV by room number
-app.get('/api/hospitality/tvs/:roomNo', async (req, res) => {
+app.get('/api/hospitality/tvs/:roomNo', authenticateToken, async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
     const tv = await getHospitalityTVByRoomNo(roomNo);
@@ -1131,7 +1102,7 @@ app.post('/api/hospitality/tvs/check-all', async (req, res) => {
 });
 
 // Get hospitality dashboard stats
-app.get('/api/hospitality/dashboard/stats', async (req, res) => {
+app.get('/api/hospitality/dashboard/stats', authenticateToken, async (req, res) => {
   try {
     const allTVs = await getHospitalityTVs();
 
@@ -1183,7 +1154,7 @@ app.get('/api/hospitality/dashboard/stats', async (req, res) => {
 // API Routes for Chromecast
 
 // Get all Chromecast devices with status
-app.get('/api/chromecast', async (req, res) => {
+app.get('/api/chromecast', authenticateToken, async (req, res) => {
   try {
     const { status, search, sortBy = 'deviceName', sortOrder = 'asc' } = req.query;
 
@@ -1265,7 +1236,7 @@ app.get('/api/chromecast', async (req, res) => {
 });
 
 // Get specific Chromecast device
-app.get('/api/chromecast/:id', async (req, res) => {
+app.get('/api/chromecast/:id', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
 
@@ -1414,7 +1385,7 @@ app.post('/api/chromecast/check-all', async (req, res) => {
 });
 
 // Get Chromecast dashboard stats
-app.get('/api/chromecast/dashboard/stats', async (req, res) => {
+app.get('/api/chromecast/dashboard/stats', authenticateToken, async (req, res) => {
   try {
     const allDevices = await getChromecastDevices();
 
@@ -1514,7 +1485,7 @@ app.post('/api/config/tv-status-mode', async (req, res) => {
 });
 
 // Get current configuration
-app.get('/api/config', (req, res) => {
+app.get('/api/config', authenticateToken, async (req, res) => {
   res.json({
     success: true,
     data: {
@@ -1577,7 +1548,7 @@ app.post('/api/config/chromecast-status-mode', async (req, res) => {
 });
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', authenticateToken, async (req, res) => {
   res.json({
     success: true,
     message: 'IPTV Monitoring API is running',
