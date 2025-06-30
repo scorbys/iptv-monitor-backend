@@ -52,13 +52,7 @@ app.use(cors({
 }));
 
 // Explicit OPTIONS handler untuk preflight requests
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', 'https://iptv-monitor2.vercel.app');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
-});
+app.options('*', cors());
 
 // Manual CORS headers untuk semua responses
 app.use((req, res, next) => {
@@ -798,7 +792,7 @@ app.get('/api/channels', authenticateToken, async (req, res) => {
 });
 
 // Get channel by ID
-app.get('/api/channels/:id', authenticateToken, async (req, res) => {
+app.get('/api/channels/:id', async (req, res) => {
   try {
     const channelId = parseInt(req.params.id);
     const allChannels = await getAllChannelsFromDB();
@@ -1016,7 +1010,7 @@ app.get('/api/hospitality/tvs', authenticateToken, async (req, res) => {
 });
 
 // Get specific TV by room number
-app.get('/api/hospitality/tvs/:roomNo', authenticateToken, async (req, res) => {
+app.get('/api/hospitality/tvs/:roomNo', async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
     const tv = await getHospitalityTVByRoomNo(roomNo);
@@ -1267,7 +1261,7 @@ app.get('/api/chromecast', authenticateToken, async (req, res) => {
 });
 
 // Get specific Chromecast device
-app.get('/api/chromecast/:id', authenticateToken, async (req, res) => {
+app.get('/api/chromecast/:id', async (req, res) => {
   try {
     const deviceId = req.params.id;
 
@@ -1320,7 +1314,7 @@ app.get('/api/chromecast/:id', authenticateToken, async (req, res) => {
 });
 
 // Check specific Chromecast device status
-app.post('/api/chromecast/:id/check', async (req, res) => {
+app.post('/api/chromecast/:id/check', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
 
