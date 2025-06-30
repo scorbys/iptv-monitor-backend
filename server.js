@@ -774,7 +774,7 @@ app.get('/api/channels', authenticateToken, async (req, res) => {
 });
 
 // Get channel by ID
-app.get('/api/channels/:id([0-9]+)', authenticateToken, async (req, res) => {
+app.get('/api/channels/:id', authenticateToken, async (req, res) => {
   try {
     const channelId = req.params.id;
 
@@ -827,7 +827,7 @@ app.get('/api/channels/:id([0-9]+)', authenticateToken, async (req, res) => {
 });
 
 // Check specific channel status
-app.post('/api/channels/:id([0-9]+)/check', authenticateToken, async (req, res) => {
+app.post('/api/channels/:id/check', authenticateToken, async (req, res) => {
   try {
     const channelId = req.params.id;
 
@@ -1012,7 +1012,7 @@ app.get('/api/hospitality/tvs', authenticateToken, async (req, res) => {
 });
 
 // Get specific TV by room number
-app.get('/api/hospitality/tvs/:roomNo([A-Za-z0-9]+)', authenticateToken, async (req, res) => {
+app.get('/api/hospitality/tvs/:roomNo', authenticateToken, async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
     
@@ -1059,7 +1059,7 @@ app.get('/api/hospitality/tvs/:roomNo([A-Za-z0-9]+)', authenticateToken, async (
 });
 
 // Check specific TV status
-app.post('/api/hospitality/tvs/:roomNo([A-Za-z0-9]+)/check', authenticateToken, async (req, res) => {
+app.post('/api/hospitality/tvs/:roomNo/check', authenticateToken, async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
     
@@ -1281,7 +1281,7 @@ app.get('/api/chromecast', authenticateToken, async (req, res) => {
 });
 
 // Get specific Chromecast device
-app.get('/api/chromecast/:id([A-Za-z0-9]+)', authenticateToken, async (req, res) => {
+app.get('/api/chromecast/:id', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
     
@@ -1345,7 +1345,7 @@ app.get('/api/chromecast/:id([A-Za-z0-9]+)', authenticateToken, async (req, res)
 });
 
 // Check specific Chromecast device status
-app.post('/api/chromecast/:id([A-Za-z0-9]+)/check', authenticateToken, async (req, res) => {
+app.post('/api/chromecast/:id/check', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
 
