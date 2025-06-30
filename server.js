@@ -4,10 +4,10 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const dgram = require('dgram');
 const net = require('net');
-const { 
-  getInternationalChannels, 
-  getLocalChannels, 
-  getHospitalityTVs, 
+const {
+  getInternationalChannels,
+  getLocalChannels,
+  getHospitalityTVs,
   getHospitalityTVByRoomNo,
   getChromecastDevices,
   getChromecastDeviceById,
@@ -25,16 +25,51 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
-// CORS Configuration
-app.use(cors({
-  origin: [
+// Handle preflight requests FIRST
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
     'https://iptv-monitor2.vercel.app'
-  ],
+  ];
+
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  next();
+});
+
+// CORS Configuration
+app.use(cors({
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://iptv-monitor2.vercel.app'
+    ];
+
+    // Allow requests with no origin (mobile apps, etc.)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Middleware
@@ -50,7 +85,7 @@ app.use((req, res, next) => {
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
-  const token = req.cookies.token || 
+  const token = req.cookies.token ||
     (req.headers.authorization && req.headers.authorization.split(' ')[1]);
 
   if (!token) {
@@ -107,7 +142,7 @@ app.use('/api/config', authenticateToken);
 app.post('/api/auth/login', async (req, res) => {
   try {
     console.log('Login attempt:', { identifier: req.body.identifier });
-    
+
     const { identifier, password } = req.body;
 
     // Validation
@@ -125,7 +160,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (result.success && result.user) {
       // Generate JWT token
       const token = jwt.sign(
-        { 
+        {
           userId: result.user.userId,
           email: result.user.email,
           username: result.user.username
@@ -172,11 +207,11 @@ app.post('/api/auth/login', async (req, res) => {
 // Register endpoint
 app.post('/api/auth/register', async (req, res) => {
   try {
-    console.log('Registration attempt:', { 
-      username: req.body.username, 
-      email: req.body.email 
+    console.log('Registration attempt:', {
+      username: req.body.username,
+      email: req.body.email
     });
-    
+
     const { username, email, password } = req.body;
 
     // Validation
@@ -219,7 +254,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (result.success && result.userId) {
       // Generate JWT token for new user
       const token = jwt.sign(
-        { 
+        {
           userId: result.userId,
           email: email,
           username: username
@@ -271,9 +306,9 @@ app.post('/api/auth/logout', (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax'
     });
-    
+
     console.log('User logged out successfully');
-    
+
     res.json({
       success: true,
       message: 'Logged out successfully'
@@ -341,36 +376,36 @@ async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000
   return new Promise((resolve) => {
     const client = dgram.createSocket('udp4');
     let isResolved = false;
-    
+
     // Set timeout
     const timer = setTimeout(() => {
       if (!isResolved) {
         isResolved = true;
         client.close();
-        resolve({ 
-          status: 'offline', 
+        resolve({
+          status: 'offline',
           responseTime: null,
           error: 'Connection timeout'
         });
       }
     }, timeout);
-    
+
     const startTime = Date.now();
-    
+
     try {
       // Try to bind to the multicast address
       client.bind(port, () => {
         try {
           client.addMembership(ipAddress);
-          
+
           // If we get here, the multicast group is accessible
           if (!isResolved) {
             isResolved = true;
             clearTimeout(timer);
             const responseTime = Date.now() - startTime;
             client.close();
-            resolve({ 
-              status: 'online', 
+            resolve({
+              status: 'online',
               responseTime: responseTime,
               error: null
             });
@@ -380,8 +415,8 @@ async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000
             isResolved = true;
             clearTimeout(timer);
             client.close();
-            resolve({ 
-              status: 'offline', 
+            resolve({
+              status: 'offline',
               responseTime: null,
               error: membershipError.message
             });
@@ -393,8 +428,8 @@ async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000
         isResolved = true;
         clearTimeout(timer);
         client.close();
-        resolve({ 
-          status: 'offline', 
+        resolve({
+          status: 'offline',
           responseTime: null,
           error: error.message
         });
@@ -406,8 +441,8 @@ async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000
         isResolved = true;
         clearTimeout(timer);
         client.close();
-        resolve({ 
-          status: 'offline', 
+        resolve({
+          status: 'offline',
           responseTime: null,
           error: error.message
         });
@@ -419,10 +454,10 @@ async function checkMulticastConnectivity(ipAddress, port = 5000, timeout = 5000
 // Function to generate dummy TV status
 function generateDummyTVStatus() {
   const isOnline = Math.random() < TV_STATUS_CONFIG.ONLINE_PROBABILITY;
-  const responseTime = isOnline 
+  const responseTime = isOnline
     ? Math.floor(Math.random() * (TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1)) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
-  
+
   return {
     status: isOnline ? 'online' : 'offline',
     responseTime,
@@ -442,11 +477,11 @@ async function checkTVConnectivity(ipAddress, timeout = 5000) {
   // Original real connectivity check
   return new Promise((resolve) => {
     const startTime = Date.now();
-    
+
     // Create a simple TCP connection test
     const socket = new net.Socket();
     let isResolved = false;
-    
+
     const timer = setTimeout(() => {
       if (!isResolved) {
         isResolved = true;
@@ -458,7 +493,7 @@ async function checkTVConnectivity(ipAddress, timeout = 5000) {
         });
       }
     }, timeout);
-    
+
     socket.connect(80, ipAddress, () => {
       if (!isResolved) {
         isResolved = true;
@@ -472,7 +507,7 @@ async function checkTVConnectivity(ipAddress, timeout = 5000) {
         });
       }
     });
-    
+
     socket.on('error', (error) => {
       if (!isResolved) {
         isResolved = true;
@@ -495,7 +530,7 @@ async function getAllChannelsFromDB() {
       getInternationalChannels(),
       getLocalChannels()
     ]);
-    
+
     return [...internationalChannels, ...localChannels];
   } catch (error) {
     console.error('Error fetching channels from database:', error);
@@ -507,7 +542,7 @@ async function getAllChannelsFromDB() {
 async function checkAllChannelsStatus() {
   try {
     const allChannels = await getAllChannelsFromDB();
-    
+
     for (const channel of allChannels) {
       try {
         const result = await checkMulticastConnectivity(channel.ipMulticast);
@@ -524,7 +559,7 @@ async function checkAllChannelsStatus() {
         });
       }
     }
-    
+
     console.log(`Checked status for ${allChannels.length} channels`);
   } catch (error) {
     console.error('Error checking channels status:', error);
@@ -535,7 +570,7 @@ async function checkAllChannelsStatus() {
 async function checkAllTVsStatus() {
   try {
     const allTVs = await getHospitalityTVs();
-    
+
     for (const tv of allTVs) {
       try {
         const result = await checkTVConnectivity(tv.ipAddress);
@@ -552,7 +587,7 @@ async function checkAllTVsStatus() {
         });
       }
     }
-    
+
     console.log(`Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? ' (using dummy status)' : ''}`);
   } catch (error) {
     console.error('Error checking TV status:', error);
@@ -563,16 +598,16 @@ async function checkAllTVsStatus() {
 function generateDummyChromecastStatus() {
   const isOnline = Math.random() < CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY;
   const isPingable = isOnline; // Fixed: Added missing variable
-  const signalLevel = isOnline 
+  const signalLevel = isOnline
     ? Math.floor(Math.random() * (CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max - CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min + 1)) + CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min
     : null;
   const speed = isOnline
     ? Math.floor(Math.random() * (CHROMECAST_STATUS_CONFIG.SPEED_RANGE.max - CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min + 1)) + CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min
     : null;
-  const responseTime = isOnline 
+  const responseTime = isOnline
     ? Math.floor(Math.random() * (CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1)) + CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
-  
+
   return {
     isPingable,
     isOnline,
@@ -596,7 +631,7 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
   // Real connectivity check (simplified version)
   return new Promise((resolve) => {
     const startTime = Date.now();
-    
+
     // Simple TCP connection test
     const socket = new net.Socket();
     const timeout_id = setTimeout(() => {
@@ -616,7 +651,7 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
       clearTimeout(timeout_id);
       const responseTime = Date.now() - startTime;
       socket.destroy();
-      
+
       resolve({
         isPingable: true,
         isOnline: true,
@@ -647,7 +682,7 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
 async function checkAllChromecastsStatus() {
   try {
     const allDevices = await getChromecastDevices();
-    
+
     for (const device of allDevices) {
       try {
         const result = await checkChromecastConnectivity(device.ipAddr);
@@ -668,7 +703,7 @@ async function checkAllChromecastsStatus() {
         });
       }
     }
-    
+
     console.log(`Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? ' (using dummy status)' : ''}`);
   } catch (error) {
     console.error('Error checking Chromecast status:', error);
@@ -681,9 +716,9 @@ async function checkAllChromecastsStatus() {
 app.get('/api/channels', async (req, res) => {
   try {
     const { type, sortBy, sortOrder } = req.query;
-    
+
     let channels = [];
-    
+
     if (type === 'international') {
       channels = await getInternationalChannels();
     } else if (type === 'local') {
@@ -691,7 +726,7 @@ app.get('/api/channels', async (req, res) => {
     } else {
       channels = await getAllChannelsFromDB();
     }
-    
+
     // Add status information to channels
     const channelsWithStatus = channels.map(channel => {
       const status = channelStatus.get(channel.id) || {
@@ -700,7 +735,7 @@ app.get('/api/channels', async (req, res) => {
         lastChecked: null,
         error: 'Not checked'
       };
-      
+
       // Determine channel type based on collection or add type field in your database
       let channelType = 'unknown';
       if (type === 'international') {
@@ -711,26 +746,26 @@ app.get('/api/channels', async (req, res) => {
         // If no specific type requested, determine from database or use a field
         channelType = channel.type || 'unknown';
       }
-      
+
       return {
         ...channel,
         ...status,
         type: channelType
       };
     });
-    
+
     // Sorting
     if (sortBy) {
       channelsWithStatus.sort((a, b) => {
         let aValue = a[sortBy];
         let bValue = b[sortBy];
-        
+
         // Handle different data types
         if (typeof aValue === 'string') {
           aValue = aValue.toLowerCase();
           bValue = bValue.toLowerCase();
         }
-        
+
         if (sortOrder === 'desc') {
           return bValue > aValue ? 1 : -1;
         } else {
@@ -738,10 +773,10 @@ app.get('/api/channels', async (req, res) => {
         }
       });
     }
-    
+
     const internationalChannels = await getInternationalChannels();
     const localChannels = await getLocalChannels();
-    
+
     res.json({
       success: true,
       data: channelsWithStatus,
@@ -766,25 +801,25 @@ app.get('/api/channels/:id', async (req, res) => {
     const channelId = parseInt(req.params.id);
     const allChannels = await getAllChannelsFromDB();
     const channel = allChannels.find(c => c.id === channelId);
-    
+
     if (!channel) {
       return res.status(404).json({
         success: false,
         message: 'Channel not found'
       });
     }
-    
+
     const status = channelStatus.get(channelId) || {
       status: 'offline',
       responseTime: null,
       lastChecked: null,
       error: 'Not checked'
     };
-    
+
     // Determine channel type
     const internationalChannels = await getInternationalChannels();
     const channelType = internationalChannels.find(c => c.id === channelId) ? 'international' : 'local';
-    
+
     res.json({
       success: true,
       data: {
@@ -809,26 +844,26 @@ app.post('/api/channels/:id/check', async (req, res) => {
     const channelId = parseInt(req.params.id);
     const allChannels = await getAllChannelsFromDB();
     const channel = allChannels.find(c => c.id === channelId);
-    
+
     if (!channel) {
       return res.status(404).json({
         success: false,
         message: 'Channel not found'
       });
     }
-    
+
     const result = await checkMulticastConnectivity(channel.ipMulticast);
     const statusInfo = {
       ...result,
       lastChecked: new Date().toISOString()
     };
-    
+
     channelStatus.set(channelId, statusInfo);
-    
+
     // Determine channel type
     const internationalChannels = await getInternationalChannels();
     const channelType = internationalChannels.find(c => c.id === channelId) ? 'international' : 'local';
-    
+
     res.json({
       success: true,
       data: {
@@ -853,14 +888,14 @@ app.get('/api/channels/dashboard/stats', async (req, res) => {
     const allChannels = await getAllChannelsFromDB();
     const internationalChannels = await getInternationalChannels();
     const localChannels = await getLocalChannels();
-    
+
     const totalChannels = allChannels.length;
     const onlineChannels = Array.from(channelStatus.values()).filter(s => s.status === 'online').length;
     const offlineChannels = totalChannels - onlineChannels;
-    
+
     // Calculate uptime percentage
     const uptime = totalChannels > 0 ? ((onlineChannels / totalChannels) * 100).toFixed(1) : '0.0';
-    
+
     // Category stats
     const categoryStats = {};
     allChannels.forEach(channel => {
@@ -868,7 +903,7 @@ app.get('/api/channels/dashboard/stats', async (req, res) => {
         categoryStats[channel.category] = { total: 0, online: 0, offline: 0 };
       }
       categoryStats[channel.category].total++;
-      
+
       const status = channelStatus.get(channel.id);
       if (status && status.status === 'online') {
         categoryStats[channel.category].online++;
@@ -876,7 +911,7 @@ app.get('/api/channels/dashboard/stats', async (req, res) => {
         categoryStats[channel.category].offline++;
       }
     });
-    
+
     res.json({
       success: true,
       data: {
@@ -906,9 +941,9 @@ app.get('/api/channels/dashboard/stats', async (req, res) => {
 app.get('/api/hospitality/tvs', async (req, res) => {
   try {
     const { status, search, sortBy = 'roomNo', sortOrder = 'asc' } = req.query;
-    
+
     let tvs = await getHospitalityTVs();
-    
+
     // Add status information to TVs
     const tvsWithStatus = tvs.map(tv => {
       const deviceStatus = tvStatus.get(tv.roomNo) || {
@@ -917,34 +952,34 @@ app.get('/api/hospitality/tvs', async (req, res) => {
         lastChecked: null,
         error: 'Not checked'
       };
-      
+
       return {
         ...tv,
         ...deviceStatus,
         model: tv.model || 'Samsung Hospitality'
       };
     });
-    
+
     // Filter by status
     let filteredTVs = tvsWithStatus;
     if (status && status !== 'all') {
       filteredTVs = tvsWithStatus.filter(tv => tv.status === status);
     }
-    
+
     // Filter by search (room number or IP address)
     if (search) {
       const searchTerm = search.toLowerCase();
-      filteredTVs = filteredTVs.filter(tv => 
+      filteredTVs = filteredTVs.filter(tv =>
         tv.roomNo.toString().toLowerCase().includes(searchTerm) ||
         tv.ipAddress.toLowerCase().includes(searchTerm)
       );
     }
-    
+
     // Sorting
     filteredTVs.sort((a, b) => {
       let aValue = a[sortBy];
       let bValue = b[sortBy];
-      
+
       // Special handling for room number sorting
       if (sortBy === 'roomNo') {
         aValue = parseInt(aValue) || 0;
@@ -953,14 +988,14 @@ app.get('/api/hospitality/tvs', async (req, res) => {
         aValue = aValue.toLowerCase();
         bValue = bValue.toLowerCase();
       }
-      
+
       if (sortOrder === 'desc') {
         return bValue > aValue ? 1 : -1;
       } else {
         return aValue > bValue ? 1 : -1;
       }
     });
-    
+
     res.json({
       success: true,
       data: filteredTVs,
@@ -983,21 +1018,21 @@ app.get('/api/hospitality/tvs/:roomNo', async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
     const tv = await getHospitalityTVByRoomNo(roomNo);
-    
+
     if (!tv) {
       return res.status(404).json({
         success: false,
         message: 'TV not found'
       });
     }
-    
+
     const deviceStatus = tvStatus.get(roomNo) || {
       status: 'offline',
       responseTime: null,
       lastChecked: null,
       error: 'Not checked'
     };
-    
+
     res.json({
       success: true,
       data: {
@@ -1021,22 +1056,22 @@ app.post('/api/hospitality/tvs/:roomNo/check', async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
     const tv = await getHospitalityTVByRoomNo(roomNo);
-    
+
     if (!tv) {
       return res.status(404).json({
         success: false,
         message: 'TV not found'
       });
     }
-    
+
     const result = await checkTVConnectivity(tv.ipAddress);
     const statusInfo = {
       ...result,
       lastChecked: new Date().toISOString()
     };
-    
+
     tvStatus.set(roomNo, statusInfo);
-    
+
     res.json({
       success: true,
       data: {
@@ -1059,9 +1094,9 @@ app.post('/api/hospitality/tvs/:roomNo/check', async (req, res) => {
 app.post('/api/hospitality/tvs/check-all', async (req, res) => {
   try {
     await checkAllTVsStatus();
-    
+
     const allTVs = await getHospitalityTVs();
-    
+
     const tvsWithStatus = allTVs.map(tv => {
       const deviceStatus = tvStatus.get(tv.roomNo) || {
         status: 'offline',
@@ -1069,14 +1104,14 @@ app.post('/api/hospitality/tvs/check-all', async (req, res) => {
         lastChecked: null,
         error: 'Not checked'
       };
-      
+
       return {
         ...tv,
         ...deviceStatus,
         model: tv.model || 'Samsung Hospitality'
       };
     });
-    
+
     res.json({
       success: true,
       message: 'All TVs status checked',
@@ -1099,14 +1134,14 @@ app.post('/api/hospitality/tvs/check-all', async (req, res) => {
 app.get('/api/hospitality/dashboard/stats', async (req, res) => {
   try {
     const allTVs = await getHospitalityTVs();
-    
+
     const totalTVs = allTVs.length;
     const onlineTVs = Array.from(tvStatus.values()).filter(s => s.status === 'online').length;
     const offlineTVs = totalTVs - onlineTVs;
-    
+
     // Calculate uptime percentage
     const uptime = totalTVs > 0 ? ((onlineTVs / totalTVs) * 100).toFixed(1) : '0.0';
-    
+
     // Floor stats (based on room number patterns)
     const floorStats = {};
     allTVs.forEach(tv => {
@@ -1115,7 +1150,7 @@ app.get('/api/hospitality/dashboard/stats', async (req, res) => {
         floorStats[floor] = { total: 0, online: 0, offline: 0 };
       }
       floorStats[floor].total++;
-      
+
       const status = tvStatus.get(tv.roomNo);
       if (status && status.status === 'online') {
         floorStats[floor].online++;
@@ -1123,7 +1158,7 @@ app.get('/api/hospitality/dashboard/stats', async (req, res) => {
         floorStats[floor].offline++;
       }
     });
-    
+
     res.json({
       success: true,
       data: {
@@ -1151,9 +1186,9 @@ app.get('/api/hospitality/dashboard/stats', async (req, res) => {
 app.get('/api/chromecast', async (req, res) => {
   try {
     const { status, search, sortBy = 'deviceName', sortOrder = 'asc' } = req.query;
-    
+
     let devices = await getChromecastDevices();
-    
+
     // Add status information to devices
     const devicesWithStatus = devices.map(device => {
       const deviceStatus = chromecastStatus.get(device.idCast) || {
@@ -1166,7 +1201,7 @@ app.get('/api/chromecast', async (req, res) => {
         error: 'Not checked',
         lastChecked: null
       };
-      
+
       return {
         ...device,
         ...deviceStatus,
@@ -1175,7 +1210,7 @@ app.get('/api/chromecast', async (req, res) => {
         model: device.model || 'Google Chromecast'
       };
     });
-    
+
     // Filter by status
     let filteredDevices = devicesWithStatus;
     if (status && status !== 'all') {
@@ -1185,33 +1220,33 @@ app.get('/api/chromecast', async (req, res) => {
         filteredDevices = devicesWithStatus.filter(device => !device.isOnline);
       }
     }
-    
+
     // Filter by search (device name or IP address)
     if (search) {
       const searchTerm = search.toLowerCase();
-      filteredDevices = filteredDevices.filter(device => 
+      filteredDevices = filteredDevices.filter(device =>
         (device.deviceName && device.deviceName.toLowerCase().includes(searchTerm)) ||
         (device.ipAddr && device.ipAddr.toLowerCase().includes(searchTerm))
       );
     }
-    
+
     // Sorting
     filteredDevices.sort((a, b) => {
       let aValue = a[sortBy];
       let bValue = b[sortBy];
-      
+
       if (typeof aValue === 'string') {
         aValue = aValue.toLowerCase();
         bValue = bValue.toLowerCase();
       }
-      
+
       if (sortOrder === 'desc') {
         return bValue > aValue ? 1 : -1;
       } else {
         return aValue > bValue ? 1 : -1;
       }
     });
-    
+
     res.json({
       success: true,
       data: filteredDevices,
@@ -1233,7 +1268,7 @@ app.get('/api/chromecast', async (req, res) => {
 app.get('/api/chromecast/:id', async (req, res) => {
   try {
     const deviceId = req.params.id;
-    
+
     // Improved validation: check if it's a valid ObjectId format or numeric
     if (!deviceId || (deviceId.length !== 24 && isNaN(parseInt(deviceId)))) {
       return res.status(400).json({
@@ -1241,16 +1276,16 @@ app.get('/api/chromecast/:id', async (req, res) => {
         message: 'Invalid device ID format. Must be a valid ObjectId (24 characters) or numeric ID.'
       });
     }
-    
+
     const device = await getChromecastDeviceById(deviceId);
-    
+
     if (!device) {
       return res.status(404).json({
         success: false,
         message: 'Chromecast device not found'
       });
     }
-    
+
     const deviceStatus = chromecastStatus.get(device.idCast) || {
       isPingable: false,
       isOnline: false,
@@ -1261,7 +1296,7 @@ app.get('/api/chromecast/:id', async (req, res) => {
       error: 'Not checked',
       lastChecked: null
     };
-    
+
     res.json({
       success: true,
       data: {
@@ -1286,7 +1321,7 @@ app.get('/api/chromecast/:id', async (req, res) => {
 app.post('/api/chromecast/:id/check', async (req, res) => {
   try {
     const deviceId = req.params.id;
-    
+
     // Improved validation
     if (!deviceId || (deviceId.length !== 24 && isNaN(parseInt(deviceId)))) {
       return res.status(400).json({
@@ -1294,24 +1329,24 @@ app.post('/api/chromecast/:id/check', async (req, res) => {
         message: 'Invalid device ID format. Must be a valid ObjectId (24 characters) or numeric ID.'
       });
     }
-    
+
     const device = await getChromecastDeviceById(deviceId);
-    
+
     if (!device) {
       return res.status(404).json({
         success: false,
         message: 'Chromecast device not found'
       });
     }
-    
+
     const result = await checkChromecastConnectivity(device.ipAddr);
     const statusInfo = {
       ...result,
       lastChecked: new Date().toISOString()
     };
-    
+
     chromecastStatus.set(device.idCast, statusInfo);
-    
+
     res.json({
       success: true,
       data: {
@@ -1336,9 +1371,9 @@ app.post('/api/chromecast/:id/check', async (req, res) => {
 app.post('/api/chromecast/check-all', async (req, res) => {
   try {
     await checkAllChromecastsStatus();
-    
+
     const allDevices = await getChromecastDevices();
-    
+
     const devicesWithStatus = allDevices.map(device => {
       const deviceStatus = chromecastStatus.get(device.idCast) || {
         isPingable: false,
@@ -1350,7 +1385,7 @@ app.post('/api/chromecast/check-all', async (req, res) => {
         error: 'Not checked',
         lastChecked: null
       };
-      
+
       return {
         ...device,
         ...deviceStatus,
@@ -1359,7 +1394,7 @@ app.post('/api/chromecast/check-all', async (req, res) => {
         model: device.model || 'Google Chromecast'
       };
     });
-    
+
     res.json({
       success: true,
       message: 'All Chromecast devices status checked',
@@ -1382,14 +1417,14 @@ app.post('/api/chromecast/check-all', async (req, res) => {
 app.get('/api/chromecast/dashboard/stats', async (req, res) => {
   try {
     const allDevices = await getChromecastDevices();
-    
+
     const totalDevices = allDevices.length;
     const onlineDevices = Array.from(chromecastStatus.values()).filter(s => s.isOnline).length;
     const offlineDevices = totalDevices - onlineDevices;
-    
+
     // Calculate uptime percentage
     const uptime = totalDevices > 0 ? ((onlineDevices / totalDevices) * 100).toFixed(1) : '0.0';
-    
+
     // Type stats
     const typeStats = {};
     allDevices.forEach(device => {
@@ -1398,7 +1433,7 @@ app.get('/api/chromecast/dashboard/stats', async (req, res) => {
         typeStats[type] = { total: 0, online: 0, offline: 0 };
       }
       typeStats[type].total++;
-      
+
       const status = chromecastStatus.get(device.idCast);
       if (status && status.isOnline) {
         typeStats[type].online++;
@@ -1406,16 +1441,16 @@ app.get('/api/chromecast/dashboard/stats', async (req, res) => {
         typeStats[type].offline++;
       }
     });
-    
+
     // Average signal level and speed
     const onlineStatusList = Array.from(chromecastStatus.values()).filter(s => s.isOnline);
-    const avgSignalLevel = onlineStatusList.length > 0 
+    const avgSignalLevel = onlineStatusList.length > 0
       ? (onlineStatusList.reduce((sum, s) => sum + (s.signalLevel || 0), 0) / onlineStatusList.length).toFixed(1)
       : null;
     const avgSpeed = onlineStatusList.length > 0
       ? (onlineStatusList.reduce((sum, s) => sum + (s.speed || 0), 0) / onlineStatusList.length).toFixed(1)
       : null;
-    
+
     res.json({
       success: true,
       data: {
@@ -1443,16 +1478,16 @@ app.get('/api/chromecast/dashboard/stats', async (req, res) => {
 app.post('/api/config/tv-status-mode', async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
-    
+
     if (typeof useDummyStatus === 'boolean') {
       TV_STATUS_CONFIG.USE_DUMMY_STATUS = useDummyStatus;
-      
+
       // Clear existing status to force refresh
       tvStatus.clear();
-      
+
       // Restart status checks with new mode
       await checkAllTVsStatus();
-      
+
       res.json({
         success: true,
         message: `TV status mode changed to ${useDummyStatus ? 'dummy' : 'real'} connectivity checks`,
@@ -1504,16 +1539,16 @@ app.get('/api/config', (req, res) => {
 app.post('/api/config/chromecast-status-mode', async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
-    
+
     if (typeof useDummyStatus === 'boolean') {
       CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS = useDummyStatus;
-      
+
       // Clear existing status to force refresh
       chromecastStatus.clear();
-      
+
       // Restart status checks with new mode
       await checkAllChromecastsStatus();
-      
+
       res.json({
         success: true,
         message: `Chromecast status mode changed to ${useDummyStatus ? 'dummy' : 'real'} connectivity checks`,
@@ -1561,11 +1596,11 @@ app.listen(port, async () => {
     console.error('Failed to connect to database. Exiting...');
     process.exit(1);
   }
-  
+
   console.log('Starting initial status checks...');
   // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
   // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-  
+
   // Initialize status checks after server starts
   try {
     await checkAllChannelsStatus();
