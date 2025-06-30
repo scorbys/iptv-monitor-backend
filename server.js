@@ -72,21 +72,6 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   
   next();
-
-  // Handle path-to-regexp errors
-  if (err.message && err.message.includes('Missing parameter name')) {
-    console.error('Route parameter error:', err.message);
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid route parameter format'
-    });
-  }
-  
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
 });
 
 // Middleware
@@ -352,24 +337,6 @@ app.get('/api/auth/verify', authenticateToken, (req, res) => {
     });
   }
 });
-
-// Error handling middleware
-app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found'
-  });
-});
-
 
 // Function database coonection check
 async function checkDatabaseConnection() {
@@ -1657,6 +1624,32 @@ app.get('/api/health', authenticateToken, async (req, res) => {
       tvDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
       chromecastDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS
     }
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found'
+  });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  // Handle path-to-regexp errors
+  if (error.message && error.message.includes('Missing parameter name')) {
+    console.error('Route parameter error:', error.message);
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid route parameter format'
+    });
+  }
+  
+  console.error('Unhandled error:', error);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
   });
 });
 
