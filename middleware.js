@@ -57,6 +57,13 @@ export async function middleware(request) {
 
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    '/',
+    '/dashboard/:path*',
+    '/channel/:path*',
+    '/hospitality/:path*',
+    '/chromecast/:path*',
+    '/login',
+    '/register',
+    '/api/:path*'
   ],
 };
