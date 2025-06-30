@@ -40,14 +40,45 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.log('CORS blocked origin:', origin); // Debug log
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200 // TAMBAHKAN INI untuk kompatibilitas browser lama
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 }));
+
+// Explicit OPTIONS handler untuk preflight requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', 'https://iptv-monitor2.vercel.app');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
+// Manual CORS headers untuk semua responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001', 
+    'https://iptv-monitor2.vercel.app'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
+  next();
+});
 
 // Middleware
 app.use(express.json({ limit: '10mb' }));
