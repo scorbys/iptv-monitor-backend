@@ -72,6 +72,21 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   
   next();
+
+  // Handle path-to-regexp errors
+  if (err.message && err.message.includes('Missing parameter name')) {
+    console.error('Route parameter error:', err.message);
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid route parameter format'
+    });
+  }
+  
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
+  });
 });
 
 // Middleware
@@ -792,11 +807,21 @@ app.get('/api/channels', authenticateToken, async (req, res) => {
 });
 
 // Get channel by ID
-app.get('/api/channels/:id', async (req, res) => {
+app.get('/api/channels/:id', authenticateToken, async (req, res) => {
   try {
-    const channelId = parseInt(req.params.id);
+    const channelId = req.params.id;
+
+    // Validasi parameter ID
+    if (!channelId || isNaN(parseInt(channelId))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid channel ID. Must be a valid number.'
+      });
+    }
+    // Fetch all channels from the database
+    const parsedChannelId = parseInt(channelId);
     const allChannels = await getAllChannelsFromDB();
-    const channel = allChannels.find(c => c.id === channelId);
+    const channel = allChannels.find(c => c.id === parsedChannelId);
 
     if (!channel) {
       return res.status(404).json({
@@ -805,7 +830,7 @@ app.get('/api/channels/:id', async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channelId) || {
+    const status = channelStatus.get(parsedChannelId) || {
       status: 'offline',
       responseTime: null,
       lastChecked: null,
@@ -814,7 +839,7 @@ app.get('/api/channels/:id', async (req, res) => {
 
     // Determine channel type
     const internationalChannels = await getInternationalChannels();
-    const channelType = internationalChannels.find(c => c.id === channelId) ? 'international' : 'local';
+    const channelType = internationalChannels.find(c => c.id === parsedChannelId) ? 'international' : 'local';
 
     res.json({
       success: true,
@@ -835,11 +860,21 @@ app.get('/api/channels/:id', async (req, res) => {
 });
 
 // Check specific channel status
-app.post('/api/channels/:id/check', async (req, res) => {
+app.post('/api/channels/:id/check', authenticateToken, async (req, res) => {
   try {
-    const channelId = parseInt(req.params.id);
+    const channelId = req.params.id;
+
+    // Validasi parameter ID
+    if (!channelId || isNaN(parseInt(channelId))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid channel ID. Must be a valid number.'
+      });
+    }
+    
+    const parsedChannelId = parseInt(channelId);
     const allChannels = await getAllChannelsFromDB();
-    const channel = allChannels.find(c => c.id === channelId);
+    const channel = allChannels.find(c => c.id === parsedChannelId);
 
     if (!channel) {
       return res.status(404).json({
@@ -854,11 +889,11 @@ app.post('/api/channels/:id/check', async (req, res) => {
       lastChecked: new Date().toISOString()
     };
 
-    channelStatus.set(channelId, statusInfo);
+    channelStatus.set(parsedChannelId, statusInfo);
 
     // Determine channel type
     const internationalChannels = await getInternationalChannels();
-    const channelType = internationalChannels.find(c => c.id === channelId) ? 'international' : 'local';
+    const channelType = internationalChannels.find(c => c.id === parsedChannelId) ? 'international' : 'local';
 
     res.json({
       success: true,
@@ -1010,9 +1045,18 @@ app.get('/api/hospitality/tvs', authenticateToken, async (req, res) => {
 });
 
 // Get specific TV by room number
-app.get('/api/hospitality/tvs/:roomNo', async (req, res) => {
+app.get('/api/hospitality/tvs/:roomNo', authenticateToken, async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
+    
+    // Validasi parameter roomNo
+    if (!roomNo || roomNo.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid room number.'
+      });
+    }
+    
     const tv = await getHospitalityTVByRoomNo(roomNo);
 
     if (!tv) {
@@ -1048,9 +1092,18 @@ app.get('/api/hospitality/tvs/:roomNo', async (req, res) => {
 });
 
 // Check specific TV status
-app.post('/api/hospitality/tvs/:roomNo/check', async (req, res) => {
+app.post('/api/hospitality/tvs/:roomNo/check', authenticateToken, async (req, res) => {
   try {
     const roomNo = req.params.roomNo;
+    
+    // Validasi parameter roomNo
+    if (!roomNo || roomNo.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid room number.'
+      });
+    }
+    
     const tv = await getHospitalityTVByRoomNo(roomNo);
 
     if (!tv) {
@@ -1261,15 +1314,26 @@ app.get('/api/chromecast', authenticateToken, async (req, res) => {
 });
 
 // Get specific Chromecast device
-app.get('/api/chromecast/:id', async (req, res) => {
+app.get('/api/chromecast/:id', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
-
-    // Improved validation: check if it's a valid ObjectId format or numeric
-    if (!deviceId || (deviceId.length !== 24 && isNaN(parseInt(deviceId)))) {
+    
+    // Validasi parameter ID yang lebih ketat
+    if (!deviceId || deviceId.trim() === '') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid device ID format. Must be a valid ObjectId (24 characters) or numeric ID.'
+        message: 'Device ID is required'
+      });
+    }
+
+    // Validasi format ID - harus ObjectId (24 karakter) atau numeric
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(deviceId);
+    const isValidNumeric = /^\d+$/.test(deviceId);
+    
+    if (!isValidObjectId && !isValidNumeric) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid device ID format. Must be a valid ObjectId (24 hex characters) or numeric ID.'
       });
     }
 
@@ -1318,11 +1382,22 @@ app.post('/api/chromecast/:id/check', authenticateToken, async (req, res) => {
   try {
     const deviceId = req.params.id;
 
-    // Improved validation
-    if (!deviceId || (deviceId.length !== 24 && isNaN(parseInt(deviceId)))) {
+    // Validasi parameter ID yang lebih ketat
+    if (!deviceId || deviceId.trim() === '') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid device ID format. Must be a valid ObjectId (24 characters) or numeric ID.'
+        message: 'Device ID is required'
+      });
+    }
+
+    // Validasi format ID
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(deviceId);
+    const isValidNumeric = /^\d+$/.test(deviceId);
+    
+    if (!isValidObjectId && !isValidNumeric) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid device ID format. Must be a valid ObjectId (24 hex characters) or numeric ID.'
       });
     }
 
@@ -1606,6 +1681,25 @@ app.listen(port, async () => {
   } catch (error) {
     console.error('Error during initial status checks:', error);
   }
+});
+
+// Debugging endpoint to list all routes
+app.get('/api/debug/routes', (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods)
+      });
+    }
+  });
+  
+  res.json({
+    success: true,
+    routes: routes,
+    message: 'Available routes'
+  });
 });
 
 // Periodic status checks
