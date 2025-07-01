@@ -1636,7 +1636,7 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-app.use((error, req, res, next) => {
+app.use('/{*any}', (error, req, res, next) => {
   // Handle path-to-regexp errors
   if (error.message && error.message.includes('Missing parameter name')) {
     console.error('Route parameter error:', error.message);
