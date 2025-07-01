@@ -1636,7 +1636,7 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-app.use('/{*any}', (error, req, res, next) => {
+/* app.use('/{*any}', (error, req, res, next) => {
   // Handle path-to-regexp errors
   if (error.message && error.message.includes('Missing parameter name')) {
     console.error('Route parameter error:', error.message);
@@ -1651,7 +1651,7 @@ app.use('/{*any}', (error, req, res, next) => {
     success: false,
     error: 'Internal server error'
   });
-});
+}); */
 
 // Start server
 app.listen(port, async () => {
