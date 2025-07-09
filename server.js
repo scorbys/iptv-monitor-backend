@@ -55,7 +55,7 @@ app.use(
 );
 
 // Explicit OPTIONS handler untuk preflight requests
-app.options(cors());
+app.options(/.*/, cors());
 
 // Manual CORS headers untuk semua responses
 app.use((req, res, next) => {
@@ -1752,7 +1752,7 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-app.use((error, req, res, next) => {
+app.use("/{*splat}", (error, req, res, next) => {
   // Handle path-to-regexp errors
   if (error.message && error.message.includes("Missing parameter name")) {
     console.error("Route parameter error:", error.message);
@@ -1763,6 +1763,9 @@ app.use((error, req, res, next) => {
   }
 
   console.error("Unhandled error:", error);
+  if (res.headersSent) {
+    return next(error);
+  }
   res.status(500).json({
     success: false,
     error: "Internal server error",
