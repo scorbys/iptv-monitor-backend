@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
@@ -54,7 +55,7 @@ app.use(
 );
 
 // Explicit OPTIONS handler untuk preflight requests
-app.options("*", cors());
+app.options(cors());
 
 // Manual CORS headers untuk semua responses
 app.use((req, res, next) => {
@@ -1751,7 +1752,7 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-app.use("/{*any}", (error, req, res, next) => {
+app.use((error, req, res, next) => {
   // Handle path-to-regexp errors
   if (error.message && error.message.includes("Missing parameter name")) {
     console.error("Route parameter error:", error.message);
