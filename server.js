@@ -1627,7 +1627,7 @@ app.get('/api/health', authenticateToken, async (req, res) => {
   });
 });
 
-// 404 handler
+/* // 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -1636,7 +1636,7 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-/* app.use('/{*any}', (error, req, res, next) => {
+ app.use('/{*any}', (error, req, res, next) => {
   // Handle path-to-regexp errors
   if (error.message && error.message.includes('Missing parameter name')) {
     console.error('Route parameter error:', error.message);
