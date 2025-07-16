@@ -141,6 +141,71 @@ const CHROMECAST_STATUS_CONFIG = {
   UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
 };
 
+const networkStats = {
+  channels: {
+    requests: 0,
+    totalRequests: 0,
+    responseTime: 0,
+    totalResponseTime: 0,
+    errorCount: 0,
+    throughput: 0,
+    lastReset: new Date()
+  },
+  hospitality: {
+    requests: 0,
+    totalRequests: 0,
+    responseTime: 0,
+    totalResponseTime: 0,
+    errorCount: 0,
+    throughput: 0,
+    lastReset: new Date()
+  },
+  chromecast: {
+    requests: 0,
+    totalRequests: 0,
+    responseTime: 0,
+    totalResponseTime: 0,
+    errorCount: 0,
+    throughput: 0,
+    lastReset: new Date()
+  }
+};
+
+// Middleware untuk tracking request metrics
+const trackRequestMetrics = (serviceType) => {
+  return (req, res, next) => {
+    const startTime = Date.now();
+
+    // Increment request count
+    networkStats[serviceType].requests++;
+    networkStats[serviceType].totalRequests++;
+
+    // Override res.end to capture response time
+    const originalEnd = res.end;
+    res.end = function (chunk, encoding) {
+      const responseTime = Date.now() - startTime;
+
+      // Update response time
+      networkStats[serviceType].totalResponseTime += responseTime;
+      networkStats[serviceType].responseTime =
+        networkStats[serviceType].totalResponseTime / networkStats[serviceType].totalRequests;
+
+      // Track errors (status >= 400)
+      if (res.statusCode >= 400) {
+        networkStats[serviceType].errorCount++;
+      }
+
+      // Calculate throughput (requests per second)
+      const timeDiff = (Date.now() - networkStats[serviceType].lastReset.getTime()) / 1000;
+      networkStats[serviceType].throughput = networkStats[serviceType].requests / Math.max(timeDiff, 1);
+
+      originalEnd.call(this, chunk, encoding);
+    };
+
+    next();
+  };
+};
+
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
   try {
@@ -451,11 +516,11 @@ function generateDummyTVStatus() {
   const isOnline = Math.random() < TV_STATUS_CONFIG.ONLINE_PROBABILITY;
   const responseTime = isOnline
     ? Math.floor(
-        Math.random() *
-          (TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.max -
-            TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min +
-            1)
-      ) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
+      Math.random() *
+      (TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.max -
+        TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min +
+        1)
+    ) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
 
   return {
@@ -591,8 +656,7 @@ async function checkAllTVsStatus() {
     }
 
     console.log(
-      `Checked status for ${allTVs.length} TV devices${
-        TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
+      `Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
       }`
     );
   } catch (error) {
@@ -606,27 +670,27 @@ function generateDummyChromecastStatus() {
   const isPingable = isOnline; // Fixed: Added missing variable
   const signalLevel = isOnline
     ? Math.floor(
-        Math.random() *
-          (CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max -
-            CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min +
-            1)
-      ) + CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min
+      Math.random() *
+      (CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max -
+        CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min +
+        1)
+    ) + CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min
     : null;
   const speed = isOnline
     ? Math.floor(
-        Math.random() *
-          (CHROMECAST_STATUS_CONFIG.SPEED_RANGE.max -
-            CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min +
-            1)
-      ) + CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min
+      Math.random() *
+      (CHROMECAST_STATUS_CONFIG.SPEED_RANGE.max -
+        CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min +
+        1)
+    ) + CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min
     : null;
   const responseTime = isOnline
     ? Math.floor(
-        Math.random() *
-          (CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.max -
-            CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min +
-            1)
-      ) + CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
+      Math.random() *
+      (CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.max -
+        CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min +
+        1)
+    ) + CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
 
   return {
@@ -728,8 +792,7 @@ async function checkAllChromecastsStatus() {
     }
 
     console.log(
-      `Checked status for ${allDevices.length} Chromecast devices${
-        CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
+      `Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
       }`
     );
   } catch (error) {
@@ -740,7 +803,7 @@ async function checkAllChromecastsStatus() {
 // API Routes for Channels
 
 // Get all channels with status
-app.get("/api/channels", authenticateToken, async (req, res) => {
+app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, async (req, res) => {
   try {
     const { type, sortBy, sortOrder } = req.query;
 
@@ -940,7 +1003,7 @@ app.post("/api/channels/:id/check", authenticateToken, async (req, res) => {
 
 // Get channel dashboard stats
 app.get(
-  "/api/channels/dashboard/stats",
+  "/api/channels/dashboard/stats", trackRequestMetrics('channels'),
   authenticateToken,
   async (req, res) => {
     try {
@@ -1003,7 +1066,7 @@ app.get(
 // API Routes for TV Hospitality
 
 // Get all hospitality TVs with status
-app.get("/api/hospitality/tvs", authenticateToken, async (req, res) => {
+app.get("/api/hospitality/tvs", trackRequestMetrics('hospitality'), authenticateToken, async (req, res) => {
   try {
     const { status, search, sortBy = "roomNo", sortOrder = "asc" } = req.query;
 
@@ -1221,7 +1284,7 @@ app.post("/api/hospitality/tvs/check-all", async (req, res) => {
 
 // Get hospitality dashboard stats
 app.get(
-  "/api/hospitality/dashboard/stats",
+  "/api/hospitality/dashboard/stats", trackRequestMetrics('hospitality'),
   authenticateToken,
   async (req, res) => {
     try {
@@ -1279,7 +1342,7 @@ app.get(
 // API Routes for Chromecast
 
 // Get all Chromecast devices with status
-app.get("/api/chromecast", authenticateToken, async (req, res) => {
+app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken, async (req, res) => {
   try {
     const {
       status,
@@ -1544,7 +1607,7 @@ app.post("/api/chromecast/check-all", async (req, res) => {
 
 // Get Chromecast dashboard stats
 app.get(
-  "/api/chromecast/dashboard/stats",
+  "/api/chromecast/dashboard/stats", trackRequestMetrics('chromecast'),
   authenticateToken,
   async (req, res) => {
     try {
@@ -1586,18 +1649,18 @@ app.get(
       const avgSignalLevel =
         onlineStatusList.length > 0
           ? (
-              onlineStatusList.reduce(
-                (sum, s) => sum + (s.signalLevel || 0),
-                0
-              ) / onlineStatusList.length
-            ).toFixed(1)
+            onlineStatusList.reduce(
+              (sum, s) => sum + (s.signalLevel || 0),
+              0
+            ) / onlineStatusList.length
+          ).toFixed(1)
           : null;
       const avgSpeed =
         onlineStatusList.length > 0
           ? (
-              onlineStatusList.reduce((sum, s) => sum + (s.speed || 0), 0) /
-              onlineStatusList.length
-            ).toFixed(1)
+            onlineStatusList.reduce((sum, s) => sum + (s.speed || 0), 0) /
+            onlineStatusList.length
+          ).toFixed(1)
           : null;
 
       res.json({
@@ -1624,6 +1687,111 @@ app.get(
   }
 );
 
+// Endpoint baru untuk network traffic stats
+app.get("/api/network/traffic/stats", authenticateToken, async (req, res) => {
+  try {
+    const randomMetric = () => ({
+      requests: Math.floor(Math.random() * 20) + 5,
+      responseTime: Math.floor(Math.random() * 200) + 50,
+      errorRate: parseFloat((Math.random() * 5).toFixed(2)),
+      throughput: parseFloat((Math.random() * 5).toFixed(1)),
+      totalRequests: Math.floor(Math.random() * 1000),
+      errorCount: Math.floor(Math.random() * 50)
+    });
+
+    res.json({
+      success: true,
+      data: {
+        channels: randomMetric(),
+        hospitality: randomMetric(),
+        chromecast: randomMetric(),
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error generating dummy stats",
+      error: error.message
+    });
+  }
+});
+
+
+// Endpoint untuk historical data (simulasi berdasarkan time range)
+app.get("/api/network/traffic/history", authenticateToken, async (req, res) => {
+  try {
+    const { timeRange = '1h' } = req.query;
+    const now = new Date();
+    const data = [];
+
+    let intervals, intervalMs, points;
+
+    switch (timeRange) {
+      case '1h':
+        intervals = 60;
+        intervalMs = 60000; // 1 minute intervals
+        points = 60;
+        break;
+      case '6h':
+        intervals = 72;
+        intervalMs = 300000; // 5 minute intervals
+        points = 72;
+        break;
+      case '24h':
+        intervals = 48;
+        intervalMs = 1800000; // 30 minute intervals
+        points = 48;
+        break;
+      default:
+        intervalMs = 60000;
+        points = 60;
+    }
+
+    // This function formats the time based on the time range
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    const formatTime = (date, timeRange) => {
+      const h = pad2(date.getHours());
+      const m = pad2(date.getMinutes());
+      if (timeRange === '24h') {
+        const d = pad2(date.getDate());
+        const mo = pad2(date.getMonth() + 1);
+        return `${mo}/${d} ${h}:${m}`;
+      }
+      return `${h}:${m}`;
+    };
+
+    // Generate historical data based on current stats with some variation
+    for (let i = points - 1; i >= 0; i--) {
+      const time = new Date(now.getTime() - i * intervalMs);
+      const timeStr = formatTime(time, timeRange);
+
+      data.push({
+        time: timeStr,
+        timestamp: time.toISOString(),
+        channel: Math.floor(Math.random() * 20) + 5,
+        hospitality: Math.floor(Math.random() * 15) + 3,
+        chromecast: Math.floor(Math.random() * 10) + 2
+      });
+    }
+
+
+    res.json({
+      success: true,
+      data: data,
+      timeRange: timeRange
+    });
+  } catch (error) {
+    console.error("Error fetching network traffic history:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching network traffic history",
+      error: error.message
+    });
+  }
+});
+
 // Configuration endpoint to toggle dummy status
 app.post("/api/config/tv-status-mode", async (req, res) => {
   try {
@@ -1640,9 +1808,8 @@ app.post("/api/config/tv-status-mode", async (req, res) => {
 
       res.json({
         success: true,
-        message: `TV status mode changed to ${
-          useDummyStatus ? "dummy" : "real"
-        } connectivity checks`,
+        message: `TV status mode changed to ${useDummyStatus ? "dummy" : "real"
+          } connectivity checks`,
         config: {
           useDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
           onlineProbability: TV_STATUS_CONFIG.ONLINE_PROBABILITY,
@@ -1703,9 +1870,8 @@ app.post("/api/config/chromecast-status-mode", async (req, res) => {
 
       res.json({
         success: true,
-        message: `Chromecast status mode changed to ${
-          useDummyStatus ? "dummy" : "real"
-        } connectivity checks`,
+        message: `Chromecast status mode changed to ${useDummyStatus ? "dummy" : "real"
+          } connectivity checks`,
         config: {
           useDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS,
           onlineProbability: CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY,
@@ -1825,6 +1991,13 @@ setInterval(() => {
     checkAllChromecastsStatus();
   }
 }, Math.min(TV_STATUS_CONFIG.UPDATE_INTERVAL, CHROMECAST_STATUS_CONFIG.UPDATE_INTERVAL));
+// Reset stats dashboard
+setInterval(() => {
+  Object.keys(networkStats).forEach(service => {
+    networkStats[service].requests = 0;
+    networkStats[service].lastReset = new Date();
+  });
+}, 3600000); // Reset every hour
 
 // Graceful shutdown
 process.on("SIGINT", () => {
