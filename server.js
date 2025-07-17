@@ -84,6 +84,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(express.json());
 
 // Add request logging middleware
 app.use((req, res, next) => {
@@ -285,7 +286,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     const { username, email, password } = req.body;
 
-    // Validation
+    // Basic validation
     if (!username || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -293,7 +294,7 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Email validation
+    // Email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
@@ -302,7 +303,7 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Password validation
+    // Password min 6 chars
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
@@ -310,7 +311,7 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Username validation
+    // Username min 3 chars
     if (username.length < 3) {
       return res.status(400).json({
         success: false,
@@ -318,7 +319,7 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Create user
+    // Register user
     const result = await createUser({ username, email, password });
     console.log("User creation result:", {
       success: result.success,
@@ -326,46 +327,44 @@ app.post("/api/auth/register", async (req, res) => {
     });
 
     if (result.success && result.userId) {
-      // Generate JWT token for new user
+      // Generate JWT
       const token = jwt.sign(
         {
           userId: result.userId,
-          email: email,
-          username: username,
+          email,
+          username,
         },
         JWT_SECRET,
         { expiresIn: "24h" }
       );
 
-      // Set HTTP-only cookie
+      // Set cookie
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       console.log("Registration successful for user:", username);
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
-        message: "Account created successfully",
         user: {
-          id: result.userId,
-          username: username,
-          email: email,
+          userId: result.userId, // ← penting untuk frontend
+          username,
+          email,
         },
       });
     } else {
-      console.log("Registration failed:", result.error);
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         error: result.error || "Failed to create account",
       });
     }
   } catch (error) {
     console.error("Register API error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Internal server error during registration",
     });
