@@ -1,11 +1,10 @@
-require("dotenv").config();
+require('dotenv').config();
 const express = require("express");
-const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
 const dgram = require("dgram");
 const net = require("net");
-
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -18,59 +17,91 @@ const {
 } = require("./db");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET;
+const port = process.env.PORT || 3001;
 
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  console.error("JWT_SECRET environment variable is missing!");
+  console.error("JWT_SECRET environment variable is required");
   process.exit(1);
 }
 
-// CORS configuration
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:3001",
-  "https://iptv-monitor2.vercel.app",
-];
-
+// CORS Configuration
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+    origin: function (origin, callback) {
+      const allowedOrigins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://iptv-monitor2.vercel.app",
+      ];
+
+      // Allow requests with no origin (mobile apps, etc.)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        console.warn("Blocked CORS origin:", origin);
+        console.log("CORS blocked origin:", origin); // Debug log
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    optionsSuccessStatus: 200,
+    preflightContinue: false,
   })
 );
 
-// Preflight handler
-app.options("*", cors());
+// Explicit OPTIONS handler untuk preflight requests
+app.options(/.*/, cors());
 
-// Basic middleware
+// Manual CORS headers untuk semua responses
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://iptv-monitor2.vercel.app",
+  ];
+
+  if (allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With"
+  );
+
+  next();
+});
+
+// Middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Request logger
+// Add request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  console.log("Headers:", req.headers);
-  console.log("Body:", req.body);
   next();
 });
 
-// JWT middleware
+// JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
   const token =
     req.cookies.token ||
     (req.headers.authorization && req.headers.authorization.split(" ")[1]);
 
   if (!token) {
-    return res.status(401).json({ success: false, error: "No token provided" });
+    return res.status(401).json({
+      success: false,
+      error: "Access denied. No token provided.",
+    });
   }
 
   try {
@@ -78,7 +109,11 @@ const authenticateToken = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    return res.status(403).json({ success: false, error: "Invalid token" });
+    console.error("Token verification error:", error);
+    return res.status(403).json({
+      success: false,
+      error: "Invalid token.",
+    });
   }
 };
 
@@ -173,14 +208,28 @@ const trackRequestMetrics = (serviceType) => {
 
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
-  const { identifier, password } = req.body;
-  if (!identifier || !password) {
-    return res.status(400).json({ success: false, error: "Missing fields" });
-  }
-
   try {
+    console.log("Login attempt:", { identifier: req.body.identifier });
+
+    const { identifier, password } = req.body;
+
+    // Validation
+    if (!identifier || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Email/username and password are required",
+      });
+    }
+
+    // Authenticate user
     const result = await authenticateUser(identifier, password);
+    console.log("Authentication result:", {
+      success: result.success,
+      userId: result.user?.id,
+    });
+
     if (result.success && result.user) {
+      // Generate JWT token
       const token = jwt.sign(
         {
           userId: result.user.userId,
@@ -191,67 +240,180 @@ app.post("/api/auth/login", async (req, res) => {
         { expiresIn: "24h" }
       );
 
+      // Set HTTP-only cookie
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
       });
 
-      return res.json({ success: true, user: result.user });
+      console.log("Login successful for user:", result.user.username);
+
+      res.json({
+        success: true,
+        user: {
+          id: result.user.userId,
+          username: result.user.username,
+          email: result.user.email,
+        },
+        message: "Login successful",
+      });
     } else {
-      return res.status(401).json({ success: false, error: result.error });
+      console.log("Login failed:", result.error);
+      res.status(401).json({
+        success: false,
+        error: result.error || "Invalid credentials",
+      });
     }
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Login error" });
+    console.error("Login API error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error during login",
+    });
   }
 });
 
+// Register endpoint
 app.post("/api/auth/register", async (req, res) => {
-  const { username, email, password } = req.body;
-  if (!username || !email || !password) {
-    return res.status(400).json({ success: false, error: "Missing fields" });
-  }
-
   try {
+    console.log("Registration attempt:", {
+      username: req.body.username,
+      email: req.body.email,
+    });
+
+    const { username, email, password } = req.body;
+
+    // Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Username, email, and password are required",
+      });
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: "Please enter a valid email address",
+      });
+    }
+
+    // Password validation
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: "Password must be at least 6 characters long",
+      });
+    }
+
+    // Username validation
+    if (username.length < 3) {
+      return res.status(400).json({
+        success: false,
+        error: "Username must be at least 3 characters long",
+      });
+    }
+
+    // Create user
     const result = await createUser({ username, email, password });
+    console.log("User creation result:", {
+      success: result.success,
+      userId: result.userId,
+    });
+
     if (result.success && result.userId) {
+      // Generate JWT token for new user
       const token = jwt.sign(
-        { userId: result.userId, username, email },
+        {
+          userId: result.userId,
+          email: email,
+          username: username,
+        },
         JWT_SECRET,
         { expiresIn: "24h" }
       );
 
+      // Set HTTP-only cookie
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
       });
 
-      return res.status(201).json({
+      console.log("Registration successful for user:", username);
+
+      res.status(201).json({
         success: true,
-        user: { userId: result.userId, username, email },
+        message: "Account created successfully",
+        user: {
+          id: result.userId,
+          username: username,
+          email: email,
+        },
       });
     } else {
-      return res.status(400).json({ success: false, error: result.error });
+      console.log("Registration failed:", result.error);
+      res.status(400).json({
+        success: false,
+        error: result.error || "Failed to create account",
+      });
     }
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Register error" });
+    console.error("Register API error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error during registration",
+    });
   }
 });
 
+// Logout endpoint
 app.post("/api/auth/logout", (req, res) => {
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-  });
-  res.json({ success: true, message: "Logged out" });
+  try {
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+
+    console.log("User logged out successfully");
+
+    res.json({
+      success: true,
+      message: "Logged out successfully",
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Error during logout",
+    });
+  }
 });
 
+// Verify token endpoint
 app.get("/api/auth/verify", authenticateToken, (req, res) => {
-  res.json({ success: true, user: req.user });
+  try {
+    res.json({
+      success: true,
+      user: {
+        userId: req.user.userId,
+        username: req.user.username,
+        email: req.user.email,
+      },
+    });
+  } catch (error) {
+    console.error("Token verification error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Error verifying token",
+    });
+  }
 });
 
 // Function database coonection check
@@ -1777,30 +1939,27 @@ app.use("/{*splat}", (error, req, res, next) => {
 });
 
 // Start server
-if (require.main === module) {
-  const port = process.env.PORT || 3001;
+app.listen(port, async () => {
+  const dbConnected = await checkDatabaseConnection();
+  if (!dbConnected) {
+    console.error("Failed to connect to database. Exiting...");
+    process.exit(1);
+  }
 
-  app.listen(port, async () => {
-    const dbConnected = await checkDatabaseConnection();
-    if (!dbConnected) {
-      console.error("Failed to connect to database. Exiting...");
-      process.exit(1);
-    }
+  console.log("Starting initial status checks...");
+  // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
 
-    console.log(`Server listening on port ${port}`);
-    try {
-      await checkAllChannelsStatus();
-      await checkAllTVsStatus();
-      await checkAllChromecastsStatus();
-      console.log("Initial status checks completed");
-    } catch (error) {
-      console.error("Error during initial status checks:", error);
-    }
-  });
-} else {
-  module.exports = app; // for Vercel
-}
-
+  // Initialize status checks after server starts
+  try {
+    await checkAllChannelsStatus();
+    await checkAllTVsStatus();
+    await checkAllChromecastsStatus();
+    console.log("Initial status checks completed");
+  } catch (error) {
+    console.error("Error during initial status checks:", error);
+  }
+});
 
 // Debugging endpoint to list all routes
 app.get("/api/debug/routes", (req, res) => {
