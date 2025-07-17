@@ -7,21 +7,30 @@ let isConnecting = false;
 
 async function connectDB() {
   if (client && client.topology?.isConnected()) {
-    const db = client.db('iptv');
-    return {
-      international: db.collection('international_channels'),
-      local: db.collection('local_channels'),
-      hospitality: db.collection('tv_hospitality'),
-      users: db.collection('login_page'),
-      chromecast : db.collection('chromecast'),
-      client: client
-    };
+    try {
+      // Test connection with a quick ping
+      await client.db('iptv').admin().ping();
+      const db = client.db('iptv');
+      return {
+        international: db.collection('international_channels'),
+        local: db.collection('local_channels'),
+        hospitality: db.collection('tv_hospitality'),
+        users: db.collection('login_page'),
+        chromecast: db.collection('chromecast'),
+        client: client
+      };
+    } catch (error) {
+      console.log('Connection test failed, reconnecting...');
+      client = null;
+    }
   }
 
   // Prevent multiple simultaneous connection attempts
   if (isConnecting) {
-    while (isConnecting) {
+    let attempts = 0;
+    while (isConnecting && attempts < 50) { // Max 5 seconds wait
       await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
     }
     if (client && client.topology?.isConnected()) {
       const db = client.db('iptv');
@@ -39,21 +48,29 @@ async function connectDB() {
   try {
     isConnecting = true;
     console.log('Connecting to MongoDB...');
-    
-    if (!client) {
-      client = new MongoClient(uri, {
-        maxPoolSize: 10,
-        serverSelectionTimeoutMS: 30000, // Increased timeout
-        socketTimeoutMS: 45000,
-        connectTimeoutMS: 30000,
-        retryWrites: true,
-        retryReads: true
-        });
+
+    if (client) {
+      try {
+        await client.close();
+      } catch (closeError) {
+        console.log('Error closing existing client:', closeError.message);
+      }
     }
-    
+
+    client = new MongoClient(uri, {
+      maxPoolSize: 5, // Reduced pool size
+      serverSelectionTimeoutMS: 15000, // Reduced timeout
+      socketTimeoutMS: 20000,
+      connectTimeoutMS: 15000,
+      retryWrites: true,
+      retryReads: true,
+      maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
+      heartbeatFrequencyMS: 10000 // Check connection every 10 seconds
+    });
+
     await client.connect();
     console.log('Connected to MongoDB successfully');
-    
+
     const db = client.db('iptv');
     return {
       international: db.collection('international_channels'),
@@ -66,7 +83,7 @@ async function connectDB() {
   } catch (error) {
     console.error('Error connecting to MongoDB:', error);
     client = null;
-    throw error;
+    throw new Error('Database connection failed');
   } finally {
     isConnecting = false;
   }
@@ -133,14 +150,14 @@ async function updateHospitalityTVStatus(roomNo, statusData) {
     const { hospitality } = await connectDB();
     const result = await hospitality.updateOne(
       { roomNo: roomNo },
-      { 
-        $set: { 
+      {
+        $set: {
           ...statusData,
           lastUpdated: new Date()
-        } 
+        }
       }
     );
-    
+
     console.log(`Updated status for room ${roomNo}`);
     return result;
   } catch (error) {
@@ -157,7 +174,7 @@ async function addHospitalityTV(tvData) {
       createdAt: new Date(),
       lastUpdated: new Date()
     });
-    
+
     console.log(`Added new TV for room ${tvData.roomNo}`);
     return result;
   } catch (error) {
@@ -169,13 +186,13 @@ async function addHospitalityTV(tvData) {
 async function bulkInsertHospitalityTVs(tvData) {
   try {
     const { hospitality } = await connectDB();
-    
+
     const tvsWithTimestamps = tvData.map(tv => ({
       ...tv,
       createdAt: new Date(),
       lastUpdated: new Date()
     }));
-    
+
     const result = await hospitality.insertMany(tvsWithTimestamps);
     console.log(`Inserted ${result.insertedCount} hospitality TVs`);
     return result;
@@ -189,7 +206,7 @@ async function deleteHospitalityTV(roomNo) {
   try {
     const { hospitality } = await connectDB();
     const result = await hospitality.deleteOne({ roomNo: roomNo });
-    
+
     console.log(`Deleted TV for room ${roomNo}`);
     return result;
   } catch (error) {
@@ -228,17 +245,24 @@ async function comparePassword(password, hashedPassword) {
 async function getUserByEmailOrUsername(identifier) {
   try {
     console.log('🔍 Searching for user with identifier:', identifier);
-    
+
     const { users } = await connectDB();
-    
-    const user = await users.findOne({
+
+    // Add timeout for database query
+    const queryPromise = users.findOne({
       $or: [
         { email: identifier.toLowerCase() },
         { username: identifier }
       ],
       isActive: { $ne: false }
     });
-    
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
     if (user) {
       console.log('✅ User found:', { id: user._id, username: user.username, email: user.email });
       return user;
@@ -248,6 +272,9 @@ async function getUserByEmailOrUsername(identifier) {
     }
   } catch (error) {
     console.error('❌ Error fetching user by email/username:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
     throw new Error('Database query failed');
   }
 }
@@ -257,12 +284,19 @@ async function getUserById(userId) {
     console.log('Searching for user with ID:', userId);
 
     const { users } = await connectDB();
-    
-    const user = await users.findOne({ 
+
+    // Add timeout for database query
+    const queryPromise = users.findOne({
       _id: new ObjectId(userId),
       isActive: { $ne: false }
     });
-    
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
     if (user) {
       console.log('User found by ID:', { id: user._id, username: user.username });
       // Remove password from returned user object
@@ -274,6 +308,9 @@ async function getUserById(userId) {
     }
   } catch (error) {
     console.error('Error fetching user by ID:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
     throw new Error('Database query failed');
   }
 }
@@ -283,7 +320,7 @@ async function insertUser(userData) {
     console.log('Creating new user:', { username: userData.username, email: userData.email });
 
     const { users } = await connectDB();
-    
+
     const userDoc = {
       ...userData,
       email: userData.email.toLowerCase(),
@@ -291,7 +328,7 @@ async function insertUser(userData) {
       createdAt: new Date(),
       updatedAt: new Date()
     };
-    
+
     const result = await users.insertOne(userDoc);
     console.log(`User created with ID: ${result.insertedId}`);
     return result.insertedId;
@@ -303,62 +340,118 @@ async function insertUser(userData) {
       const field = error.keyPattern?.email ? 'email' : 'username';
       throw new Error(`This ${field} is already registered`);
     }
-    
+
     throw new Error('Failed to create user in database');
   }
 }
 
 // ==================== AUTHENTICATION MAIN FUNCTIONS ====================
 
+async function authenticateUser(identifier, password) {
+  try {
+    console.log('Starting authentication process for:', identifier);
+
+    // Add timeout wrapper
+    const authPromise = performAuthentication(identifier, password);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Authentication timeout')), 10000);
+    });
+
+    const result = await Promise.race([authPromise, timeoutPromise]);
+    return result;
+  } catch (error) {
+    console.error('Authentication error:', error);
+
+    // Return specific error messages
+    if (error.message === 'Authentication timeout') {
+      return {
+        success: false,
+        error: 'Authentication request timed out. Please try again.'
+      };
+    }
+
+    if (error.message === 'Database connection failed') {
+      return {
+        success: false,
+        error: 'Database connection failed. Please try again later.'
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Authentication failed. Please check your credentials and try again.'
+    };
+  }
+}
+
+async function performAuthentication(identifier, password) {
+  // Normalize identifier
+  const normalizedIdentifier = identifier.trim();
+
+  // Find user by email or username
+  console.log('Finding user...');
+  const user = await getUserByEmailOrUsername(normalizedIdentifier);
+
+  if (!user) {
+    console.log('User not found');
+    return {
+      success: false,
+      error: 'Invalid email/username or password'
+    };
+  }
+
+  console.log('User found, verifying password...');
+  // Verify password
+  const isValidPassword = await comparePassword(password, user.password);
+
+  if (!isValidPassword) {
+    console.log('Invalid password');
+    return {
+      success: false,
+      error: 'Invalid email/username or password'
+    };
+  }
+
+  console.log('Authentication successful for user:', user.username);
+  return {
+    success: true,
+    user: {
+      userId: user._id.toString(),
+      username: user.username,
+      email: user.email
+    }
+  };
+}
+
 async function createUser({ username, email, password }) {
   try {
     console.log('Starting user creation process:', { username, email });
 
-    // Normalize inputs
-    const normalizedEmail = email.toLowerCase().trim();
-    const trimmedUsername = username.trim();
-    
-    // Check if user already exists by email
-    console.log('Checking if email exists:', normalizedEmail);
-    const existingUserByEmail = await getUserByEmailOrUsername(normalizedEmail);
-    if (existingUserByEmail) {
-      console.log('Email already exists');
-      return {
-        success: false,
-        error: 'An account with this email already exists'
-      };
-    }
-
-    // Check if username exists
-    console.log('Checking if username exists:', trimmedUsername);
-    const existingUserByUsername = await getUserByEmailOrUsername(trimmedUsername);
-    if (existingUserByUsername) {
-      console.log('Username already exists');
-      return {
-        success: false,
-        error: 'This username is already taken'
-      };
-    }
-
-    // Hash password
-    console.log('Hashing password...');
-    const hashedPassword = await hashPassword(password);
-    
-    // Create user
-    console.log('Inserting user into database...');
-    const userId = await insertUser({
-      username: trimmedUsername,
-      email: normalizedEmail,
-      password: hashedPassword
+    // Add timeout wrapper
+    const createPromise = performUserCreation({ username, email, password });
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('User creation timeout')), 10000);
     });
 
-    console.log('User created successfully:', { userId, username: trimmedUsername });
-    return {
-      success: true,
-      userId: userId.toString() // Pastikan ID dikembalikan sebagai string
-    };
+    const result = await Promise.race([createPromise, timeoutPromise]);
+    return result;
   } catch (error) {
     console.error('User creation error:', error);
+
+    if (error.message === 'User creation timeout') {
+      return {
+        success: false,
+        error: 'User creation request timed out. Please try again.'
+      };
+    }
+
+    if (error.message === 'Database connection failed') {
+      return {
+        success: false,
+        error: 'Database connection failed. Please try again later.'
+      };
+    }
+
     return {
       success: false,
       error: error.message || 'Failed to create user'
@@ -366,62 +459,66 @@ async function createUser({ username, email, password }) {
   }
 }
 
-async function authenticateUser(identifier, password) {
-  try {
-    console.log('Starting authentication process for:', identifier);
+async function performUserCreation({ username, email, password }) {
+  // Normalize inputs
+  const normalizedEmail = email.toLowerCase().trim();
+  const trimmedUsername = username.trim();
 
-    // Normalize identifier
-    const normalizedIdentifier = identifier.trim();
-    
-    // Find user by email or username
-    console.log('Finding user...');
-    const user = await getUserByEmailOrUsername(normalizedIdentifier);
-    
-    if (!user) {
-      console.log('User not found');
-      return {
-        success: false,
-        error: 'Invalid email/username or password'
-      };
-    }
-    
-    console.log('User found, verifying password...');
-    // Verify password
-    const isValidPassword = await comparePassword(password, user.password);
-    
-    if (!isValidPassword) {
-      console.log('Invalid password');
-      return {
-        success: false,
-        error: 'Invalid email/username or password'
-      };
-    }
-
-    console.log('Authentication successful for user:', user.username);
-    return {
-      success: true,
-      user: {
-        userId: user._id.toString(), // Pastikan ID dikembalikan sebagai string
-        username: user.username,
-        email: user.email
-      }
-    };
-  } catch (error) {
-    console.error('Authentication error:', error);
+  // Check if user already exists by email
+  console.log('Checking if email exists:', normalizedEmail);
+  const existingUserByEmail = await getUserByEmailOrUsername(normalizedEmail);
+  if (existingUserByEmail) {
+    console.log('Email already exists');
     return {
       success: false,
-      error: 'Authentication failed due to server error'
+      error: 'An account with this email already exists'
     };
   }
+
+  // Check if username exists
+  console.log('Checking if username exists:', trimmedUsername);
+  const existingUserByUsername = await getUserByEmailOrUsername(trimmedUsername);
+  if (existingUserByUsername) {
+    console.log('Username already exists');
+    return {
+      success: false,
+      error: 'This username is already taken'
+    };
+  }
+
+  // Hash password
+  console.log('Hashing password...');
+  const hashedPassword = await hashPassword(password);
+
+  // Create user
+  console.log('Inserting user into database...');
+  const userId = await insertUser({
+    username: trimmedUsername,
+    email: normalizedEmail,
+    password: hashedPassword
+  });
+
+  console.log('User created successfully:', { userId, username: trimmedUsername });
+  return {
+    success: true,
+    userId: userId.toString()
+  };
 }
 
-// ==================== UTILITY FUNCTIONS ====================
+// ==================== CONNECTION HEALTH CHECK ====================
 
 async function testConnection() {
   try {
     console.log('Testing database connection...');
     const { client } = await connectDB();
-    await client.db('iptv').admin().ping();
+
+    // Add timeout for ping
+    const pingPromise = client.db('iptv').admin().ping();
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Connection test timeout')), 5000);
+    });
+
+    await Promise.race([pingPromise, timeoutPromise]);
     console.log('Database connection test successful');
     return true;
   } catch (error) {
@@ -432,29 +529,23 @@ async function testConnection() {
 
 // ==================== GRACEFUL SHUTDOWN ====================
 
-process.on('SIGINT', async () => {
-  console.log('Shutting down MongoDB connection...');
+async function closeConnection() {
   if (client) {
     try {
       await client.close();
+      client = null;
       console.log('MongoDB connection closed');
     } catch (error) {
       console.error('Error closing MongoDB connection:', error);
     }
   }
-});
+}
 
-process.on('SIGTERM', async () => {
-  console.log('Shutting down MongoDB connection...');
-  if (client) {
-    try {
-      await client.close();
-      console.log('MongoDB connection closed');
-    } catch (error) {
-      console.error('Error closing MongoDB connection:', error);
-    }
-  }
-});
+process.on('SIGINT', closeConnection);
+process.on('SIGTERM', closeConnection);
+
+// For Vercel serverless functions
+process.on('beforeExit', closeConnection);
 
 // ==================== CHROMECAST DEVICE FUNCTIONS ====================
 
@@ -474,7 +565,7 @@ async function getChromecastDeviceById(deviceId) {
   try {
     const { chromecast } = await connectDB();
     let device;
-    
+
     // Try to find by ObjectId first, then by numeric id
     try {
       device = await chromecast.findOne({ _id: new ObjectId(deviceId) });
@@ -485,7 +576,7 @@ async function getChromecastDeviceById(deviceId) {
         device = await chromecast.findOne({ idCast: numericId });
       }
     }
-    
+
     if (device) {
       console.log(`Retrieved Chromecast device: ${device.deviceName}`);
     } else {
@@ -526,7 +617,7 @@ async function addChromecastDevice(deviceData) {
         error: 'Device with this IP address already exists'
       };
     }
-    
+
     const deviceDoc = {
       ...deviceData,
       createdAt: new Date(),
@@ -535,7 +626,7 @@ async function addChromecastDevice(deviceData) {
 
     const result = await chromecast.insertOne(deviceDoc);
     console.log(`Added new Chromecast device: ${deviceData.deviceName}`);
-    
+
     return {
       success: true,
       deviceId: result.insertedId
@@ -552,27 +643,27 @@ async function addChromecastDevice(deviceData) {
 async function updateChromecastDevice(deviceName, updateData) {
   try {
     const { chromecast } = await connectDB();
-    
+
     // Remove sensitive fields from update
     const { _id, createdAt, ...safeUpdateData } = updateData;
 
     const result = await chromecast.updateOne(
       { deviceName: deviceName },
-      { 
+      {
         $set: {
           ...safeUpdateData,
           lastUpdated: new Date()
         }
       }
     );
-    
+
     if (result.matchedCount === 0) {
       return {
         success: false,
         error: 'Device not found'
       };
     }
-    
+
     console.log(`Updated Chromecast device: ${deviceName}`);
     return {
       success: true,
@@ -590,10 +681,10 @@ async function updateChromecastDevice(deviceName, updateData) {
 async function updateChromecastDeviceStatus(deviceName, statusData) {
   try {
     const { chromecast } = await connectDB();
-    
+
     const result = await chromecast.updateOne(
       { deviceName: deviceName },
-      { 
+      {
         $set: {
           ...statusData,
           lastSeen: new Date().toISOString(),
@@ -601,14 +692,14 @@ async function updateChromecastDeviceStatus(deviceName, statusData) {
         }
       }
     );
-    
+
     if (result.matchedCount === 0) {
       return {
         success: false,
         error: 'Device not found'
       };
     }
-    
+
     console.log(`Updated status for Chromecast device: ${deviceName}`);
     return {
       success: true,
@@ -627,7 +718,7 @@ async function deleteChromecastDevice(deviceId) {
   try {
     const { chromecast } = await connectDB();
     let result;
-    
+
     // Try to delete by ObjectId first, then by numeric id
     try {
       result = await chromecast.deleteOne({ _id: new ObjectId(deviceId) });
@@ -647,7 +738,7 @@ async function deleteChromecastDevice(deviceId) {
         error: 'Device not found'
       };
     }
-    
+
     console.log(`Deleted Chromecast device: ${deviceId}`);
     return {
       success: true,
@@ -665,7 +756,7 @@ async function deleteChromecastDevice(deviceId) {
 async function bulkInsertChromecastDevices(devicesData) {
   try {
     const { chromecast } = await connectDB();
-    
+
     const devicesWithTimestamps = devicesData.map(device => ({
       ...device,
       createdAt: new Date(),
@@ -674,7 +765,7 @@ async function bulkInsertChromecastDevices(devicesData) {
 
     const result = await chromecast.insertMany(devicesWithTimestamps);
     console.log(`Inserted ${result.insertedCount} Chromecast devices`);
-    
+
     return {
       success: true,
       insertedCount: result.insertedCount,
@@ -708,7 +799,7 @@ module.exports = {
   // Channel functions
   getInternationalChannels,
   getLocalChannels,
-  
+
   // Hospitality TV functions
   getHospitalityTVs,
   getHospitalityTVByRoomNo,
@@ -716,12 +807,12 @@ module.exports = {
   addHospitalityTV,
   bulkInsertHospitalityTVs,
   deleteHospitalityTV,
-  
+
   // User CRUD functions
   getUserById,
   getUserByEmailOrUsername,
   insertUser,
-  
+
   // Authentication functions
   createUser,
   authenticateUser,

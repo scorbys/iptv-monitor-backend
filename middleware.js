@@ -3,7 +3,7 @@ import { jwtVerify } from 'jose';
 
 const JWT_SECRET = new TextEncoder().encode('Pec@tu2024++');
 
-const protectedPaths = ['/channel', '/chromecast', '/hospitality'];
+const protectedPaths = ['/channel', '/chromecast', '/hospitality', '/dashboard'];
 const authPaths = ['/login', '/register'];
 
 export async function middleware(request) {
@@ -24,11 +24,20 @@ export async function middleware(request) {
   // Redirect ke login jika mengakses protected path tanpa token
   if (protectedPaths.some(path => pathname.startsWith(path))) {
     if (!token) {
-      return NextResponse.redirect(new URL('/login', request.url));
+      const loginUrl = new URL('/login', request.url);
+      // Tambahkan redirect parameter untuk kembali ke halaman yang diminta
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
     }
 
     try {
-      await jwtVerify(token, JWT_SECRET);
+      // Tambahkan timeout untuk JWT verification
+      const verifyPromise = jwtVerify(token, JWT_SECRET);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('JWT verification timeout')), 3000)
+      );
+
+      await Promise.race([verifyPromise, timeoutPromise]);
       return NextResponse.next();
     } catch (error) {
       console.error('Token verification failed:', error);
@@ -39,10 +48,23 @@ export async function middleware(request) {
   }
 
   // Redirect ke dashboard jika sudah login dan mengakses auth pages
-  if (authPaths.some(path => pathname === path)) { // Gunakan === bukan startsWith
+  if (authPaths.some(path => pathname === path)) {
     if (token) {
       try {
-        await jwtVerify(token, JWT_SECRET);
+        // Tambahkan timeout untuk JWT verification
+        const verifyPromise = jwtVerify(token, JWT_SECRET);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('JWT verification timeout')), 3000)
+        );
+
+        await Promise.race([verifyPromise, timeoutPromise]);
+
+        // Cek apakah ada redirect parameter
+        const redirectUrl = request.nextUrl.searchParams.get('redirect');
+        if (redirectUrl && protectedPaths.some(path => redirectUrl.startsWith(path))) {
+          return NextResponse.redirect(new URL(redirectUrl, request.url));
+        }
+
         return NextResponse.redirect(new URL('/dashboard', request.url));
       } catch (error) {
         console.error('Token invalid for auth page:', error);

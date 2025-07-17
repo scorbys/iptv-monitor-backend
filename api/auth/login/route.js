@@ -21,11 +21,16 @@ const cookieOptions = {
 };
 
 export async function POST(request) {
+  // Set timeout untuk seluruh request handler
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 detik
+
   try {
     const { identifier, password } = await request.json();
 
     // Validate input
     if (!identifier || !password) {
+      clearTimeout(timeoutId);
       const response = NextResponse.json(
         { success: false, error: 'Email/username and password are required' },
         { status: 400 }
@@ -36,9 +41,24 @@ export async function POST(request) {
       return response;
     }
 
-    // Authenticate user dengan timeout
+    // Validate input tidak kosong
+    if (identifier.trim().length === 0 || password.trim().length === 0) {
+      clearTimeout(timeoutId);
+      const response = NextResponse.json(
+        { success: false, error: 'Email/username and password cannot be empty' },
+        { status: 400 }
+      );
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        response.headers.set(key, value);
+      });
+      return response;
+    }
+
+    console.log('Login attempt for:', identifier);
+
+    // Authenticate user dengan timeout yang lebih pendek
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Database timeout')), 10000)
+      setTimeout(() => reject(new Error('Authentication timeout')), 15000) // Kurangi dari 10000 ke 15000
     );
 
     const authResult = await Promise.race([
@@ -46,7 +66,10 @@ export async function POST(request) {
       timeoutPromise
     ]);
 
+    clearTimeout(timeoutId);
+
     if (!authResult.success) {
+      console.log('Login failed:', authResult.error);
       const response = NextResponse.json(
         { success: false, error: authResult.error },
         { status: 401 }
@@ -68,6 +91,8 @@ export async function POST(request) {
       .setExpirationTime('7d')
       .sign(JWT_SECRET);
 
+    console.log('Login successful for:', authResult.user.username);
+
     // Create response
     const response = NextResponse.json({
       success: true,
@@ -84,10 +109,27 @@ export async function POST(request) {
 
     return response;
   } catch (error) {
+    clearTimeout(timeoutId);
     console.error('Login API error:', error);
+
+    // Handle specific error types
+    let errorMessage = 'Internal server error';
+    let statusCode = 500;
+
+    if (error.name === 'AbortError') {
+      errorMessage = 'Request timeout';
+      statusCode = 504;
+    } else if (error.message === 'Authentication timeout') {
+      errorMessage = 'Authentication timeout. Please try again.';
+      statusCode = 504;
+    } else if (error.message === 'Database connection failed') {
+      errorMessage = 'Database connection failed. Please try again.';
+      statusCode = 503;
+    }
+
     const response = NextResponse.json(
-      { success: false, error: error.message || 'Internal server error' },
-      { status: 500 }
+      { success: false, error: errorMessage },
+      { status: statusCode }
     );
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
