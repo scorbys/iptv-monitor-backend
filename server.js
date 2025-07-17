@@ -208,13 +208,8 @@ const trackRequestMetrics = (serviceType) => {
 
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
-  const startTime = Date.now();
-  
   try {
-    console.log("Login attempt started:", { 
-      identifier: req.body.identifier,
-      timestamp: new Date().toISOString()
-    });
+    console.log("Login attempt:", { identifier: req.body.identifier });
 
     const { identifier, password } = req.body;
 
@@ -226,116 +221,54 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    // Check if functions exist before calling
-    if (typeof authenticateUser !== 'function') {
-      console.error("authenticateUser function not found");
-      return res.status(500).json({
-        success: false,
-        error: "Authentication service unavailable",
-      });
-    }
-
-    // Authenticate user dengan proper timeout dan error handling
-    let result;
-    try {
-      const authPromise = authenticateUser(identifier, password);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Authentication timeout')), 8000); // Kurangi timeout
-      });
-
-      result = await Promise.race([authPromise, timeoutPromise]);
-    } catch (authError) {
-      console.error("Authentication error:", authError);
-      
-      if (authError.message === 'Authentication timeout') {
-        return res.status(408).json({
-          success: false,
-          error: "Authentication request timed out. Please try again.",
-        });
-      }
-      
-      return res.status(500).json({
-        success: false,
-        error: "Authentication service error",
-      });
-    }
-    
+    // Authenticate user
+    const result = await authenticateUser(identifier, password);
     console.log("Authentication result:", {
-      success: result?.success,
-      userId: result?.user?.id || result?.user?.userId,
-      duration: Date.now() - startTime
+      success: result.success,
+      userId: result.user?.id,
     });
 
-    if (result?.success && result?.user) {
-      // Pastikan JWT_SECRET ada
-      if (!JWT_SECRET) {
-        console.error("JWT_SECRET not configured");
-        return res.status(500).json({
-          success: false,
-          error: "Server configuration error",
-        });
-      }
+    if (result.success && result.user) {
+      // Generate JWT token
+      const token = jwt.sign(
+        {
+          userId: result.user.userId,
+          email: result.user.email,
+          username: result.user.username,
+        },
+        JWT_SECRET,
+        { expiresIn: "24h" }
+      );
 
-      // Generate JWT token dengan error handling
-      let token;
-      try {
-        token = jwt.sign(
-          {
-            userId: result.user.userId || result.user.id,
-            email: result.user.email,
-            username: result.user.username,
-          },
-          JWT_SECRET,
-          { expiresIn: "24h" }
-        );
-      } catch (tokenError) {
-        console.error("JWT token generation error:", tokenError);
-        return res.status(500).json({
-          success: false,
-          error: "Token generation failed",
-        });
-      }
-
-      // Set HTTP-only cookie dengan error handling
-      try {
-        res.cookie("token", token, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        });
-      } catch (cookieError) {
-        console.error("Cookie setting error:", cookieError);
-        // Continue anyway, token bisa dikirim via response
-      }
+      // Set HTTP-only cookie
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      });
 
       console.log("Login successful for user:", result.user.username);
 
-      return res.json({
+      res.json({
         success: true,
         user: {
-          userId: result.user.userId || result.user.id,
+          id: result.user.userId,
           username: result.user.username,
           email: result.user.email,
         },
         message: "Login successful",
       });
     } else {
-      console.log("Login failed:", result?.error || "Invalid credentials");
-      return res.status(401).json({
+      console.log("Login failed:", result.error);
+      res.status(401).json({
         success: false,
-        error: result?.error || "Invalid credentials",
+        error: result.error || "Invalid credentials",
       });
     }
   } catch (error) {
-    console.error("Login API error:", {
-      message: error.message,
-      stack: error.stack,
-      duration: Date.now() - startTime
-    });
-    
-    // Jangan expose internal error details
-    return res.status(500).json({
+    console.error("Login API error:", error);
+    res.status(500).json({
       success: false,
       error: "Internal server error during login",
     });
@@ -385,14 +318,8 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Create user dengan timeout
-    const createUserPromise = createUser({ username, email, password });
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('User creation timeout')), 10000); // 10 detik timeout
-    });
-
-    const result = await Promise.race([createUserPromise, timeoutPromise]);
-    
+    // Create user
+    const result = await createUser({ username, email, password });
     console.log("User creation result:", {
       success: result.success,
       userId: result.userId,
@@ -424,7 +351,7 @@ app.post("/api/auth/register", async (req, res) => {
         success: true,
         message: "Account created successfully",
         user: {
-          userId: result.userId, // Pastikan menggunakan userId
+          id: result.userId,
           username: username,
           email: email,
         },
@@ -492,11 +419,11 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
 // Function database coonection check
 async function checkDatabaseConnection() {
   try {
-    // Test koneksi database dengan query sederhana
-    const testResult = await getInternationalChannels();
-    return Array.isArray(testResult);
+    const testChannel = await getInternationalChannels();
+    console.log("✅ Database connection successful");
+    return true;
   } catch (error) {
-    console.error("Database connection check failed:", error);
+    console.error("❌ Database connection failed:", error.message);
     return false;
   }
 }
@@ -1975,7 +1902,6 @@ app.get("/api/health", authenticateToken, async (req, res) => {
     success: true,
     message: "IPTV Monitoring API is running",
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
     config: {
       tvDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
       chromecastDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS,
@@ -2014,37 +1940,24 @@ app.use("/{*splat}", (error, req, res, next) => {
 
 // Start server
 app.listen(port, async () => {
-  console.log(`Server starting on port ${port}...`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`JWT_SECRET configured: ${!!JWT_SECRET}`);
+  const dbConnected = await checkDatabaseConnection();
+  if (!dbConnected) {
+    console.error("Failed to connect to database. Exiting...");
+    process.exit(1);
+  }
 
+  console.log("Starting initial status checks...");
+  // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+
+  // Initialize status checks after server starts
   try {
-    // Check database connection dengan timeout
-    console.log("Checking database connection...");
-    /* console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-    console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`); */
-
-    // Initialize status checks after server starts
-    try {
-      if (typeof checkAllChannelsStatus === 'function') {
-        await checkAllChannelsStatus();
-      }
-      if (typeof checkAllTVsStatus === 'function') {
-        await checkAllTVsStatus();
-      }
-      if (typeof checkAllChromecastsStatus === 'function') {
-        await checkAllChromecastsStatus();
-      }
-      console.log("Initial status checks completed");
-    } catch (statusError) {
-      console.error("Error during initial status checks:", statusError);
-      // Jangan stop server karena status checks gagal
-    }
-
-    console.log(`Server successfully started on port ${port}`);
+    await checkAllChannelsStatus();
+    await checkAllTVsStatus();
+    await checkAllChromecastsStatus();
+    console.log("Initial status checks completed");
   } catch (error) {
-    console.error("Error during server startup:", error);
-    // Server tetap berjalan untuk debugging
+    console.error("Error during initial status checks:", error);
   }
 });
 
@@ -2095,20 +2008,6 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   console.log("\n🛑 Shutting down server gracefully...");
   process.exit(0);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // Jangan exit di production, log saja
-  if (process.env.NODE_ENV !== 'production') {
-    process.exit(1);
-  }
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Jangan exit di production, log saja
 });
 
 module.exports = app;
