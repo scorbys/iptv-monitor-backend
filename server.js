@@ -1,10 +1,11 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
+const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const cookieParser = require("cookie-parser");
 const dgram = require("dgram");
 const net = require("net");
+
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -17,92 +18,59 @@ const {
 } = require("./db");
 
 const app = express();
-const port = process.env.PORT || 3001;
-
-// JWT Secret
+const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET;
+
 if (!JWT_SECRET) {
-  console.error("JWT_SECRET environment variable is required");
+  console.error("JWT_SECRET environment variable is missing!");
   process.exit(1);
 }
 
-// CORS Configuration
+// CORS configuration
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://iptv-monitor2.vercel.app",
+];
+
 app.use(
   cors({
-    origin: function (origin, callback) {
-      const allowedOrigins = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://iptv-monitor2.vercel.app",
-      ];
-
-      // Allow requests with no origin (mobile apps, etc.)
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        console.log("CORS blocked origin:", origin); // Debug log
+        console.warn("Blocked CORS origin:", origin);
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-    optionsSuccessStatus: 200,
-    preflightContinue: false,
   })
 );
 
-// Explicit OPTIONS handler untuk preflight requests
-app.options(/.*/, cors());
+// Preflight handler
+app.options("*", cors());
 
-// Manual CORS headers untuk semua responses
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "https://iptv-monitor2.vercel.app",
-  ];
-
-  if (allowedOrigins.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
-  }
-
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With"
-  );
-
-  next();
-});
-
-// Middleware
+// Basic middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(express.json());
 
-// Add request logging middleware
+// Request logger
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log("Headers:", req.headers);
+  console.log("Body:", req.body);
   next();
 });
 
-// JWT Authentication Middleware
+// JWT middleware
 const authenticateToken = (req, res, next) => {
   const token =
     req.cookies.token ||
     (req.headers.authorization && req.headers.authorization.split(" ")[1]);
 
   if (!token) {
-    return res.status(401).json({
-      success: false,
-      error: "Access denied. No token provided.",
-    });
+    return res.status(401).json({ success: false, error: "No token provided" });
   }
 
   try {
@@ -110,11 +78,7 @@ const authenticateToken = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    console.error("Token verification error:", error);
-    return res.status(403).json({
-      success: false,
-      error: "Invalid token.",
-    });
+    return res.status(403).json({ success: false, error: "Invalid token" });
   }
 };
 
@@ -209,142 +173,24 @@ const trackRequestMetrics = (serviceType) => {
 
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
-  try {
-    console.log('Request body:', req.body);
-    console.log('Request headers:', req.headers);
-    console.log("Login attempt:", { identifier, password: "[REDACTED]" });
-
-    const { identifier, password } = req.body;
-
-    // Validation
-    if (!identifier || !password) {
-      return res.status(400).json({
-        success: false,
-        error: "Email/username and password are required",
-      });
-    }
-
-    // Authenticate user
-    const result = await authenticateUser(identifier, password);
-    console.log("Authentication result:", {
-      success: result.success,
-      userId: result.user?.id,
-    });
-    console.log('Database result:', result);
-
-    if (result.success && result.user) {
-      // Generate JWT token
-      const token = jwt.sign(
-        {
-          userId: result.user.userId,
-          email: result.user.email,
-          username: result.user.username,
-        },
-        JWT_SECRET,
-        { expiresIn: "24h" }
-      );
-
-      // Set HTTP-only cookie
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      });
-
-      console.log("Login successful for user:", result.user.username);
-
-      res.json({
-        success: true,
-        user: {
-          userId: result.user.userId,
-          username: result.user.username,
-          email: result.user.email,
-        },
-        message: "Login successful",
-      });
-    } else {
-      console.log("Login failed:", result.error);
-      res.status(401).json({
-        success: false,
-        error: result.error || "Invalid credentials",
-      });
-    }
-  } catch (error) {
-    console.error("Login API error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Internal server error during login",
-    });
+  const { identifier, password } = req.body;
+  if (!identifier || !password) {
+    return res.status(400).json({ success: false, error: "Missing fields" });
   }
-});
 
-// Register endpoint
-app.post("/api/auth/register", async (req, res) => {
   try {
-    console.log('Request body:', req.body);
-    console.log('Request headers:', req.headers);
-    console.log("Registration attempt:", {
-      username: req.body.username,
-      email: req.body.email,
-    });
-
-    const { username, email, password } = req.body;
-
-    // Basic validation
-    if (!username || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: "Username, email, and password are required",
-      });
-    }
-
-    // Email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        error: "Please enter a valid email address",
-      });
-    }
-
-    // Password min 6 chars
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        error: "Password must be at least 6 characters long",
-      });
-    }
-
-    // Username min 3 chars
-    if (username.length < 3) {
-      return res.status(400).json({
-        success: false,
-        error: "Username must be at least 3 characters long",
-      });
-    }
-
-    // Register user
-    const result = await createUser({ username, email, password });
-    console.log("User creation result:", {
-      success: result.success,
-      userId: result.userId,
-    });
-    console.log('Database result:', result);
-
-    if (result.success && result.userId) {
-      // Generate JWT
+    const result = await authenticateUser(identifier, password);
+    if (result.success && result.user) {
       const token = jwt.sign(
         {
-          userId: result.userId,
-          email,
-          username,
+          userId: result.user.userId,
+          email: result.user.email,
+          username: result.user.username,
         },
         JWT_SECRET,
         { expiresIn: "24h" }
       );
 
-      // Set cookie
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -352,73 +198,60 @@ app.post("/api/auth/register", async (req, res) => {
         maxAge: 24 * 60 * 60 * 1000,
       });
 
-      console.log("Registration successful for user:", username);
+      return res.json({ success: true, user: result.user });
+    } else {
+      return res.status(401).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    return res.status(500).json({ success: false, error: "Login error" });
+  }
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username || !email || !password) {
+    return res.status(400).json({ success: false, error: "Missing fields" });
+  }
+
+  try {
+    const result = await createUser({ username, email, password });
+    if (result.success && result.userId) {
+      const token = jwt.sign(
+        { userId: result.userId, username, email },
+        JWT_SECRET,
+        { expiresIn: "24h" }
+      );
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 24 * 60 * 60 * 1000,
+      });
 
       return res.status(201).json({
         success: true,
-        user: {
-          userId: result.userId,  // ← penting untuk frontend
-          username,
-          email,
-        },
+        user: { userId: result.userId, username, email },
       });
     } else {
-      return res.status(400).json({
-        success: false,
-        error: result.error || "Failed to create account",
-      });
+      return res.status(400).json({ success: false, error: result.error });
     }
   } catch (error) {
-    console.error("Register API error:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error during registration",
-    });
+    return res.status(500).json({ success: false, error: "Register error" });
   }
 });
 
-// Logout endpoint
 app.post("/api/auth/logout", (req, res) => {
-  try {
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-    });
-
-    console.log("User logged out successfully");
-
-    res.json({
-      success: true,
-      message: "Logged out successfully",
-    });
-  } catch (error) {
-    console.error("Logout error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Error during logout",
-    });
-  }
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+  res.json({ success: true, message: "Logged out" });
 });
 
-// Verify token endpoint
 app.get("/api/auth/verify", authenticateToken, (req, res) => {
-  try {
-    res.json({
-      success: true,
-      user: {
-        userId: req.user.userId,
-        username: req.user.username,
-        email: req.user.email,
-      },
-    });
-  } catch (error) {
-    console.error("Token verification error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Error verifying token",
-    });
-  }
+  res.json({ success: true, user: req.user });
 });
 
 // Function database coonection check
@@ -1944,27 +1777,30 @@ app.use("/{*splat}", (error, req, res, next) => {
 });
 
 // Start server
-app.listen(port, async () => {
-  const dbConnected = await checkDatabaseConnection();
-  if (!dbConnected) {
-    console.error("Failed to connect to database. Exiting...");
-    process.exit(1);
-  }
+if (require.main === module) {
+  const port = process.env.PORT || 3001;
 
-  console.log("Starting initial status checks...");
-  // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-  // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  app.listen(port, async () => {
+    const dbConnected = await checkDatabaseConnection();
+    if (!dbConnected) {
+      console.error("Failed to connect to database. Exiting...");
+      process.exit(1);
+    }
 
-  // Initialize status checks after server starts
-  try {
-    await checkAllChannelsStatus();
-    await checkAllTVsStatus();
-    await checkAllChromecastsStatus();
-    console.log("Initial status checks completed");
-  } catch (error) {
-    console.error("Error during initial status checks:", error);
-  }
-});
+    console.log(`Server listening on port ${port}`);
+    try {
+      await checkAllChannelsStatus();
+      await checkAllTVsStatus();
+      await checkAllChromecastsStatus();
+      console.log("Initial status checks completed");
+    } catch (error) {
+      console.error("Error during initial status checks:", error);
+    }
+  });
+} else {
+  module.exports = app; // for Vercel
+}
+
 
 // Debugging endpoint to list all routes
 app.get("/api/debug/routes", (req, res) => {
