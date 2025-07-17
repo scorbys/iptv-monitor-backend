@@ -221,8 +221,14 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    // Authenticate user
-    const result = await authenticateUser(identifier, password);
+    // Authenticate user dengan timeout
+    const authPromise = authenticateUser(identifier, password);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Authentication timeout')), 10000); // 10 detik timeout
+    });
+
+    const result = await Promise.race([authPromise, timeoutPromise]);
+    
     console.log("Authentication result:", {
       success: result.success,
       userId: result.user?.id,
@@ -253,7 +259,7 @@ app.post("/api/auth/login", async (req, res) => {
       res.json({
         success: true,
         user: {
-          id: result.user.userId,
+          userId: result.user.userId, // Pastikan menggunakan userId
           username: result.user.username,
           email: result.user.email,
         },
@@ -318,8 +324,14 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    // Create user
-    const result = await createUser({ username, email, password });
+    // Create user dengan timeout
+    const createUserPromise = createUser({ username, email, password });
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('User creation timeout')), 10000); // 10 detik timeout
+    });
+
+    const result = await Promise.race([createUserPromise, timeoutPromise]);
+    
     console.log("User creation result:", {
       success: result.success,
       userId: result.userId,
@@ -351,7 +363,7 @@ app.post("/api/auth/register", async (req, res) => {
         success: true,
         message: "Account created successfully",
         user: {
-          id: result.userId,
+          userId: result.userId, // Pastikan menggunakan userId
           username: username,
           email: email,
         },
@@ -419,11 +431,12 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
 // Function database coonection check
 async function checkDatabaseConnection() {
   try {
-    const testChannel = await getInternationalChannels();
-    console.log("✅ Database connection successful");
+    // Test koneksi database dengan query sederhana
+    const testQuery = await getInternationalChannels();
+    console.log("Database connection successful");
     return true;
   } catch (error) {
-    console.error("❌ Database connection failed:", error.message);
+    console.error("Database connection failed:", error);
     return false;
   }
 }
@@ -1940,24 +1953,40 @@ app.use("/{*splat}", (error, req, res, next) => {
 
 // Start server
 app.listen(port, async () => {
-  const dbConnected = await checkDatabaseConnection();
-  if (!dbConnected) {
-    console.error("Failed to connect to database. Exiting...");
-    process.exit(1);
-  }
+  console.log(`Server starting on port ${port}...`);
 
-  console.log("Starting initial status checks...");
-  // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-  // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-
-  // Initialize status checks after server starts
   try {
-    await checkAllChannelsStatus();
-    await checkAllTVsStatus();
-    await checkAllChromecastsStatus();
-    console.log("Initial status checks completed");
+    const dbConnected = await checkDatabaseConnection();
+    if (!dbConnected) {
+      console.error("Failed to connect to database. Server will continue but authentication may not work.");
+      // Jangan exit server, biarkan tetap berjalan untuk debugging
+    }
+
+    console.log("Starting initial status checks...");
+    // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+    // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+
+    // Initialize status checks after server starts
+    try {
+      if (typeof checkAllChannelsStatus === 'function') {
+        await checkAllChannelsStatus();
+      }
+      if (typeof checkAllTVsStatus === 'function') {
+        await checkAllTVsStatus();
+      }
+      if (typeof checkAllChromecastsStatus === 'function') {
+        await checkAllChromecastsStatus();
+      }
+      console.log("Initial status checks completed");
+    } catch (statusError) {
+      console.error("Error during initial status checks:", statusError);
+      // Jangan stop server karena status checks gagal
+    }
+
+    console.log(`Server successfully started on port ${port}`);
   } catch (error) {
-    console.error("Error during initial status checks:", error);
+    console.error("Error during server startup:", error);
+    // Server tetap berjalan untuk debugging
   }
 });
 
