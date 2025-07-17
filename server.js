@@ -210,7 +210,9 @@ const trackRequestMetrics = (serviceType) => {
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
   try {
-    console.log("Login attempt:", { identifier: req.body.identifier });
+    console.log('Request body:', req.body);
+    console.log('Request headers:', req.headers);
+    console.log("Login attempt:", { identifier, password: "[REDACTED]" });
 
     const { identifier, password } = req.body;
 
@@ -228,6 +230,7 @@ app.post("/api/auth/login", async (req, res) => {
       success: result.success,
       userId: result.user?.id,
     });
+    console.log('Database result:', result);
 
     if (result.success && result.user) {
       // Generate JWT token
@@ -254,7 +257,7 @@ app.post("/api/auth/login", async (req, res) => {
       res.json({
         success: true,
         user: {
-          id: result.user.userId,
+          userId: result.user.userId,
           username: result.user.username,
           email: result.user.email,
         },
@@ -279,6 +282,8 @@ app.post("/api/auth/login", async (req, res) => {
 // Register endpoint
 app.post("/api/auth/register", async (req, res) => {
   try {
+    console.log('Request body:', req.body);
+    console.log('Request headers:', req.headers);
     console.log("Registration attempt:", {
       username: req.body.username,
       email: req.body.email,
@@ -325,6 +330,7 @@ app.post("/api/auth/register", async (req, res) => {
       success: result.success,
       userId: result.userId,
     });
+    console.log('Database result:', result);
 
     if (result.success && result.userId) {
       // Generate JWT
@@ -351,7 +357,7 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(201).json({
         success: true,
         user: {
-          userId: result.userId, // ← penting untuk frontend
+          userId: result.userId,  // ← penting untuk frontend
           username,
           email,
         },
