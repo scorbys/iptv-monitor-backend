@@ -13,7 +13,6 @@ const corsHeaders = {
 
 export async function GET(request) {
   try {
-    // Get token from cookies
     const token = request.cookies.get('token')?.value;
 
     if (!token) {
@@ -21,47 +20,36 @@ export async function GET(request) {
         { success: false, error: 'No token provided' },
         { status: 401 }
       );
-
-      // Set CORS headers - INI YANG HILANG
       Object.entries(corsHeaders).forEach(([key, value]) => {
         response.headers.set(key, value);
       });
-
       return response;
     }
 
-    // Verify token
     const { payload } = await jwtVerify(token, JWT_SECRET);
-
-    // Get fresh user data from database
     const user = await getUserById(payload.userId);
 
     if (!user) {
-      // User not found in database, clear cookie
       const response = NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 401 }
       );
       response.cookies.delete('token');
-
-      // Set CORS headers - INI JUGA YANG HILANG
       Object.entries(corsHeaders).forEach(([key, value]) => {
         response.headers.set(key, value);
       });
-
       return response;
     }
 
     const response = NextResponse.json({
       success: true,
       user: {
-        id: user._id,
+        userId: user._id || user.userId, // Pastikan userId ada
         username: user.username,
         email: user.email
       }
     });
 
-    // Set CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
@@ -69,19 +57,14 @@ export async function GET(request) {
     return response;
   } catch (error) {
     console.error('Token verification error:', error);
-
-    // Clear invalid token
     const response = NextResponse.json(
       { success: false, error: 'Invalid token' },
       { status: 401 }
     );
     response.cookies.delete('token');
-
-    // Set CORS headers - INI JUGA YANG HILANG
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
-
     return response;
   }
 }

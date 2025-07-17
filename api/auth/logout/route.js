@@ -8,6 +8,15 @@ const corsHeaders = {
   'Access-Control-Allow-Credentials': 'true',
 };
 
+// Gunakan setting cookie yang sama di semua auth routes
+const cookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  maxAge: 7 * 24 * 60 * 60,
+  path: '/'
+};
+
 export async function POST() {
   try {
     const response = NextResponse.json({
@@ -17,10 +26,8 @@ export async function POST() {
 
     // Clear the authentication cookie
     response.cookies.set('token', '', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 0 // Expire immediately
+      ...cookieOptions,
+      maxAge: 0 // untuk menghapus
     });
 
     // Set CORS headers
@@ -35,12 +42,12 @@ export async function POST() {
       { success: false, error: 'Internal server error' },
       { status: 500 }
     );
-    
+
     // Set CORS headers for error response
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
-    
+
     return response;
   }
 }

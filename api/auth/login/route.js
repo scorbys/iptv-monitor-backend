@@ -11,6 +11,15 @@ const corsHeaders = {
   'Access-Control-Allow-Credentials': 'true',
 };
 
+// Gunakan setting cookie yang sama di semua auth routes
+const cookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  maxAge: 7 * 24 * 60 * 60,
+  path: '/'
+};
+
 export async function POST(request) {
   try {
     const { identifier, password } = await request.json();
@@ -21,29 +30,30 @@ export async function POST(request) {
         { success: false, error: 'Email/username and password are required' },
         { status: 400 }
       );
-
-      // Set CORS headers - INI YANG HILANG
       Object.entries(corsHeaders).forEach(([key, value]) => {
         response.headers.set(key, value);
       });
-
       return response;
     }
 
-    // Authenticate user
-    const authResult = await authenticateUser(identifier, password);
+    // Authenticate user dengan timeout
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Database timeout')), 10000)
+    );
+
+    const authResult = await Promise.race([
+      authenticateUser(identifier, password),
+      timeoutPromise
+    ]);
 
     if (!authResult.success) {
       const response = NextResponse.json(
         { success: false, error: authResult.error },
         { status: 401 }
       );
-
-      // Set CORS headers
       Object.entries(corsHeaders).forEach(([key, value]) => {
         response.headers.set(key, value);
       });
-
       return response;
     }
 
@@ -65,15 +75,9 @@ export async function POST(request) {
       message: 'Login successful'
     });
 
-    // Set HTTP-only cookie
-    response.cookies.set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 // 7 days
-    });
+    // Set cookie dengan domain yang benar
+    response.cookies.set('token', token, cookieOptions);
 
-    // Set CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
@@ -82,15 +86,12 @@ export async function POST(request) {
   } catch (error) {
     console.error('Login API error:', error);
     const response = NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: error.message || 'Internal server error' },
       { status: 500 }
     );
-
-    // Set CORS headers for error response - INI JUGA YANG HILANG
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
-
     return response;
   }
 }

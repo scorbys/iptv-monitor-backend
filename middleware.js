@@ -8,12 +8,13 @@ const authPaths = ['/login', '/register'];
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
-  
+
   // Skip middleware untuk API routes dan public assets
   if (
     pathname.startsWith('/api/') ||
     pathname.startsWith('/_next/') ||
-    pathname.startsWith('/favicon.ico')
+    pathname.startsWith('/favicon.ico') ||
+    pathname === '/'
   ) {
     return NextResponse.next();
   }
@@ -30,7 +31,7 @@ export async function middleware(request) {
       await jwtVerify(token, JWT_SECRET);
       return NextResponse.next();
     } catch (error) {
-      // Token invalid, redirect ke login
+      console.error('Token verification failed:', error);
       const response = NextResponse.redirect(new URL('/login', request.url));
       response.cookies.delete('token');
       return response;
@@ -38,13 +39,13 @@ export async function middleware(request) {
   }
 
   // Redirect ke dashboard jika sudah login dan mengakses auth pages
-  if (authPaths.some(path => pathname.startsWith(path))) {
+  if (authPaths.some(path => pathname === path)) { // Gunakan === bukan startsWith
     if (token) {
       try {
         await jwtVerify(token, JWT_SECRET);
         return NextResponse.redirect(new URL('/dashboard', request.url));
       } catch (error) {
-        // Token invalid, lanjutkan ke auth page
+        console.error('Token invalid for auth page:', error);
         const response = NextResponse.next();
         response.cookies.delete('token');
         return response;

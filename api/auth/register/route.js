@@ -11,6 +11,15 @@ const corsHeaders = {
   'Access-Control-Allow-Credentials': 'true',
 };
 
+// Gunakan setting cookie yang sama di semua auth routes
+const cookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  maxAge: 7 * 24 * 60 * 60,
+  path: '/'
+};
+
 export async function POST(request) {
   try {
     const { username, email, password } = await request.json();
@@ -101,12 +110,7 @@ export async function POST(request) {
     });
 
     // Set HTTP-only cookie
-    response.cookies.set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 // 7 days
-    });
+    response.cookies.set('token', token, cookieOptions);
 
     // Set CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {
