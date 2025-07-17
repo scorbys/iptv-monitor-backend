@@ -27,32 +27,30 @@ if (!JWT_SECRET) {
 }
 
 // CORS Configuration
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      const allowedOrigins = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://iptv-monitor2.vercel.app",
-      ];
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "https://iptv-monitor2.vercel.app",
+    ];
 
-      // Allow requests with no origin (mobile apps, etc.)
-      if (!origin) return callback(null, true);
+    // Allow requests with no origin (mobile apps, etc.)
+    if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.log("CORS blocked origin:", origin); // Debug log
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-    optionsSuccessStatus: 200,
-    preflightContinue: false,
-  })
-);
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log("CORS blocked origin:", origin);
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  optionsSuccessStatus: 200,
+  preflightContinue: false,
+};
 
 // Explicit OPTIONS handler untuk preflight requests
 app.options(/.*/, cors());
@@ -84,6 +82,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(cors(corsOptions));
 
 // Add request logging middleware
 app.use((req, res, next) => {
@@ -98,6 +97,7 @@ const authenticateToken = (req, res, next) => {
     (req.headers.authorization && req.headers.authorization.split(" ")[1]);
 
   if (!token) {
+    console.log("No token provided");
     return res.status(401).json({
       success: false,
       error: "Access denied. No token provided.",
@@ -107,12 +107,22 @@ const authenticateToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
+    console.log("Token verified for user:", decoded.username);
     next();
   } catch (error) {
     console.error("Token verification error:", error);
+    
+    // PERBAIKAN: berikan pesan error yang lebih spesifik
+    let errorMessage = "Invalid token";
+    if (error.name === 'TokenExpiredError') {
+      errorMessage = "Token expired";
+    } else if (error.name === 'JsonWebTokenError') {
+      errorMessage = "Invalid token format";
+    }
+    
     return res.status(403).json({
       success: false,
-      error: "Invalid token.",
+      error: errorMessage,
     });
   }
 };
@@ -229,10 +239,10 @@ app.post("/api/auth/login", async (req, res) => {
     });
 
     if (result.success && result.user) {
-      // Generate JWT token
+      // Generate JWT token - PERBAIKAN: pastikan field yang benar digunakan
       const token = jwt.sign(
         {
-          userId: result.user.userId,
+          userId: result.user.id || result.user.userId, // Gunakan id jika userId tidak ada
           email: result.user.email,
           username: result.user.username,
         },
@@ -244,16 +254,17 @@ app.post("/api/auth/login", async (req, res) => {
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // PERBAIKAN: untuk cross-origin
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
       });
 
       console.log("Login successful for user:", result.user.username);
 
+      // PERBAIKAN: Konsisten dengan field yang digunakan di JWT
       res.json({
         success: true,
         user: {
-          id: result.user.userId,
+          id: result.user.id || result.user.userId,
           username: result.user.username,
           email: result.user.email,
         },
@@ -337,11 +348,11 @@ app.post("/api/auth/register", async (req, res) => {
         { expiresIn: "24h" }
       );
 
-      // Set HTTP-only cookie
+      // Set HTTP-only cookie - PERBAIKAN: sameSite untuk cross-origin
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
       });
 
@@ -375,10 +386,12 @@ app.post("/api/auth/register", async (req, res) => {
 // Logout endpoint
 app.post("/api/auth/logout", (req, res) => {
   try {
+    // PERBAIKAN: pastikan cookie dihapus dengan konfigurasi yang sama
     res.clearCookie("token", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/", // TAMBAHAN: pastikan path yang benar
     });
 
     console.log("User logged out successfully");
@@ -399,13 +412,19 @@ app.post("/api/auth/logout", (req, res) => {
 // Verify token endpoint
 app.get("/api/auth/verify", authenticateToken, (req, res) => {
   try {
+    // PERBAIKAN: pastikan data user dikembalikan dengan benar
+    const user = {
+      userId: req.user.userId,
+      username: req.user.username,
+      email: req.user.email,
+    };
+
+    console.log("Token verification successful for user:", user.username);
+
     res.json({
       success: true,
-      user: {
-        userId: req.user.userId,
-        username: req.user.username,
-        email: req.user.email,
-      },
+      user: user,
+      message: "Token verified successfully", // TAMBAHAN: pesan yang jelas
     });
   } catch (error) {
     console.error("Token verification error:", error);
@@ -419,7 +438,14 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
 // Function database coonection check
 async function checkDatabaseConnection() {
   try {
-    const testChannel = await getInternationalChannels();
+    // PERBAIKAN: tambahkan timeout untuk database connection
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database connection timeout')), 10000);
+    });
+    
+    const dbPromise = getInternationalChannels();
+    
+    await Promise.race([dbPromise, timeoutPromise]);
     console.log("✅ Database connection successful");
     return true;
   } catch (error) {
@@ -427,6 +453,7 @@ async function checkDatabaseConnection() {
     return false;
   }
 }
+
 // Function to check multicast connectivity
 async function checkMulticastConnectivity(
   ipAddress,
@@ -1918,20 +1945,14 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-app.use("/{*splat}", (error, req, res, next) => {
-  // Handle path-to-regexp errors
-  if (error.message && error.message.includes("Missing parameter name")) {
-    console.error("Route parameter error:", error.message);
-    return res.status(400).json({
-      success: false,
-      error: "Invalid route parameter format",
-    });
-  }
-
+app.use((error, req, res, next) => {
   console.error("Unhandled error:", error);
+  
+  // PERBAIKAN: jangan gunakan catch-all route yang bermasalah
   if (res.headersSent) {
     return next(error);
   }
+  
   res.status(500).json({
     success: false,
     error: "Internal server error",
