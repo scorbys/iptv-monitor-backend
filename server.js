@@ -2031,7 +2031,7 @@ app.use((req, res) => {
 });
 
 // Error handling middleware
-aapp.use((error, req, res, next) => {
+app.use((error, req, res, next) => {
   console.error("Unhandled error:", error);
   
   // PERBAIKAN: jangan gunakan catch-all route yang bermasalah
