@@ -1,6 +1,5 @@
-const express = require("express");
-const router = express.Router();
-const { OAuth2Client } = require("google-auth-library");
+import { NextResponse } from 'next/server';
+import { OAuth2Client } from 'google-auth-library';
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -8,13 +7,19 @@ const client = new OAuth2Client(
   `${process.env.BASE_URL}/api/auth/google/callback`
 );
 
-router.get("/", (req, res) => {
-  const url = client.generateAuthUrl({
-    access_type: "offline",
-    scope: ["profile", "email"],
-  });
+export async function GET(request) {
+  try {
+    const url = client.generateAuthUrl({
+      access_type: "offline",
+      scope: ["profile", "email"],
+    });
 
-  res.redirect(url);
-});
-
-module.exports = router;
+    return NextResponse.redirect(url);
+  } catch (error) {
+    console.error('Google auth error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to generate auth URL' },
+      { status: 500 }
+    );
+  }
+}

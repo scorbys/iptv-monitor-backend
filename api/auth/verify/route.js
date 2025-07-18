@@ -44,7 +44,7 @@ export async function GET(request) {
     const response = NextResponse.json({
       success: true,
       user: {
-        userId: user._id || user.userId, // Pastikan userId ada
+        userId: user._id || user.userId,
         username: user.username,
         email: user.email
       }

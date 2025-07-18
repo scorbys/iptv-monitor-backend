@@ -74,6 +74,8 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With"
   );
+  res.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.header("Cross-Origin-Embedder-Policy", "unsafe-none");
 
   next();
 });
@@ -501,6 +503,10 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
     });
   }
 });
+
+// To verify route
+const verifyRoute = require("./api/auth/verify/route");
+app.use("/api/auth/verify", verifyRoute);
 
 // Function database coonection check
 async function checkDatabaseConnection() {
