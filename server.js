@@ -18,6 +18,9 @@ const {
 
 const app = express();
 const port = process.env.PORT || 3001;
+const verifyRoute = require("./api/auth/verify/route");
+const googleAuthRoute = require("./api/auth/google/route");
+const googleCallbackRoute = require("./api/auth/google/callback/route");
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -85,6 +88,9 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(cors(corsOptions));
+app.use("/api/auth/verify", verifyRoute);
+app.use("/api/auth/google", googleAuthRoute);
+app.use("/api/auth/google/callback", googleCallbackRoute);
 
 // Add request logging middleware
 app.use((req, res, next) => {
@@ -503,10 +509,6 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
     });
   }
 });
-
-// To verify route
-const verifyRoute = require("./api/auth/verify/route");
-app.use("/api/auth/verify", verifyRoute);
 
 // Function database coonection check
 async function checkDatabaseConnection() {
@@ -2027,13 +2029,6 @@ app.get("/api/status", (req, res) => {
     uptime: process.uptime()
   });
 });
-
-// Google OAuth
-const googleAuthRoute = require("./api/auth/google/route");
-const googleCallbackRoute = require("./api/auth/google/callback/route");
-
-app.use("/api/auth/google", googleAuthRoute);
-app.use("/api/auth/google/callback", googleCallbackRoute);
 
 // 404 handler
 app.use((req, res) => {
