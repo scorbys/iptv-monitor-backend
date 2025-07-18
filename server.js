@@ -2022,6 +2022,13 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// Google OAuth
+const googleAuthRoute = require("./api/auth/google/route");
+const googleCallbackRoute = require("./api/auth/google/callback/route");
+
+app.use("/api/auth/google", googleAuthRoute);
+app.use("/api/auth/google/callback", googleCallbackRoute);
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
