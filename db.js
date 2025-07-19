@@ -345,6 +345,40 @@ async function insertUser(userData) {
   }
 }
 
+async function getUserByEmail(email) {
+  try {
+    console.log('🔍 Searching for user by email:', email);
+
+    const { users } = await connectDB();
+
+    // Add timeout for database query
+    const queryPromise = users.findOne({
+      email: email.toLowerCase(),
+      isActive: { $ne: false }
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
+    if (user) {
+      console.log('✅ User found by email:', { id: user._id, username: user.username, email: user.email });
+      return user;
+    } else {
+      console.log('❌ User not found with email:', email);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error fetching user by email:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
+  }
+}
+
 // ==================== AUTHENTICATION MAIN FUNCTIONS ====================
 
 async function authenticateUser(identifier, password) {
@@ -811,6 +845,7 @@ module.exports = {
   // User CRUD functions
   getUserById,
   getUserByEmailOrUsername,
+  getUserByEmail,
   insertUser,
 
   // Authentication functions

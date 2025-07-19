@@ -12,6 +12,9 @@ const {
 
 const app = express();
 const port = process.env.PORT || 3001;
+const verifyRoute = require("./api/auth/verify/route");
+const googleAuthRoute = require("./api/auth/google/route");
+const googleCallbackRoute = require("./api/auth/google/callback/route");
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -68,6 +71,8 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With"
   );
+  res.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.header("Cross-Origin-Embedder-Policy", "unsafe-none");
 
   next();
 });
@@ -77,46 +82,85 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(cors(corsOptions));
+app.use("/api/auth/verify", verifyRoute);
+app.use("/api/auth/google", googleAuthRoute);
+app.use("/api/auth/google/callback", googleCallbackRoute);
 
 // Add request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  
+  // Log cookies untuk debugging
+  if (req.path.includes('/auth/')) {
+    console.log("Cookies:", req.cookies);
+  }
+  
   next();
 });
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
-  const token =
-    req.cookies.token ||
-    (req.headers.authorization && req.headers.authorization.split(" ")[1]);
+  console.log("=== AUTHENTICATE TOKEN START ===");
+  
+  // Cek token dari cookie terlebih dahulu, kemudian dari header
+  let token = req.cookies.token;
+  
+  if (!token && req.headers.authorization) {
+    const authHeader = req.headers.authorization;
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
+
+  console.log("Token source:", {
+    fromCookie: !!req.cookies.token,
+    fromHeader: !!req.headers.authorization,
+    tokenPresent: !!token
+  });
 
   if (!token) {
-    console.log("No token provided");
+    console.log("❌ No token provided");
     return res.status(401).json({
       success: false,
       error: "Access denied. No token provided.",
+      authenticated: false
     });
   }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
-    console.log("Token verified for user:", decoded.username);
+    console.log("✅ Token verified for user:", decoded.username);
+    console.log("Token expires at:", new Date(decoded.exp * 1000));
+    console.log("=== AUTHENTICATE TOKEN END ===");
     next();
   } catch (error) {
-    console.error("Token verification error:", error);
+    console.error("💥 Token verification error:", error);
     
     // PERBAIKAN: berikan pesan error yang lebih spesifik
     let errorMessage = "Invalid token";
+    let statusCode = 403;
+    
     if (error.name === 'TokenExpiredError') {
       errorMessage = "Token expired";
+      statusCode = 401;
     } else if (error.name === 'JsonWebTokenError') {
       errorMessage = "Invalid token format";
+      statusCode = 401;
     }
     
-    return res.status(403).json({
+    // PERBAIKAN: Clear cookie jika token invalid
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/"
+    });
+    
+    return res.status(statusCode).json({
       success: false,
       error: errorMessage,
+      authenticated: false
     });
   }
 };
@@ -124,12 +168,18 @@ const authenticateToken = (req, res, next) => {
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
   try {
-    console.log("Login attempt:", { identifier: req.body.identifier });
+    console.log("=== LOGIN REQUEST START ===");
+    console.log("Headers:", req.headers);
+    console.log("Body:", { 
+      identifier: req.body.identifier,
+      passwordLength: req.body.password ? req.body.password.length : 0 
+    });
 
     const { identifier, password } = req.body;
 
     // Validation
     if (!identifier || !password) {
+      console.log("❌ Missing credentials");
       return res.status(400).json({
         success: false,
         error: "Email/username and password are required",
@@ -137,56 +187,68 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     // Authenticate user
+    console.log("🔍 Authenticating user...");
     const result = await authenticateUser(identifier, password);
     console.log("Authentication result:", {
       success: result.success,
       userId: result.user?.id,
+      username: result.user?.username,
+      error: result.error
     });
 
     if (result.success && result.user) {
       // Generate JWT token - PERBAIKAN: pastikan field yang benar digunakan
-      const token = jwt.sign(
-        {
-          userId: result.user.id || result.user.userId, // Gunakan id jika userId tidak ada
-          email: result.user.email,
-          username: result.user.username,
-        },
-        JWT_SECRET,
-        { expiresIn: "24h" }
-      );
+      const tokenPayload = {
+        userId: result.user.id || result.user.userId,
+        email: result.user.email,
+        username: result.user.username,
+        iat: Math.floor(Date.now() / 1000)
+      };
 
-      // Set HTTP-only cookie
-      res.cookie("token", token, {
+      console.log("🎫 Creating token with payload:", tokenPayload);
+      
+      const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
+
+      // PERBAIKAN: Set cookie dengan konfigurasi yang lebih kompatibel
+      const cookieOptions = {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // PERBAIKAN: untuk cross-origin
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      });
+        path: "/" // PENTING: pastikan path cookie
+      };
 
-      console.log("Login successful for user:", result.user.username);
+      console.log("🍪 Setting cookie with options:", cookieOptions);
+      res.cookie("token", token, cookieOptions);
 
       // PERBAIKAN: Konsisten dengan field yang digunakan di JWT
+      const userResponse = {
+        id: result.user.id || result.user.userId,
+        username: result.user.username,
+        email: result.user.email,
+      };
+
+      console.log("✅ Login successful for user:", userResponse.username);
+      console.log("=== LOGIN REQUEST END ===");
+
       res.json({
         success: true,
-        user: {
-          id: result.user.id || result.user.userId,
-          username: result.user.username,
-          email: result.user.email,
-        },
+        user: userResponse,
         message: "Login successful",
       });
     } else {
-      console.log("Login failed:", result.error);
+      console.log("❌ Login failed:", result.error);
       res.status(401).json({
         success: false,
         error: result.error || "Invalid credentials",
       });
     }
   } catch (error) {
-    console.error("Login API error:", error);
+    console.error("💥 Login API error:", error);
     res.status(500).json({
       success: false,
       error: "Internal server error during login",
+      details: process.env.NODE_ENV === "development" ? error.message : undefined
     });
   }
 });
@@ -291,22 +353,26 @@ app.post("/api/auth/register", async (req, res) => {
 // Logout endpoint
 app.post("/api/auth/logout", (req, res) => {
   try {
+    console.log("=== LOGOUT REQUEST START ===");
+    
     // PERBAIKAN: pastikan cookie dihapus dengan konfigurasi yang sama
     res.clearCookie("token", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/", // TAMBAHAN: pastikan path yang benar
+      path: "/",
     });
 
-    console.log("User logged out successfully");
+    console.log("✅ User logged out successfully");
+    console.log("=== LOGOUT REQUEST END ===");
 
     res.json({
       success: true,
       message: "Logged out successfully",
+      authenticated: false
     });
   } catch (error) {
-    console.error("Logout error:", error);
+    console.error("💥 Logout error:", error);
     res.status(500).json({
       success: false,
       error: "Error during logout",
@@ -317,25 +383,34 @@ app.post("/api/auth/logout", (req, res) => {
 // Verify token endpoint
 app.get("/api/auth/verify", authenticateToken, (req, res) => {
   try {
+    console.log("=== TOKEN VERIFICATION START ===");
+    console.log("Token from cookie:", req.cookies.token ? "Present" : "Missing");
+    console.log("Token from header:", req.headers.authorization ? "Present" : "Missing");
+    console.log("Decoded user:", req.user);
+
     // PERBAIKAN: pastikan data user dikembalikan dengan benar
     const user = {
-      userId: req.user.userId,
+      id: req.user.userId || req.user.id, // PERBAIKAN: konsisten dengan field
+      userId: req.user.userId, // Tetap kirim userId untuk backward compatibility
       username: req.user.username,
       email: req.user.email,
     };
 
-    console.log("Token verification successful for user:", user.username);
+    console.log("✅ Token verification successful for user:", user.username);
+    console.log("=== TOKEN VERIFICATION END ===");
 
     res.json({
       success: true,
       user: user,
-      message: "Token verified successfully", // TAMBAHAN: pesan yang jelas
+      message: "Token verified successfully",
+      authenticated: true // TAMBAHAN: flag untuk frontend
     });
   } catch (error) {
-    console.error("Token verification error:", error);
+    console.error("💥 Token verification error:", error);
     res.status(500).json({
       success: false,
       error: "Error verifying token",
+      authenticated: false
     });
   }
 });
@@ -359,100 +434,35 @@ async function checkDatabaseConnection() {
   }
 }
 
-// Function to check multicast connectivity
-async function checkMulticastConnectivity(
-  ipAddress,
-  port = 5000,
-  timeout = 5000
-) {
-  return new Promise((resolve) => {
-    const client = dgram.createSocket("udp4");
-    let isResolved = false;
-
-    // Set timeout
-    const timer = setTimeout(() => {
-      if (!isResolved) {
-        isResolved = true;
-        client.close();
-        resolve({
-          status: "offline",
-          responseTime: null,
-          error: "Connection timeout",
-        });
-      }
-    }, timeout);
-
-    const startTime = Date.now();
-
-    try {
-      // Try to bind to the multicast address
-      client.bind(port, () => {
-        try {
-          client.addMembership(ipAddress);
-
-          // If we get here, the multicast group is accessible
-          if (!isResolved) {
-            isResolved = true;
-            clearTimeout(timer);
-            const responseTime = Date.now() - startTime;
-            client.close();
-            resolve({
-              status: "online",
-              responseTime: responseTime,
-              error: null,
-            });
-          }
-        } catch (membershipError) {
-          if (!isResolved) {
-            isResolved = true;
-            clearTimeout(timer);
-            client.close();
-            resolve({
-              status: "offline",
-              responseTime: null,
-              error: membershipError.message,
-            });
-          }
-        }
-      });
-    } catch (error) {
-      if (!isResolved) {
-        isResolved = true;
-        clearTimeout(timer);
-        client.close();
-        resolve({
-          status: "offline",
-          responseTime: null,
-          error: error.message,
-        });
-      }
-    }
-
-    client.on("error", (error) => {
-      if (!isResolved) {
-        isResolved = true;
-        clearTimeout(timer);
-        client.close();
-        resolve({
-          status: "offline",
-          responseTime: null,
-          error: error.message,
-        });
-      }
-    });
-  });
-}
-
 // Health check endpoint
 app.get("/api/health", authenticateToken, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      message: "IPTV Monitoring API is running",
+      timestamp: new Date().toISOString(),
+      config: {
+        tvDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
+        chromecastDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS,
+      },
+      stats: networkStats
+    });
+  } catch (error) {
+    console.error("Health check error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Health check failed"
+    });
+  }
+});
+
+// Endpoint untuk check server status tanpa auth
+app.get("/api/status", (req, res) => {
   res.json({
     success: true,
-    message: "IPTV Monitoring API is running",
+    message: "Server is running",
     timestamp: new Date().toISOString(),
-    config: {
-      tvDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
-      chromecastDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS,
-    },
+    uptime: process.uptime()
   });
 });
 
@@ -464,42 +474,40 @@ app.use((req, res) => {
   });
 });
 
-// Error handling middleware
-app.use((error, req, res, next) => {
-  console.error("Unhandled error:", error);
-  
-  // PERBAIKAN: jangan gunakan catch-all route yang bermasalah
-  if (res.headersSent) {
-    return next(error);
-  }
-  
-  res.status(500).json({
-    success: false,
-    error: "Internal server error",
-  });
-});
-
 // Start server
 app.listen(port, async () => {
+  console.log(`🚀 Server starting on port ${port}`);
+  
+  // PERBAIKAN: buat database connection check opsional
   const dbConnected = await checkDatabaseConnection();
   if (!dbConnected) {
-    console.error("Failed to connect to database. Exiting...");
-    process.exit(1);
+    console.warn("⚠️  Database connection failed, but server will continue running");
+    // JANGAN exit server jika database gagal connect
+    // process.exit(1);
   }
 
   console.log("Starting initial status checks...");
-  // console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
-  // console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
+  console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
 
-  // Initialize status checks after server starts
+  // PERBAIKAN: buat status checks opsional dan tidak crash server
   try {
-    await checkAllChannelsStatus();
-    await checkAllTVsStatus();
-    await checkAllChromecastsStatus();
-    console.log("Initial status checks completed");
+    if (typeof checkAllChannelsStatus === 'function') {
+      await checkAllChannelsStatus();
+    }
+    if (typeof checkAllTVsStatus === 'function') {
+      await checkAllTVsStatus();
+    }
+    if (typeof checkAllChromecastsStatus === 'function') {
+      await checkAllChromecastsStatus();
+    }
+    console.log("✅ Initial status checks completed");
   } catch (error) {
-    console.error("Error during initial status checks:", error);
+    console.error("⚠️  Error during initial status checks:", error);
+    // JANGAN crash server jika status check gagal
   }
+  setTimeout(startPeriodicChecks, 5000); // Start after 5 seconds
+  console.log(`✅ Server is running on port ${port}`);
 });
 
 // Debugging endpoint to list all routes
@@ -521,17 +529,6 @@ app.get("/api/debug/routes", (req, res) => {
   });
 });
 
-// Periodic status checks
-setInterval(checkAllChannelsStatus, 120000); // Every 2 minutes for channels
-setInterval(() => {
-  if (
-    TV_STATUS_CONFIG.USE_DUMMY_STATUS ||
-    CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS
-  ) {
-    checkAllTVsStatus();
-    checkAllChromecastsStatus();
-  }
-}, Math.min(TV_STATUS_CONFIG.UPDATE_INTERVAL, CHROMECAST_STATUS_CONFIG.UPDATE_INTERVAL));
 // Reset stats dashboard
 setInterval(() => {
   Object.keys(networkStats).forEach(service => {
