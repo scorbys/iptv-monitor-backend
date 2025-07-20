@@ -1,86 +1,75 @@
-import { NextResponse } from 'next/server';
+const express = require("express");
+const router = express.Router();
 
-// CORS headers configuration
-const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Credentials': 'true',
+// CORS middleware
+const setCorsHeaders = (req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://iptv-monitor2.vercel.app");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  next();
 };
 
-export async function POST() {
-  try {
-    console.log("=== NEXTJS LOGOUT REQUEST START ===");
+router.use(setCorsHeaders);
 
-    const response = NextResponse.json({
-      success: true,
-      message: 'Logged out successfully',
-      authenticated: false
-    });
+// Handle preflight OPTIONS requests
+router.options("/", (req, res) => {
+  res.status(200).end();
+});
+
+router.post("/", (req, res) => {
+  try {
+    console.log("=== EXPRESS LOGOUT REQUEST START ===");
 
     // Clear cookie dengan berbagai konfigurasi untuk memastikan terhapus
     const cookieConfigs = [
       {
         httpOnly: true,
         secure: true,
-        sameSite: 'none',
-        maxAge: 0,
-        path: '/'
+        sameSite: "none",
+        path: "/"
       },
       {
         httpOnly: true,
         secure: true,
-        sameSite: 'lax',
-        maxAge: 0,
-        path: '/'
+        sameSite: "lax",
+        path: "/"
       },
       {
         httpOnly: true,
         secure: false,
-        sameSite: 'lax',
-        maxAge: 0,
-        path: '/'
+        sameSite: "lax",
+        path: "/"
       },
       {
-        maxAge: 0,
-        path: '/'
+        path: "/"
       }
     ];
 
     // Clear dengan semua konfigurasi
     cookieConfigs.forEach(config => {
-      response.cookies.set('token', '', config);
+      res.clearCookie("token", config);
     });
 
-    // Set CORS headers
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      response.headers.set(key, value);
+    console.log("✅ Express logout successful - all cookies cleared");
+    console.log("=== EXPRESS LOGOUT REQUEST END ===");
+
+    res.json({
+      success: true,
+      message: "Logged out successfully",
+      authenticated: false
     });
 
-    console.log("✅ NextJS logout successful - all cookies cleared");
-    console.log("=== NEXTJS LOGOUT REQUEST END ===");
-
-    return response;
   } catch (error) {
-    console.error('Logout API error:', error);
-    const response = NextResponse.json(
-      { success: true, message: 'Logged out successfully', authenticated: false },
-      { status: 200 } // Selalu return 200 untuk logout
-    );
-
-    // Set CORS headers for error response
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      response.headers.set(key, value);
+    console.error("Logout API error:", error);
+    
+    // Selalu return success untuk logout
+    res.json({
+      success: true,
+      message: "Logged out successfully",
+      authenticated: false
     });
-
-    return response;
   }
-}
+});
 
-// OPTIONS handler untuk preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: corsHeaders,
-  });
-}
+module.exports = router;

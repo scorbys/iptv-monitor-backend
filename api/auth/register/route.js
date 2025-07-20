@@ -1,143 +1,115 @@
-import { NextResponse } from 'next/server';
-import { SignJWT } from 'jose';
-import { createUser } from '../../../db';
+const express = require("express");
+const router = express.Router();
+const jwt = require("jsonwebtoken");
+const { createUser } = require("../../../db");
 
-const JWT_SECRET = new TextEncoder().encode('process.env.JWT_SECRET');
+const JWT_SECRET = process.env.JWT_SECRET;
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Credentials': 'true',
+// CORS middleware
+const setCorsHeaders = (req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://iptv-monitor2.vercel.app");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  next();
 };
 
-// Gunakan setting cookie yang sama di semua auth routes
+router.use(setCorsHeaders);
+
+// Cookie options configuration
 const cookieOptions = {
   httpOnly: true,
-  secure: true,
-  sameSite: 'none',
-  maxAge: 7 * 24 * 60 * 60,
-  path: '/'
+  secure: process.env.NODE_ENV === "production",
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  path: "/"
 };
 
-export async function POST(request) {
+// Input validation middleware
+const validateRegisterInput = (req, res, next) => {
+  const { username, email, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      error: "All fields are required"
+    });
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid email format"
+    });
+  }
+
+  // Validate password length
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      error: "Password must be at least 6 characters long"
+    });
+  }
+
+  next();
+};
+
+// Handle preflight OPTIONS requests
+router.options("/", (req, res) => {
+  res.status(200).end();
+});
+
+router.post("/", validateRegisterInput, async (req, res) => {
+  const { username, email, password } = req.body;
+
   try {
-    const { username, email, password } = await request.json();
-
-    // Validate input
-    if (!username || !email || !password) {
-      const response = NextResponse.json(
-        { success: false, error: 'All fields are required' },
-        { status: 400 }
-      );
-
-      // Set CORS headers - INI YANG HILANG
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-
-      return response;
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      const response = NextResponse.json(
-        { success: false, error: 'Invalid email format' },
-        { status: 400 }
-      );
-
-      // Set CORS headers
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-
-      return response;
-    }
-
-    // Validate password length
-    if (password.length < 6) {
-      const response = NextResponse.json(
-        { success: false, error: 'Password must be at least 6 characters long' },
-        { status: 400 }
-      );
-
-      // Set CORS headers
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-
-      return response;
-    }
+    console.log("Registration attempt for:", email);
 
     // Create user
     const createResult = await createUser({ username, email, password });
 
     if (!createResult.success) {
-      const response = NextResponse.json(
-        { success: false, error: createResult.error },
-        { status: 400 }
-      );
-
-      // Set CORS headers
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
+      return res.status(400).json({
+        success: false,
+        error: createResult.error
       });
-
-      return response;
     }
 
     // Create JWT token
-    const token = await new SignJWT({
+    const tokenPayload = {
       userId: createResult.userId.toString(),
       username: username,
-      email: email
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime('7d')
-      .sign(JWT_SECRET);
+      email: email,
+      iat: Math.floor(Date.now() / 1000)
+    };
 
-    // Create response
-    const response = NextResponse.json({
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+
+    console.log("Registration successful for:", username);
+
+    // Set cookie
+    res.cookie("token", token, cookieOptions);
+
+    // Send response
+    res.json({
       success: true,
       user: {
-        userId: createResult.userId, // PERBAIKI: tambahkan userId
+        userId: createResult.userId,
         username: username,
         email: email
       },
-      message: 'Registration successful'
+      message: "Registration successful"
     });
 
-    // Set HTTP-only cookie
-    response.cookies.set('token', token, cookieOptions);
-
-    // Set CORS headers
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-
-    return response;
   } catch (error) {
-    console.error('Registration API error:', error);
-    // handle error with CORS headers
-    const errorResponse = NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
-
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      errorResponse.headers.set(key, value);
+    console.error("Registration API error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error"
     });
-
-    return errorResponse; // PERBAIKI: return errorResponse, bukan undefined
   }
-}
+});
 
-// OPTIONS handler for preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: corsHeaders,
-  });
-}
+module.exports = router;

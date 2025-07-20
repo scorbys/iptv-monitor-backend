@@ -1,147 +1,119 @@
-import { NextResponse } from 'next/server';
-import { SignJWT } from 'jose';
-import { authenticateUser } from '../../../db';
+const express = require("express");
+const router = express.Router();
+const jwt = require("jsonwebtoken");
+const { authenticateUser } = require("../../../db");
 
-const JWT_SECRET = new TextEncoder().encode('process.env.JWT_SECRET');
+const JWT_SECRET = process.env.JWT_SECRET;
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Credentials': 'true',
+// CORS middleware
+const setCorsHeaders = (req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://iptv-monitor2.vercel.app");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  next();
 };
 
-// Gunakan setting cookie yang sama di semua auth routes
+router.use(setCorsHeaders);
+
+// Cookie options configuration
 const cookieOptions = {
   httpOnly: true,
-  secure: true,
-  sameSite: 'none',
-  maxAge: 7 * 24 * 60 * 60,
-  path: '/'
+  secure: process.env.NODE_ENV === "production",
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  path: "/"
 };
 
-export async function POST(request) {
-  // Set timeout untuk seluruh request handler
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 detik
+// Input validation middleware
+const validateLoginInput = (req, res, next) => {
+  const { identifier, password } = req.body;
 
+  if (!identifier || !password) {
+    return res.status(400).json({
+      success: false,
+      error: "Email/username and password are required"
+    });
+  }
+
+  if (identifier.trim().length === 0 || password.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: "Email/username and password cannot be empty"
+    });
+  }
+
+  next();
+};
+
+// Handle preflight OPTIONS requests
+router.options("/", (req, res) => {
+  res.status(200).end();
+});
+
+router.post("/", validateLoginInput, async (req, res) => {
+  const { identifier, password } = req.body;
+  
   try {
-    const { identifier, password } = await request.json();
+    console.log("Login attempt for:", identifier);
 
-    // Validate input
-    if (!identifier || !password) {
-      clearTimeout(timeoutId);
-      const response = NextResponse.json(
-        { success: false, error: 'Email/username and password are required' },
-        { status: 400 }
-      );
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      return response;
-    }
-
-    // Validate input tidak kosong
-    if (identifier.trim().length === 0 || password.trim().length === 0) {
-      clearTimeout(timeoutId);
-      const response = NextResponse.json(
-        { success: false, error: 'Email/username and password cannot be empty' },
-        { status: 400 }
-      );
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
-      });
-      return response;
-    }
-
-    console.log('Login attempt for:', identifier);
-
-    // Authenticate user dengan timeout yang lebih pendek
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Authentication timeout')), 15000) // Kurangi dari 10000 ke 15000
+    // Set timeout for authentication
+    const authPromise = authenticateUser(identifier, password);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Authentication timeout")), 15000)
     );
 
-    const authResult = await Promise.race([
-      authenticateUser(identifier, password),
-      timeoutPromise
-    ]);
-
-    clearTimeout(timeoutId);
+    const authResult = await Promise.race([authPromise, timeoutPromise]);
 
     if (!authResult.success) {
-      console.log('Login failed:', authResult.error);
-      const response = NextResponse.json(
-        { success: false, error: authResult.error },
-        { status: 401 }
-      );
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
+      console.log("Login failed:", authResult.error);
+      return res.status(401).json({
+        success: false,
+        error: authResult.error
       });
-      return response;
     }
 
     // Create JWT token
-    const token = await new SignJWT({
+    const tokenPayload = {
       userId: authResult.user.userId,
       username: authResult.user.username,
-      email: authResult.user.email
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime('7d')
-      .sign(JWT_SECRET);
+      email: authResult.user.email,
+      iat: Math.floor(Date.now() / 1000)
+    };
 
-    console.log('Login successful for:', authResult.user.username);
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
 
-    // Create response
-    const response = NextResponse.json({
+    console.log("Login successful for:", authResult.user.username);
+
+    // Set cookie
+    res.cookie("token", token, cookieOptions);
+
+    // Send response
+    res.json({
       success: true,
       user: authResult.user,
-      message: 'Login successful'
+      message: "Login successful"
     });
 
-    // Set cookie dengan domain yang benar
-    response.cookies.set('token', token, cookieOptions);
-
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-
-    return response;
   } catch (error) {
-    clearTimeout(timeoutId);
-    console.error('Login API error:', error);
+    console.error("Login API error:", error);
 
-    // Handle specific error types
-    let errorMessage = 'Internal server error';
+    let errorMessage = "Internal server error";
     let statusCode = 500;
 
-    if (error.name === 'AbortError') {
-      errorMessage = 'Request timeout';
+    if (error.message === "Authentication timeout") {
+      errorMessage = "Authentication timeout. Please try again.";
       statusCode = 504;
-    } else if (error.message === 'Authentication timeout') {
-      errorMessage = 'Authentication timeout. Please try again.';
-      statusCode = 504;
-    } else if (error.message === 'Database connection failed') {
-      errorMessage = 'Database connection failed. Please try again.';
+    } else if (error.message === "Database connection failed") {
+      errorMessage = "Database connection failed. Please try again.";
       statusCode = 503;
     }
 
-    const response = NextResponse.json(
-      { success: false, error: errorMessage },
-      { status: statusCode }
-    );
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      response.headers.set(key, value);
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage
     });
-    return response;
   }
-}
+});
 
-// OPTIONS handler for preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: corsHeaders,
-  });
-}
+module.exports = router;
