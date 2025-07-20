@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
-const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo  } = require("../../../../db");
+const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo } = require("../../../../db");
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -138,36 +138,22 @@ router.get("/", async (req, res) => {
     if (state) {
       try {
         const decodedState = decodeURIComponent(state);
-        // Validate redirect URL
-        if (decodedState.startsWith(process.env.FRONTEND_URL)) {
+        // Validasi dan gunakan dashboard sebagai default
+        if (decodedState.includes('/login') || decodedState.includes('/register')) {
+          redirectUrl = `${process.env.FRONTEND_URL}/dashboard`;
+        } else if (decodedState.startsWith(process.env.FRONTEND_URL)) {
           redirectUrl = decodedState;
         }
       } catch (e) {
         console.log("Failed to decode state:", e);
+        redirectUrl = `${process.env.FRONTEND_URL}/dashboard`;
       }
     }
 
     console.log("Redirecting to:", redirectUrl);
     console.log("=== GOOGLE CALLBACK END ===");
 
-    res.send(`
-      <script>
-      if (window.opener) {
-        window.opener.postMessage({
-          type: 'GOOGLE_LOGIN_SUCCESS',
-          user: {
-            userId: '${user._id?.toString() || user.userId}',
-            username: '${user.username}',
-            email: '${user.email}'
-          }
-        }, '${process.env.FRONTEND_URL || "http://localhost:3000"}');
-        window.close();
-      } else {
-        window.location.href = '${redirectUrl}';
-      }
-      </script>
-  `);
-    // return res.redirect(redirectUrl);
+    return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Google callback error:", error);
 
