@@ -1,9 +1,8 @@
-// routes/auth/google/callback.js
 const express = require("express");
 const router = express.Router();
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
-const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo } = require("../../../../db");
+const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo  } = require("../../../../db");
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -13,99 +12,14 @@ const client = new OAuth2Client(
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Cookie options configuration
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  maxAge: 24 * 60 * 60 * 1000, // 24 hours
-  path: "/",
-};
-
-// Helper function untuk update user dengan Google info
-const updateUserGoogleInfo = async (email, googleData) => {
-  try {
-    const { connectDB } = require("../../../../db");
-    const { users } = await connectDB();
-
-    await users.updateOne(
-      { email: email.toLowerCase() },
-      {
-        $set: {
-          googleId: googleData.googleId,
-          avatar: googleData.avatar,
-          provider: "google",
-          updatedAt: new Date()
-        }
-      }
-    );
-    return true;
-  } catch (error) {
-    console.error("Failed to update user with Google info:", error);
-    return false;
-  }
-};
-
-// Helper function untuk generate response HTML
-const generateResponseHTML = (user, redirectUrl) => {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Google Login Success</title>
-      <meta charset="utf-8">
-    </head>
-    <body>
-      <script>
-        console.log('Google login callback executed');
-        
-        // Cek apakah window dibuka sebagai popup
-        if (window.opener && !window.opener.closed) {
-          console.log('Sending message to parent window');
-          
-          // Kirim pesan ke parent window
-          window.opener.postMessage({
-            type: 'GOOGLE_LOGIN_SUCCESS',
-            user: {
-              userId: '${user._id?.toString() || user.userId}',
-              username: '${user.username}',
-              email: '${user.email}'
-            },
-            token: true // Menandakan bahwa cookie sudah di-set
-          }, '${process.env.FRONTEND_URL || "http://localhost:3000"}');
-          
-          // Tunggu sebentar sebelum menutup window
-          setTimeout(() => {
-            window.close();
-          }, 1000);
-        } else {
-          console.log('No parent window, redirecting normally');
-          // Jika tidak ada parent window, redirect normal
-          window.location.href = '${redirectUrl}';
-        }
-        
-        // Fallback jika window.close() tidak bekerja
-        setTimeout(() => {
-          if (!window.closed) {
-            window.location.href = '${redirectUrl}';
-          }
-        }, 2000);
-      </script>
-      <div style="text-align: center; margin-top: 50px;">
-        <h3>Login successful! Redirecting...</h3>
-        <p>If you are not redirected automatically, <a href="${redirectUrl}">click here</a></p>
-      </div>
-    </body>
-    </html>
-  `;
-};
-
 router.get("/", async (req, res) => {
   try {
     console.log("=== GOOGLE CALLBACK START ===");
     console.log("Query params:", req.query);
 
-    const { code, state, error } = req.query;
+    const code = req.query.code;
+    const state = req.query.state;
+    const error = req.query.error;
 
     // Handle OAuth errors
     if (error) {
@@ -116,8 +30,7 @@ router.get("/", async (req, res) => {
 
     if (!code) {
       console.log("No authorization code found");
-      const errorUrl = `${process.env.BASE_URL}/login?error=no_code`;
-      return res.redirect(errorUrl);
+      return res.redirect(`${process.env.BASE_URL}/login?error=no_code`);
     }
 
     console.log("Exchanging code for tokens...");
@@ -139,8 +52,7 @@ router.get("/", async (req, res) => {
 
     if (!email || !googleId) {
       console.log("Invalid user data from Google");
-      const errorUrl = `${process.env.BASE_URL}/login?error=invalid_user_data`;
-      return res.redirect(errorUrl);
+      return res.redirect(`${process.env.BASE_URL}/login?error=invalid_user_data`);
     }
 
     // Check if user exists
@@ -153,7 +65,7 @@ router.get("/", async (req, res) => {
       const createResult = await createUser({
         email,
         username: name || email.split("@")[0],
-        password: null, // No password for Google users
+        password: null, // PERBAIKAN: jangan gunakan googleId sebagai password
         googleId,
         avatar: picture || null,
         provider: "google",
@@ -162,34 +74,40 @@ router.get("/", async (req, res) => {
       if (createResult.success) {
         // Get the created user
         user = await getUserByEmailOrUsername(email);
-        console.log("New user created:", user?.username);
+        console.log("New user created:", user.username);
       } else {
         console.error("Failed to create user:", createResult.error);
-        const errorUrl = `${process.env.BASE_URL}/login?error=create_user_failed`;
-        return res.redirect(errorUrl);
+        return res.redirect(`${process.env.BASE_URL}/login?error=create_user_failed`);
       }
     } else {
       console.log("User exists:", user.username);
-      // Update existing user dengan Google info jika belum ada
+      // PERBAIKAN: Update existing user dengan Google info
       if (!user.googleId) {
         console.log("Updating user with Google info...");
-        const updateSuccess = await updateUserGoogleInfo(email, {
+        await updateUserWithGoogleInfo(email, {
           googleId,
           avatar: picture
         });
-
-        if (updateSuccess) {
-          // Refresh user data
-          user = await getUserByEmailOrUsername(email);
+        // Refresh user data
+        user = await getUserByEmailOrUsername(email);
+        // Perlu implementasi updateUser function di db.js
+        try {
+          const { users } = await require("../../../../db").connectDB();
+          await users.updateOne(
+            { email: email.toLowerCase() },
+            {
+              $set: {
+                googleId,
+                avatar: picture || user.avatar,
+                provider: "google",
+                updatedAt: new Date()
+              }
+            }
+          );
+        } catch (updateError) {
+          console.error("Failed to update user with Google info:", updateError);
         }
       }
-    }
-
-    // Validate user object
-    if (!user) {
-      console.error("User object is null after creation/retrieval");
-      const errorUrl = `${process.env.BASE_URL}/login?error=user_not_found`;
-      return res.redirect(errorUrl);
     }
 
     // Generate JWT token
@@ -204,6 +122,14 @@ router.get("/", async (req, res) => {
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
 
     // Set cookie with proper configuration
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      path: "/",
+    };
+
     console.log("Setting auth cookie...");
     res.cookie("token", token, cookieOptions);
 
@@ -212,15 +138,8 @@ router.get("/", async (req, res) => {
     if (state) {
       try {
         const decodedState = decodeURIComponent(state);
-        // Validate redirect URL - harus dari domain yang sama
-        const allowedDomains = [
-          process.env.FRONTEND_URL,
-          process.env.BASE_URL,
-          "http://localhost:3000",
-          "https://localhost:3000"
-        ].filter(Boolean);
-
-        if (allowedDomains.some(domain => decodedState.startsWith(domain))) {
+        // Validate redirect URL
+        if (decodedState.startsWith(process.env.FRONTEND_URL)) {
           redirectUrl = decodedState;
         }
       } catch (e) {
@@ -231,10 +150,24 @@ router.get("/", async (req, res) => {
     console.log("Redirecting to:", redirectUrl);
     console.log("=== GOOGLE CALLBACK END ===");
 
-    // Send HTML response with JavaScript untuk handle popup dan redirect
-    const responseHTML = generateResponseHTML(user, redirectUrl);
-    res.send(responseHTML);
-
+    res.send(`
+      <script>
+      if (window.opener) {
+        window.opener.postMessage({
+          type: 'GOOGLE_LOGIN_SUCCESS',
+          user: {
+            userId: '${user._id?.toString() || user.userId}',
+            username: '${user.username}',
+            email: '${user.email}'
+          }
+        }, '${process.env.FRONTEND_URL || "http://localhost:3000"}');
+        window.close();
+      } else {
+        window.location.href = '${redirectUrl}';
+      }
+      </script>
+  `);
+    // return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Google callback error:", error);
 
@@ -252,12 +185,9 @@ router.get("/", async (req, res) => {
       errorParam = "expired_code";
     } else if (error.message && error.message.includes("timeout")) {
       errorParam = "timeout";
-    } else if (error.message && error.message.includes("invalid_token")) {
-      errorParam = "invalid_token";
     }
 
-    const errorUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/login?error=${errorParam}`;
-    return res.redirect(errorUrl);
+    return res.redirect(`${process.env.BASE_URL}/login?error=${errorParam}`);
   }
 });
 
