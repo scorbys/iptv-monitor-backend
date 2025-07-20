@@ -354,16 +354,45 @@ app.post("/api/auth/register", async (req, res) => {
 app.post("/api/auth/logout", (req, res) => {
   try {
     console.log("=== LOGOUT REQUEST START ===");
+    console.log("Current cookies:", req.cookies);
     
-    // PERBAIKAN: pastikan cookie dihapus dengan konfigurasi yang sama
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/",
+    // Clear cookie dengan berbagai konfigurasi untuk memastikan terhapus
+    const cookieConfigs = [
+      {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        path: "/",
+      },
+      {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        path: "/",
+      },
+      {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax", 
+        path: "/",
+      },
+      {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        path: "/",
+      },
+      {
+        path: "/", // Basic clear
+      }
+    ];
+
+    // Clear dengan semua konfigurasi possible
+    cookieConfigs.forEach(config => {
+      res.clearCookie("token", config);
     });
 
-    console.log("✅ User logged out successfully");
+    console.log("✅ All cookie configurations cleared");
     console.log("=== LOGOUT REQUEST END ===");
 
     res.json({
@@ -373,9 +402,11 @@ app.post("/api/auth/logout", (req, res) => {
     });
   } catch (error) {
     console.error("💥 Logout error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Error during logout",
+    // Tetap return success karena logout harus selalu berhasil
+    res.json({
+      success: true,
+      message: "Logged out successfully",
+      authenticated: false
     });
   }
 });

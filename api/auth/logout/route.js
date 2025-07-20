@@ -8,26 +8,48 @@ const corsHeaders = {
   'Access-Control-Allow-Credentials': 'true',
 };
 
-// Gunakan setting cookie yang sama di semua auth routes
-const cookieOptions = {
-  httpOnly: true,
-  secure: true,
-  sameSite: 'none',
-  maxAge: 7 * 24 * 60 * 60,
-  path: '/'
-};
-
 export async function POST() {
   try {
+    console.log("=== NEXTJS LOGOUT REQUEST START ===");
+
     const response = NextResponse.json({
       success: true,
-      message: 'Logged out successfully'
+      message: 'Logged out successfully',
+      authenticated: false
     });
 
-    // Clear the authentication cookie
-    response.cookies.set('token', '', {
-      ...cookieOptions,
-      maxAge: 0 // untuk menghapus
+    // Clear cookie dengan berbagai konfigurasi untuk memastikan terhapus
+    const cookieConfigs = [
+      {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        maxAge: 0,
+        path: '/'
+      },
+      {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 0,
+        path: '/'
+      },
+      {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'lax',
+        maxAge: 0,
+        path: '/'
+      },
+      {
+        maxAge: 0,
+        path: '/'
+      }
+    ];
+
+    // Clear dengan semua konfigurasi
+    cookieConfigs.forEach(config => {
+      response.cookies.set('token', '', config);
     });
 
     // Set CORS headers
@@ -35,12 +57,15 @@ export async function POST() {
       response.headers.set(key, value);
     });
 
+    console.log("✅ NextJS logout successful - all cookies cleared");
+    console.log("=== NEXTJS LOGOUT REQUEST END ===");
+
     return response;
   } catch (error) {
     console.error('Logout API error:', error);
     const response = NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
+      { success: true, message: 'Logged out successfully', authenticated: false },
+      { status: 200 } // Selalu return 200 untuk logout
     );
 
     // Set CORS headers for error response
