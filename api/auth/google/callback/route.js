@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
-const { createUser, getUserByEmailOrUsername, updateUserGoogleInfo } = require("../../../../db");
+const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo } = require("../../../../db");
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
