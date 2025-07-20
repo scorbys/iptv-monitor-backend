@@ -208,7 +208,7 @@ router.get("/", async (req, res) => {
     res.cookie("token", token, cookieOptions);
 
     // Determine redirect URL
-    let redirectUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/dashboard`;
+    let redirectUrl = `${process.env.FRONTEND_URL}/dashboard`;
     if (state) {
       try {
         const decodedState = decodeURIComponent(state);
