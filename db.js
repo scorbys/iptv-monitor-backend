@@ -240,6 +240,27 @@ async function comparePassword(password, hashedPassword) {
   }
 }
 
+async function updateUserWithGoogleInfo(email, googleData) {
+  try {
+    const { users } = await connectDB();
+    const result = await users.updateOne(
+      { email: email.toLowerCase() },
+      {
+        $set: {
+          googleId: googleData.googleId,
+          avatar: googleData.avatar,
+          provider: 'google',
+          updatedAt: new Date()
+        }
+      }
+    );
+    return result;
+  } catch (error) {
+    console.error('Error updating user with Google info:', error);
+    return null;
+  }
+}
+
 // ==================== USER CRUD FUNCTIONS ====================
 
 async function getUserByEmailOrUsername(identifier) {
@@ -457,12 +478,19 @@ async function performAuthentication(identifier, password) {
   };
 }
 
-async function createUser({ username, email, password }) {
+async function createUser({ username, email, password, googleId, avatar, provider }) {
   try {
-    console.log('Starting user creation process:', { username, email });
+    console.log('🔍 Creating user for provider:', provider || 'local');
 
-    // Add timeout wrapper
-    const createPromise = performUserCreation({ username, email, password });
+    const createPromise = performUserCreation({
+      username,
+      email,
+      password,
+      googleId,
+      avatar,
+      provider
+    });
+
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('User creation timeout')), 10000);
     });
@@ -471,21 +499,6 @@ async function createUser({ username, email, password }) {
     return result;
   } catch (error) {
     console.error('User creation error:', error);
-
-    if (error.message === 'User creation timeout') {
-      return {
-        success: false,
-        error: 'User creation request timed out. Please try again.'
-      };
-    }
-
-    if (error.message === 'Database connection failed') {
-      return {
-        success: false,
-        error: 'Database connection failed. Please try again later.'
-      };
-    }
-
     return {
       success: false,
       error: error.message || 'Failed to create user'
@@ -493,46 +506,45 @@ async function createUser({ username, email, password }) {
   }
 }
 
-async function performUserCreation({ username, email, password }) {
-  // Normalize inputs
+async function performUserCreation({ username, email, password, googleId, avatar, provider }) {
   const normalizedEmail = email.toLowerCase().trim();
   const trimmedUsername = username.trim();
 
-  // Check if user already exists by email
-  console.log('Checking if email exists:', normalizedEmail);
+  // Check existing user
   const existingUserByEmail = await getUserByEmailOrUsername(normalizedEmail);
   if (existingUserByEmail) {
-    console.log('Email already exists');
     return {
       success: false,
       error: 'An account with this email already exists'
     };
   }
 
-  // Check if username exists
-  console.log('Checking if username exists:', trimmedUsername);
-  const existingUserByUsername = await getUserByEmailOrUsername(trimmedUsername);
-  if (existingUserByUsername) {
-    console.log('Username already exists');
-    return {
-      success: false,
-      error: 'This username is already taken'
-    };
+  // PERBAIKAN: Hash password hanya jika ada password
+  let hashedPassword = null;
+  if (password) {
+    hashedPassword = await hashPassword(password);
   }
 
-  // Hash password
-  console.log('Hashing password...');
-  const hashedPassword = await hashPassword(password);
-
-  // Create user
-  console.log('Inserting user into database...');
-  const userId = await insertUser({
+  // Create user document
+  const userDoc = {
     username: trimmedUsername,
     email: normalizedEmail,
-    password: hashedPassword
-  });
+    password: hashedPassword,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
 
-  console.log('User created successfully:', { userId, username: trimmedUsername });
+  // PERBAIKAN: Tambahkan fields Google OAuth jika ada
+  if (googleId) {
+    userDoc.googleId = googleId;
+    userDoc.provider = provider || 'google';
+  }
+  if (avatar) {
+    userDoc.avatar = avatar;
+  }
+
+  const userId = await insertUser(userDoc);
   return {
     success: true,
     userId: userId.toString()
@@ -852,5 +864,6 @@ module.exports = {
   createUser,
   authenticateUser,
   hashPassword,
-  comparePassword
+  comparePassword,
+  updateUserWithGoogleInfo
 };

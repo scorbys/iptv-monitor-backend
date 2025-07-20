@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode('Pec@tu2024++');
+const JWT_SECRET = new TextEncoder().encode('process.env.JWT_SECRET');
 
 const protectedPaths = ['/channel', '/chromecast', '/hospitality', '/dashboard'];
 const authPaths = ['/login', '/register'];

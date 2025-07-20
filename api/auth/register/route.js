@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { SignJWT } from 'jose';
 import { createUser } from '../../../db';
 
-const JWT_SECRET = new TextEncoder().encode('Pec@tu2024++');
+const JWT_SECRET = new TextEncoder().encode('process.env.JWT_SECRET');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://iptv-monitor2.vercel.app',

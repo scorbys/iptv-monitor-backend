@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
-const { createUser, getUserByEmailOrUsername } = require("../../../../db");
+const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo  } = require("../../../../db");
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -65,7 +65,7 @@ router.get("/", async (req, res) => {
       const createResult = await createUser({
         email,
         username: name || email.split("@")[0],
-        password: googleId, // Use googleId as password for Google users
+        password: null, // PERBAIKAN: jangan gunakan googleId sebagai password
         googleId,
         avatar: picture || null,
         provider: "google",
@@ -81,10 +81,32 @@ router.get("/", async (req, res) => {
       }
     } else {
       console.log("User exists:", user.username);
-      // Optionally update user with Google info if not set
+      // PERBAIKAN: Update existing user dengan Google info
       if (!user.googleId) {
         console.log("Updating user with Google info...");
-        // Update user in database if needed - implement updateUser function in db.js if required
+        await updateUserWithGoogleInfo(email, {
+          googleId,
+          avatar: picture
+        });
+        // Refresh user data
+        user = await getUserByEmailOrUsername(email);
+        // Perlu implementasi updateUser function di db.js
+        try {
+          const { users } = await require("../../../../db").connectDB();
+          await users.updateOne(
+            { email: email.toLowerCase() },
+            {
+              $set: {
+                googleId,
+                avatar: picture || user.avatar,
+                provider: "google",
+                updatedAt: new Date()
+              }
+            }
+          );
+        } catch (updateError) {
+          console.error("Failed to update user with Google info:", updateError);
+        }
       }
     }
 
@@ -128,7 +150,24 @@ router.get("/", async (req, res) => {
     console.log("Redirecting to:", redirectUrl);
     console.log("=== GOOGLE CALLBACK END ===");
 
-    return res.redirect(redirectUrl);
+    res.send(`
+      <script>
+      if (window.opener) {
+        window.opener.postMessage({
+          type: 'GOOGLE_LOGIN_SUCCESS',
+          user: {
+            userId: '${user._id?.toString() || user.userId}',
+            username: '${user.username}',
+            email: '${user.email}'
+          }
+        }, '${process.env.FRONTEND_URL || "http://localhost:3000"}');
+        window.close();
+      } else {
+        window.location.href = '${redirectUrl}';
+      }
+      </script>
+  `);
+    // return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Google callback error:", error);
 
