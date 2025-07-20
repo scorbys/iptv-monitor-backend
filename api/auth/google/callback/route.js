@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
-const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo } = require("../../../../db");
+const { createUser, getUserByEmailOrUsername, updateUserGoogleInfo } = require("../../../../db");
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -25,7 +25,7 @@ const cookieOptions = {
 // Helper function untuk update user dengan Google info
 const updateUserGoogleInfo = async (email, googleData) => {
   try {
-    const { connectDB } = require("../../../db");
+    const { connectDB } = require("../../../../db");
     const { users } = await connectDB();
 
     await users.updateOne(
@@ -110,13 +110,13 @@ router.get("/", async (req, res) => {
     // Handle OAuth errors
     if (error) {
       console.log("OAuth error:", error);
-      const errorUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/login?error=${error}`;
+      const errorUrl = `${process.env.BASE_URL}/login?error=${error}`;
       return res.redirect(errorUrl);
     }
 
     if (!code) {
       console.log("No authorization code found");
-      const errorUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/login?error=no_code`;
+      const errorUrl = `${process.env.BASE_URL}/login?error=no_code`;
       return res.redirect(errorUrl);
     }
 
@@ -139,7 +139,7 @@ router.get("/", async (req, res) => {
 
     if (!email || !googleId) {
       console.log("Invalid user data from Google");
-      const errorUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/login?error=invalid_user_data`;
+      const errorUrl = `${process.env.BASE_URL}/login?error=invalid_user_data`;
       return res.redirect(errorUrl);
     }
 
@@ -165,7 +165,7 @@ router.get("/", async (req, res) => {
         console.log("New user created:", user?.username);
       } else {
         console.error("Failed to create user:", createResult.error);
-        const errorUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/login?error=create_user_failed`;
+        const errorUrl = `${process.env.BASE_URL}/login?error=create_user_failed`;
         return res.redirect(errorUrl);
       }
     } else {
@@ -188,7 +188,7 @@ router.get("/", async (req, res) => {
     // Validate user object
     if (!user) {
       console.error("User object is null after creation/retrieval");
-      const errorUrl = `${process.env.FRONTEND_URL || process.env.BASE_URL}/login?error=user_not_found`;
+      const errorUrl = `${process.env.BASE_URL}/login?error=user_not_found`;
       return res.redirect(errorUrl);
     }
 
