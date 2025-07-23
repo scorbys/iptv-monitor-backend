@@ -11,29 +11,42 @@ const client = new OAuth2Client(
 // GET /api/auth/google → Redirect ke Google OAuth
 router.get("/", (req, res) => {
   try {
+    console.log("=== GOOGLE AUTH START ===");
+    console.log("Base URL:", process.env.BASE_URL);
+    console.log("Frontend URL:", process.env.FRONTEND_URL);
+    
     const redirectTo = req.query.redirect || "/dashboard";
+    const state = req.query.state;
 
     // Validate env
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      console.error("Google OAuth credentials not configured");
       return res.status(500).json({
         success: false,
         error: "Google OAuth not configured",
       });
     }
 
+    const baseUrl = process.env.BASE_URL || process.env.VERCEL_URL || 'http://localhost:3000';
+    const finalState = state || `${process.env.FRONTEND_URL}${redirectTo}`;
+
+    console.log("Generating auth URL with state:", finalState);
+
     const url = client.generateAuthUrl({
       access_type: "offline",
       scope: ["profile", "email"],
-      state: encodeURIComponent(`${process.env.BASE_URL}${redirectTo}`),
+      state: encodeURIComponent(finalState),
       prompt: "select_account",
+      include_granted_scopes: true,
     });
 
+    console.log("Generated auth URL:", url);
     return res.redirect(url);
   } catch (error) {
     console.error("Google auth error:", error);
     return res.status(500).json({
       success: false,
-      error: "Failed to generate auth URL",
+      error: "Failed to generate auth URL: " + error.message,
     });
   }
 });
