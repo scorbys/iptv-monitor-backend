@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode('process.env.JWT_SECRET');
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 
 const protectedPaths = ['/channel', '/chromecast', '/hospitality', '/dashboard'];
 const authPaths = ['/login', '/register'];
@@ -38,11 +38,14 @@ export async function middleware(request) {
       );
 
       await Promise.race([verifyPromise, timeoutPromise]);
-      return NextResponse.next();
+      const response = NextResponse.next();
+      response.headers.set('Vary', 'Cookie');
+      return response;
     } catch (error) {
       console.error('Token verification failed:', error);
       const response = NextResponse.redirect(new URL('/login', request.url));
       response.cookies.delete('token');
+      response.headers.set('Vary', 'Cookie');
       return response;
     }
   }
@@ -62,10 +65,14 @@ export async function middleware(request) {
         // Cek apakah ada redirect parameter
         const redirectUrl = request.nextUrl.searchParams.get('redirect');
         if (redirectUrl && protectedPaths.some(path => redirectUrl.startsWith(path))) {
-          return NextResponse.redirect(new URL(redirectUrl, request.url));
+          const response = NextResponse.redirect(new URL(redirectUrl, request.url));
+          response.headers.set('Vary', 'Cookie');
+          return response;
         }
 
-        return NextResponse.redirect(new URL('/dashboard', request.url));
+        const response = NextResponse.redirect(new URL('/dashboard', request.url));
+        response.headers.set('Vary', 'Cookie');
+        return response;
       } catch (error) {
         console.error('Token invalid for auth page:', error);
         const response = NextResponse.next();
