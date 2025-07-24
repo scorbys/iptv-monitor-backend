@@ -22,9 +22,43 @@ router.options("/", (req, res) => {
 
 router.get("/", (req, res) => {
   try {
-    // PERBAIKAN: Enhanced token extraction
-    let token = req.cookies.token || req.cookies['auth-token'] || req.cookies.jwt;
-    
+    // Enhanced token extraction dengan mobile detection
+    const userAgent = req.headers['user-agent'] || '';
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+
+    console.log('=== VERIFY TOKEN DEBUG ===');
+    console.log('User Agent:', userAgent);
+    console.log('Is Mobile:', isMobile);
+    console.log('Raw cookie header:', req.headers.cookie);
+    console.log('Parsed cookies:', JSON.stringify(req.cookies, null, 2));
+    console.log('Authorization header:', req.headers.authorization);
+
+    let token = req.cookies.token ||
+      req.cookies['auth-token'] ||
+      req.cookies.jwt ||
+      req.cookies.authToken; // Tambahan untuk mobile
+
+    // Manual cookie parsing sebagai fallback
+    if (!token && req.headers.cookie) {
+      const cookieString = req.headers.cookie;
+      const cookies = cookieString.split(';').reduce((acc, cookie) => {
+        const [key, value] = cookie.trim().split('=');
+        if (key && value) {
+          acc[key] = decodeURIComponent(value);
+        }
+        return acc;
+      }, {});
+
+      token = cookies.token ||
+        cookies['auth-token'] ||
+        cookies.jwt ||
+        cookies.authToken;
+
+      if (token) {
+        console.log('Token found via manual cookie parsing');
+      }
+    }
+
     // Fallback dari Authorization header
     if (!token) {
       const authHeader = req.headers.authorization;
@@ -34,63 +68,100 @@ router.get("/", (req, res) => {
       }
     }
 
-    console.log('Verify route - Token present:', !!token);
-    console.log('Verify route - Cookies available:', Object.keys(req.cookies || {}));
+    console.log('Token extraction result:', {
+      tokenFound: !!token,
+      tokenLength: token ? token.length : 0,
+      tokenPreview: token ? token.substring(0, 30) + '...' : 'none',
+      isMobile: isMobile
+    });
 
     if (!token) {
+      console.log('=== NO TOKEN FOUND ===');
       return res.status(401).json({
         success: false,
         error: "No token provided",
         debug: {
           cookies: Object.keys(req.cookies || {}),
-          userAgent: req.headers['user-agent']
+          rawCookieHeader: req.headers.cookie,
+          userAgent: userAgent,
+          isMobile: isMobile,
+          authHeader: !!req.headers.authorization,
+          // More detailed debugging info
+          cookieParsingResult: req.headers.cookie ? 'attempted' : 'no_cookie_header'
         }
       });
     }
 
-    // Verify the token
-    const decoded = jwt.verify(token, JWT_SECRET);
-    
+    // Verify the token dengan enhanced error handling
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+      console.log('Token verification successful');
+    } catch (jwtError) {
+      console.error('JWT Verification Error:', {
+        name: jwtError.name,
+        message: jwtError.message,
+        expiredAt: jwtError.expiredAt
+      });
+
+      // Clear semua possible cookie names
+      const cookieNames = ['token', 'auth-token', 'jwt', 'authToken'];
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        path: "/",
+      };
+
+      cookieNames.forEach(name => {
+        res.clearCookie(name, cookieOptions);
+      });
+
+      return res.status(401).json({
+        success: false,
+        error: "Token verification failed",
+        debug: {
+          errorType: jwtError.name,
+          errorMessage: jwtError.message,
+          isMobile: isMobile
+        }
+      });
+    }
+
     console.log('Token decoded successfully:', {
       userId: decoded.userId,
       username: decoded.username,
-      email: decoded.email
+      email: decoded.email,
+      iat: decoded.iat,
+      exp: decoded.exp
     });
-    
-    // PERBAIKAN: Consistent user data format
-    res.json({
+
+    // Consistent user data format
+    const responseData = {
       success: true,
       user: {
-        userId: decoded.userId, // Pastikan menggunakan userId konsisten
-        id: decoded.userId,     // Tambahan untuk compatibility
+        userId: decoded.userId,
+        id: decoded.userId,
         username: decoded.username,
         email: decoded.email
       }
-    });
-    
-  } catch (error) {
-    console.error("Token verification error:", error);
-    console.error("Token verification error type:", error.name);
-    console.error("Token verification error message:", error.message);
-    
-    // Clear invalid token dengan multiple cookie names
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/",
     };
-    
-    res.clearCookie("token", cookieOptions);
-    res.clearCookie("auth-token", cookieOptions);
-    res.clearCookie("jwt", cookieOptions);
-    
-    res.status(401).json({
+
+    console.log('Sending response:', responseData);
+    console.log('=== VERIFY TOKEN SUCCESS ===');
+
+    res.json(responseData);
+
+  } catch (error) {
+    console.error("=== VERIFY TOKEN ERROR ===");
+    console.error("Unexpected error:", error);
+
+    res.status(500).json({
       success: false,
-      error: "Invalid token",
+      error: "Internal server error",
       debug: {
-        errorType: error.name,
-        errorMessage: error.message
+        errorMessage: error.message,
+        isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(req.headers['user-agent'] || '')
       }
     });
   }

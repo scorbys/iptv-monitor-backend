@@ -113,20 +113,39 @@ router.get("/", async (req, res) => {
 
     // Generate JWT token
     console.log("Generating JWT token...");
+    const userId = user._id?.toString() ||
+      user.userId?.toString() ||
+      user.id?.toString();
+
+    console.log("Debug user object:", {
+      _id: user._id,
+      userId: user.userId,
+      id: user.id,
+      finalUserId: userId
+    });
+
+    if (!userId) {
+      console.error("No valid user ID found in user object:", user);
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_user_id`);
+    }
+
     const tokenPayload = {
-      userId: user._id?.toString() || user.userId?.toString() || user.id?.toString(),
+      userId: userId,
       username: user.username,
       email: user.email,
       iat: Math.floor(Date.now() / 1000)
     };
+    console.log("Final token payload:", tokenPayload);
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
-    console.log("JWT token generated successfully");
-    console.log("Token payload userId:", tokenPayload.userId); // Debug log
+    console.log("JWT token generated successfully for user:", userId);
+
+    // console.log("JWT token generated successfully");
+    // console.log("Token payload userId:", tokenPayload.userId); // Debug log
 
     // PERBAIKAN UTAMA: Simplified cookie configuration untuk mobile compatibility
     const isProduction = process.env.NODE_ENV === "production";
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(req.headers['user-agent'] || '');
-    
+
     // Mobile-friendly cookie configuration
     const cookieOptions = {
       httpOnly: true,
@@ -134,17 +153,15 @@ router.get("/", async (req, res) => {
       sameSite: isProduction ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: "/",
-      // TAMBAHAN: Domain setting untuk mobile compatibility
-      ...(isProduction && { domain: ".vercel.app" })
     };
 
     console.log("Setting auth cookie with options:", cookieOptions);
     console.log("Is mobile device:", isMobile);
-    
+
     // Set cookie hanya sekali dengan konfigurasi yang paling kompatibel
     res.cookie("token", token, cookieOptions);
 
-    // TAMBAHAN: Fallback cookie untuk mobile
+    // Fallback cookie untuk mobile
     if (isMobile) {
       res.cookie("auth-token", token, {
         ...cookieOptions,
@@ -153,8 +170,8 @@ router.get("/", async (req, res) => {
     }
 
     // Redirect URL
-    const redirectUrl = state ? 
-      decodeURIComponent(state) : 
+    const redirectUrl = state ?
+      decodeURIComponent(state) :
       `${process.env.FRONTEND_URL}/dashboard`;
 
     const finalRedirectUrl = new URL(redirectUrl);
@@ -172,65 +189,66 @@ router.get("/", async (req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script>
             console.log('Google OAuth callback processing...');
-            console.log('User agent:', navigator.userAgent);
             
-            // Detect mobile browser
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-            console.log('Is mobile:', isMobile, 'Is iOS:', isIOS);
+            console.log('Is mobile device:', isMobile);
             
-            // Mobile-optimized cookie setting
-            if (isMobile) {
-                // For mobile, use simpler cookie configuration
-                const cookieValue = 'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; ${isProduction ? 'secure; samesite=none' : 'samesite=lax'}';
-                document.cookie = cookieValue;
-                console.log('Mobile cookie set:', cookieValue.substring(0, 50) + '...');
-            } else {
-                // Desktop cookie setting
-                const cookieConfigs = [
-                    'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; ${isProduction ? 'secure; samesite=none' : 'samesite=lax'}',
-                    'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax'
-                ];
+            // Enhanced cookie setting untuk mobile
+            const token = '${token}';
+            const isProduction = window.location.protocol === 'https:';
+            
+            // Set cookie dengan multiple methods untuk compatibility
+            const setCookies = () => {
+                // Method 1: Standard cookie setting
+                const cookieString = \`token=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`;
+                document.cookie = cookieString;
                 
-                cookieConfigs.forEach(config => {
-                    document.cookie = config;
+                // Method 2: Backup cookie untuk mobile
+                const backupCookieString = \`auth-token=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`;
+                document.cookie = backupCookieString;
+                
+                console.log('Cookies set:', {
+                    standard: cookieString.substring(0, 50) + '...',
+                    backup: backupCookieString.substring(0, 50) + '...'
                 });
+            };
+            
+            // Set cookies immediately
+            setCookies();
+            
+            // Store token in localStorage as additional backup for mobile
+            try {
+                localStorage.setItem('authToken', token);
+                localStorage.setItem('token', token);
+                console.log('Token stored in localStorage as backup');
+            } catch (e) {
+                console.warn('Could not store token in localStorage:', e);
             }
             
-            // Verify cookie was set
+            // Verify cookies were set
             setTimeout(() => {
-                const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-                    const [key, value] = cookie.trim().split('=');
-                    if (key) acc[key] = value;
-                    return acc;
-                }, {});
+                const allCookies = document.cookie;
+                console.log('All cookies after setting:', allCookies);
+                console.log('Token cookie present:', document.cookie.includes('token='));
+                console.log('Auth-token cookie present:', document.cookie.includes('auth-token='));
                 
-                console.log('Cookies after setting:', Object.keys(cookies));
-                console.log('Token cookie present:', !!cookies.token);
-                
-                // Store token in localStorage as backup for mobile
-                if (isMobile) {
-                    try {
-                        localStorage.setItem('authToken', '${token}');
-                        console.log('Token stored in localStorage for mobile backup');
-                    } catch (e) {
-                        console.warn('Could not store token in localStorage:', e);
-                    }
-                }
-                
-                // Mobile-optimized redirect
-                const redirectDelay = isMobile ? 1500 : 500;
+                // Enhanced redirect for mobile
+                const redirectDelay = isMobile ? 2000 : 1000; // Longer delay for mobile
                 
                 setTimeout(() => {
                     console.log('Redirecting to:', '${finalRedirectUrl.toString()}');
-                    if (isMobile && window.location.replace) {
-                        // Use replace for mobile to avoid back button issues
-                        window.location.replace('${finalRedirectUrl.toString()}');
+                    
+                    // Force refresh untuk ensure cookie is recognized
+                    if (isMobile) {
+                        // For mobile, use location.replace with cache busting
+                        const redirectUrl = new URL('${finalRedirectUrl.toString()}');
+                        redirectUrl.searchParams.set('_refresh', Date.now().toString());
+                        window.location.replace(redirectUrl.toString());
                     } else {
                         window.location.href = '${finalRedirectUrl.toString()}';
                     }
                 }, redirectDelay);
-            }, 100);
+            }, 500);
         </script>
     </head>
     <body>
@@ -330,11 +348,11 @@ router.get("/", async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    
+
     // Mobile-specific headers
     res.setHeader('X-UA-Compatible', 'IE=edge');
     res.setHeader('Vary', 'User-Agent');
-    
+
     res.send(htmlResponse);
 
     console.log("=== GOOGLE CALLBACK END ===");
