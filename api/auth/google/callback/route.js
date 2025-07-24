@@ -114,17 +114,18 @@ router.get("/", async (req, res) => {
     // Generate JWT token
     console.log("Generating JWT token...");
     const tokenPayload = {
-      userId: user._id?.toString() || user.userId,
+      userId: user._id?.toString() || user.userId?.toString() || user.id?.toString(),
       username: user.username,
       email: user.email,
       iat: Math.floor(Date.now() / 1000)
     };
-
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
     console.log("JWT token generated successfully");
+    console.log("Token payload userId:", tokenPayload.userId); // Debug log
 
     // PERBAIKAN UTAMA: Simplified cookie configuration untuk mobile compatibility
     const isProduction = process.env.NODE_ENV === "production";
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(req.headers['user-agent'] || '');
     
     // Mobile-friendly cookie configuration
     const cookieOptions = {
@@ -133,12 +134,23 @@ router.get("/", async (req, res) => {
       sameSite: isProduction ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: "/",
+      // TAMBAHAN: Domain setting untuk mobile compatibility
+      ...(isProduction && { domain: ".vercel.app" })
     };
 
     console.log("Setting auth cookie with options:", cookieOptions);
+    console.log("Is mobile device:", isMobile);
     
     // Set cookie hanya sekali dengan konfigurasi yang paling kompatibel
     res.cookie("token", token, cookieOptions);
+
+    // TAMBAHAN: Fallback cookie untuk mobile
+    if (isMobile) {
+      res.cookie("auth-token", token, {
+        ...cookieOptions,
+        httpOnly: false // Agar bisa diakses JavaScript di mobile
+      });
+    }
 
     // Redirect URL
     const redirectUrl = state ? 
