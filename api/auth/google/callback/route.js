@@ -16,7 +16,6 @@ router.get("/", async (req, res) => {
   try {
     console.log("=== GOOGLE CALLBACK START ===");
     console.log("Query params:", req.query);
-    console.log("User-Agent:", req.headers['user-agent']);
 
     const code = req.query.code;
     const state = req.query.state;
@@ -114,227 +113,147 @@ router.get("/", async (req, res) => {
     // Generate JWT token
     console.log("Generating JWT token...");
     const tokenPayload = {
-      userId: user._id?.toString() || user.userId?.toString() || user.id?.toString(),
+      userId: user._id?.toString() || user.userId,
       username: user.username,
       email: user.email,
       iat: Math.floor(Date.now() / 1000)
     };
+
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
     console.log("JWT token generated successfully");
-    console.log("Token payload userId:", tokenPayload.userId); // Debug log
 
-    // PERBAIKAN UTAMA: Simplified cookie configuration untuk mobile compatibility
+    // PERBAIKAN UTAMA: Cookie configuration yang lebih robust
     const isProduction = process.env.NODE_ENV === "production";
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(req.headers['user-agent'] || '');
     
-    // Mobile-friendly cookie configuration
-    const cookieOptions = {
+    // Cookie options untuk production
+    const productionCookieOptions = {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "none" : "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: "/",
-      // TAMBAHAN: Domain setting untuk mobile compatibility
-      ...(isProduction && { domain: ".vercel.app" })
+      // Domain tidak di-set agar cookie bisa cross-origin
     };
 
-    console.log("Setting auth cookie with options:", cookieOptions);
-    console.log("Is mobile device:", isMobile);
-    
-    // Set cookie hanya sekali dengan konfigurasi yang paling kompatibel
-    res.cookie("token", token, cookieOptions);
+    // Cookie options untuk development
+    const developmentCookieOptions = {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: "/"
+    };
 
-    // TAMBAHAN: Fallback cookie untuk mobile
-    if (isMobile) {
-      res.cookie("auth-token", token, {
-        ...cookieOptions,
-        httpOnly: false // Agar bisa diakses JavaScript di mobile
+    const cookieOptions = isProduction ? productionCookieOptions : developmentCookieOptions;
+
+    console.log("Setting auth cookie with options:", cookieOptions);
+    
+    // Set cookie dengan multiple attempts untuk memastikan berhasil
+    res.cookie("token", token, cookieOptions);
+    
+    // Untuk production, set additional cookie variants
+    if (isProduction) {
+      // Set dengan domain explicit untuk vercel
+      res.cookie("token", token, {
+        ...productionCookieOptions,
+        domain: ".vercel.app"
+      });
+      
+      // Set tanpa domain constraint
+      res.cookie("token", token, {
+        ...productionCookieOptions,
+        domain: undefined
       });
     }
 
-    // Redirect URL
+    // Redirect langsung dengan query parameter untuk trigger auth check
     const redirectUrl = state ? 
       decodeURIComponent(state) : 
       `${process.env.FRONTEND_URL}/dashboard`;
 
+    // Tambahkan parameter untuk trigger auth recheck
     const finalRedirectUrl = new URL(redirectUrl);
     finalRedirectUrl.searchParams.set('google_login', 'success');
-    finalRedirectUrl.searchParams.set('_t', Date.now().toString());
+    finalRedirectUrl.searchParams.set('_t', Date.now().toString()); // Cache buster
 
     console.log("Redirecting to:", finalRedirectUrl.toString());
 
-    // MOBILE-OPTIMIZED HTML Response dengan improved cookie handling
+    // SOLUSI ALTERNATIF: Gunakan HTML page dengan JavaScript untuk set cookie dan redirect
     const htmlResponse = `
     <!DOCTYPE html>
     <html>
     <head>
         <title>Authentication Complete</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script>
             console.log('Google OAuth callback processing...');
-            console.log('User agent:', navigator.userAgent);
             
-            // Detect mobile browser
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-            console.log('Is mobile:', isMobile, 'Is iOS:', isIOS);
+            // Multiple cookie setting attempts
+            const cookieConfigs = [
+                'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; ${isProduction ? 'secure; samesite=none' : 'samesite=lax'}',
+                'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax',
+                'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}'
+            ];
             
-            // Mobile-optimized cookie setting
-            if (isMobile) {
-                // For mobile, use simpler cookie configuration
-                const cookieValue = 'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; ${isProduction ? 'secure; samesite=none' : 'samesite=lax'}';
-                document.cookie = cookieValue;
-                console.log('Mobile cookie set:', cookieValue.substring(0, 50) + '...');
-            } else {
-                // Desktop cookie setting
-                const cookieConfigs = [
-                    'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; ${isProduction ? 'secure; samesite=none' : 'samesite=lax'}',
-                    'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax'
-                ];
-                
-                cookieConfigs.forEach(config => {
-                    document.cookie = config;
-                });
-            }
+            cookieConfigs.forEach(config => {
+                document.cookie = config;
+                console.log('Set cookie:', config.substring(0, 50) + '...');
+            });
             
             // Verify cookie was set
-            setTimeout(() => {
-                const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-                    const [key, value] = cookie.trim().split('=');
-                    if (key) acc[key] = value;
-                    return acc;
-                }, {});
-                
-                console.log('Cookies after setting:', Object.keys(cookies));
-                console.log('Token cookie present:', !!cookies.token);
-                
-                // Store token in localStorage as backup for mobile
-                if (isMobile) {
-                    try {
-                        localStorage.setItem('authToken', '${token}');
-                        console.log('Token stored in localStorage for mobile backup');
-                    } catch (e) {
-                        console.warn('Could not store token in localStorage:', e);
-                    }
-                }
-                
-                // Mobile-optimized redirect
-                const redirectDelay = isMobile ? 1500 : 500;
-                
-                setTimeout(() => {
-                    console.log('Redirecting to:', '${finalRedirectUrl.toString()}');
-                    if (isMobile && window.location.replace) {
-                        // Use replace for mobile to avoid back button issues
-                        window.location.replace('${finalRedirectUrl.toString()}');
-                    } else {
-                        window.location.href = '${finalRedirectUrl.toString()}';
-                    }
-                }, redirectDelay);
-            }, 100);
+            const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+                const [key, value] = cookie.trim().split('=');
+                acc[key] = value;
+                return acc;
+            }, {});
+            
+            console.log('Cookies after setting:', Object.keys(cookies));
+            console.log('Token cookie present:', !!cookies.token);
+            
+            // Store token in localStorage as backup
+            try {
+                localStorage.setItem('authToken', '${token}');
+                console.log('Token stored in localStorage as backup');
+            } catch (e) {
+                console.warn('Could not store token in localStorage:', e);
+            }
+            
+            // Redirect with delay to ensure cookie is set
+            setTimeout(function() {
+                console.log('Redirecting to:', '${finalRedirectUrl.toString()}');
+                window.location.href = '${finalRedirectUrl.toString()}';
+            }, 500);
         </script>
     </head>
     <body>
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; text-align: center; padding: 20px; max-width: 400px; margin: 0 auto;">
-            <div style="background: #f8f9fa; border-radius: 12px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                <h2 style="color: #2c3e50; margin-bottom: 15px; font-size: 24px;">Authentication Successful ✓</h2>
-                <p style="color: #7f8c8d; margin-bottom: 25px; font-size: 16px;">Please wait while we redirect you...</p>
-                <div style="margin: 20px 0;">
-                    <div class="spinner"></div>
-                </div>
-                <p style="color: #95a5a6; font-size: 14px; margin-top: 20px;">If you're not redirected automatically, <a href="${finalRedirectUrl.toString()}" style="color: #3498db; text-decoration: none;">click here</a></p>
+        <div style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h2>Authentication Successful</h2>
+            <p>Please wait while we redirect you...</p>
+            <div style="margin-top: 20px;">
+                <div style="display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite;"></div>
             </div>
         </div>
-        
         <style>
-            .spinner {
-                display: inline-block;
-                width: 40px;
-                height: 40px;
-                border: 4px solid #ecf0f1;
-                border-top: 4px solid #3498db;
-                border-radius: 50%;
-                animation: spin 1s linear infinite;
-            }
-            
             @keyframes spin {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
             }
-            
-            body {
-                margin: 0;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            
-            @media (max-width: 480px) {
-                body { padding: 10px; }
-                .spinner { width: 30px; height: 30px; }
-                h2 { font-size: 20px !important; }
-                p { font-size: 14px !important; }
-            }
         </style>
-        
         <script>
-            // Enhanced fallback for mobile browsers
-            let redirectAttempted = false;
-            
-            const performRedirect = () => {
-                if (redirectAttempted) return;
-                redirectAttempted = true;
-                
-                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                
-                if (isMobile) {
-                    // For mobile, try multiple redirect methods
-                    try {
-                        if (window.location.replace) {
-                            window.location.replace('${finalRedirectUrl.toString()}');
-                        } else {
-                            window.location.href = '${finalRedirectUrl.toString()}';
-                        }
-                    } catch (e) {
-                        console.error('Redirect error:', e);
-                        // Manual redirect as last resort
-                        window.location = '${finalRedirectUrl.toString()}';
+            // Fallback redirect if setTimeout doesn't work
+            window.addEventListener('load', function() {
+                setTimeout(function() {
+                    if (window.location.href.includes('callback')) {
+                        window.location.href = '${finalRedirectUrl.toString()}';
                     }
-                } else {
-                    window.location.href = '${finalRedirectUrl.toString()}';
-                }
-            };
-            
-            // Multiple fallback triggers
-            window.addEventListener('load', () => {
-                setTimeout(performRedirect, 2000);
-            });
-            
-            // Additional fallback
-            setTimeout(performRedirect, 3000);
-            
-            // Handle visibility change (mobile app switching)
-            document.addEventListener('visibilitychange', () => {
-                if (!document.hidden && !redirectAttempted) {
-                    setTimeout(performRedirect, 500);
-                }
+                }, 1000);
             });
         </script>
     </body>
     </html>`;
 
-    // Send HTML response with mobile-optimized headers
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    // Send HTML response instead of direct redirect
+    res.setHeader('Content-Type', 'text/html');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    
-    // Mobile-specific headers
-    res.setHeader('X-UA-Compatible', 'IE=edge');
-    res.setHeader('Vary', 'User-Agent');
-    
     res.send(htmlResponse);
 
     console.log("=== GOOGLE CALLBACK END ===");
