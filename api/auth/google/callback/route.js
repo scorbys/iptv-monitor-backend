@@ -189,7 +189,7 @@ router.get("/", async (req, res) => {
       sameSite: "lax",
     });
 
-    // TAMBAHAN: Set session cookie juga
+    //  Set session cookie juga
     res.cookie("session-token", token, {
       httpOnly: true,
       secure: isProduction,
