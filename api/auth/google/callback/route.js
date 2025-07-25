@@ -2,7 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
-const { createUser, getUserByEmailOrUsername, updateUserWithGoogleInfo } = require("../../../../db");
+const {
+  createUser,
+  getUserByEmailOrUsername,
+  updateUserWithGoogleInfo,
+} = require("../../../../db");
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -16,7 +20,7 @@ router.get("/", async (req, res) => {
   try {
     console.log("=== GOOGLE CALLBACK START ===");
     console.log("Query params:", req.query);
-    console.log("User-Agent:", req.headers['user-agent']);
+    console.log("User-Agent:", req.headers["user-agent"]);
 
     const code = req.query.code;
     const state = req.query.state;
@@ -53,7 +57,9 @@ router.get("/", async (req, res) => {
 
     if (!email || !googleId) {
       console.log("Invalid user data from Google");
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_user_data`);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/login?error=invalid_user_data`
+      );
     }
 
     // Check if user exists
@@ -78,7 +84,9 @@ router.get("/", async (req, res) => {
         console.log("New user created:", user.username);
       } else {
         console.error("Failed to create user:", createResult.error);
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=create_user_failed`);
+        return res.redirect(
+          `${process.env.FRONTEND_URL}/login?error=create_user_failed`
+        );
       }
     } else {
       console.log("User exists:", user.username);
@@ -87,7 +95,7 @@ router.get("/", async (req, res) => {
         console.log("Updating user with Google info...");
         await updateUserWithGoogleInfo(email, {
           googleId,
-          avatar: picture
+          avatar: picture,
         });
         // Refresh user data
         user = await getUserByEmailOrUsername(email);
@@ -101,8 +109,8 @@ router.get("/", async (req, res) => {
                 googleId,
                 avatar: picture || user.avatar,
                 provider: "google",
-                updatedAt: new Date()
-              }
+                updatedAt: new Date(),
+              },
             }
           );
         } catch (updateError) {
@@ -113,27 +121,28 @@ router.get("/", async (req, res) => {
 
     // Generate JWT token
     console.log("Generating JWT token...");
-    const userId = user._id?.toString() ||
-      user.userId?.toString() ||
-      user.id?.toString();
+    const userId =
+      user._id?.toString() || user.userId?.toString() || user.id?.toString();
 
     console.log("Debug user object:", {
       _id: user._id,
       userId: user.userId,
       id: user.id,
-      finalUserId: userId
+      finalUserId: userId,
     });
 
     if (!userId) {
       console.error("No valid user ID found in user object:", user);
-      return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_user_id`);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/login?error=invalid_user_id`
+      );
     }
 
     const tokenPayload = {
       userId: userId,
       username: user.username,
       email: user.email,
-      iat: Math.floor(Date.now() / 1000)
+      iat: Math.floor(Date.now() / 1000),
     };
     console.log("Final token payload:", tokenPayload);
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
@@ -141,7 +150,10 @@ router.get("/", async (req, res) => {
 
     // Enhanced cookie configuration
     const isProduction = process.env.NODE_ENV === "production";
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(req.headers['user-agent'] || '');
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        req.headers["user-agent"] || ""
+      );
 
     // FIXED: More robust cookie configuration
     const baseCookieOptions = {
@@ -158,7 +170,7 @@ router.get("/", async (req, res) => {
 
     // CRITICAL FIX: Set cookie dengan multiple methods untuk ensure compatibility
     res.cookie("token", token, baseCookieOptions);
-    
+
     // Additional cookie untuk mobile fallback
     res.cookie("auth-token", token, {
       ...baseCookieOptions,
@@ -188,16 +200,16 @@ router.get("/", async (req, res) => {
     console.log("Multiple cookies set for compatibility");
 
     // Redirect URL
-    const redirectUrl = state ?
-      decodeURIComponent(state) :
-      `${process.env.FRONTEND_URL}/dashboard`;
+    const redirectUrl = state
+      ? decodeURIComponent(state)
+      : `${process.env.FRONTEND_URL}/dashboard`;
 
     const finalRedirectUrl = new URL(redirectUrl);
-    finalRedirectUrl.searchParams.set('google_login', 'success');
-    finalRedirectUrl.searchParams.set('_t', Date.now().toString());
-    
+    finalRedirectUrl.searchParams.set("google_login", "success");
+    finalRedirectUrl.searchParams.set("_t", Date.now().toString());
+
     // CRITICAL: Add token as URL parameter for mobile fallback
-    finalRedirectUrl.searchParams.set('temp_token', encodeURIComponent(token));
+    finalRedirectUrl.searchParams.set("temp_token", encodeURIComponent(token));
 
     console.log("Redirecting to:", finalRedirectUrl.toString());
 
@@ -319,28 +331,30 @@ router.get("/", async (req, res) => {
     </html>`;
 
     // Send HTML response with enhanced headers
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+
     // Mobile-specific headers
-    res.setHeader('X-UA-Compatible', 'IE=edge');
-    res.setHeader('Vary', 'User-Agent, Cookie');
-    
+    res.setHeader("X-UA-Compatible", "IE=edge");
+    res.setHeader("Vary", "User-Agent, Cookie");
+
     // CORS headers for OAuth
-    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader(
+      "Access-Control-Allow-Origin",
+      process.env.FRONTEND_URL || "*"
+    );
+    res.setHeader("Access-Control-Allow-Credentials", "true");
 
     res.send(htmlResponse);
 
     console.log("=== GOOGLE CALLBACK END ===");
-
   } catch (error) {
     console.error("Google callback error:", error);
 
     // Clear any potentially invalid cookies dengan multiple methods
-    const cookieNames = ['token', 'auth-token', 'jwt', 'authToken'];
+    const cookieNames = ["token", "auth-token", "jwt", "authToken"];
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -348,7 +362,7 @@ router.get("/", async (req, res) => {
       path: "/",
     };
 
-    cookieNames.forEach(name => {
+    cookieNames.forEach((name) => {
       res.clearCookie(name, cookieOptions);
     });
 
@@ -360,7 +374,9 @@ router.get("/", async (req, res) => {
       errorParam = "timeout";
     }
 
-    return res.redirect(`${process.env.FRONTEND_URL}/login?error=${errorParam}`);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/login?error=${errorParam}`
+    );
   }
 });
 

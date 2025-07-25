@@ -6,8 +6,14 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // CORS middleware
 const setCorsHeaders = (req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://iptv-monitor2.vercel.app");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "https://iptv-monitor2.vercel.app"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS"
+  );
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   next();
@@ -49,7 +55,7 @@ router.get("/", (req, res) => {
     });
   } catch (error) {
     console.error("Token verification error:", error);
-    
+
     // Clear invalid token
     res.clearCookie("token", {
       httpOnly: true,
@@ -57,10 +63,10 @@ router.get("/", (req, res) => {
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/",
     });
-    
+
     res.status(401).json({
       success: false,
-      error: "Invalid token"
+      error: "Invalid token",
     });
   }
 });
