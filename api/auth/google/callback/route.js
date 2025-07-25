@@ -16,6 +16,7 @@ router.get("/", async (req, res) => {
   try {
     console.log("=== GOOGLE CALLBACK START ===");
     console.log("Query params:", req.query);
+    console.log("User-Agent:", req.headers['user-agent']);
 
     const code = req.query.code;
     const state = req.query.state;
@@ -112,148 +113,225 @@ router.get("/", async (req, res) => {
 
     // Generate JWT token
     console.log("Generating JWT token...");
+    const userId = user._id?.toString() ||
+      user.userId?.toString() ||
+      user.id?.toString();
+
+    console.log("Debug user object:", {
+      _id: user._id,
+      userId: user.userId,
+      id: user.id,
+      finalUserId: userId
+    });
+
+    if (!userId) {
+      console.error("No valid user ID found in user object:", user);
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_user_id`);
+    }
+
     const tokenPayload = {
-      userId: user._id?.toString() || user.userId,
+      userId: userId,
       username: user.username,
       email: user.email,
       iat: Math.floor(Date.now() / 1000)
     };
-
+    console.log("Final token payload:", tokenPayload);
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
-    console.log("JWT token generated successfully");
+    console.log("JWT token generated successfully for user:", userId);
 
-    // PERBAIKAN UTAMA: Cookie configuration yang lebih robust
+    // Enhanced cookie configuration
     const isProduction = process.env.NODE_ENV === "production";
-    
-    // Cookie options untuk production
-    const productionCookieOptions = {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(req.headers['user-agent'] || '');
+
+    // FIXED: More robust cookie configuration
+    const baseCookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: "/",
-      // Domain tidak di-set agar cookie bisa cross-origin
+      // CRITICAL FIX: Set domain explicitly untuk cross-origin
+      domain: isProduction ? process.env.COOKIE_DOMAIN || undefined : undefined,
     };
 
-    // Cookie options untuk development
-    const developmentCookieOptions = {
-      httpOnly: true,
-      secure: false,
+    console.log("Setting auth cookie with options:", baseCookieOptions);
+
+    // CRITICAL FIX: Set cookie dengan multiple methods untuk ensure compatibility
+    res.cookie("token", token, baseCookieOptions);
+    
+    // Additional cookie untuk mobile fallback
+    res.cookie("auth-token", token, {
+      ...baseCookieOptions,
+      httpOnly: false, // Allow JS access on mobile
+    });
+
+    // Legacy cookie name untuk compatibility
+    res.cookie("authToken", token, {
+      ...baseCookieOptions,
+      httpOnly: false,
+    });
+
+    // PERBAIKAN UTAMA: Set cookie dengan SameSite=Lax sebagai fallback
+    res.cookie("token-fallback", token, {
+      ...baseCookieOptions,
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: "/"
-    };
+    });
 
-    const cookieOptions = isProduction ? productionCookieOptions : developmentCookieOptions;
+    // TAMBAHAN: Set session cookie juga
+    res.cookie("session-token", token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      path: "/",
+    });
 
-    console.log("Setting auth cookie with options:", cookieOptions);
-    
-    // Set cookie dengan multiple attempts untuk memastikan berhasil
-    res.cookie("token", token, cookieOptions);
-    
-    // Untuk production, set additional cookie variants
-    if (isProduction) {
-      // Set dengan domain explicit untuk vercel
-      res.cookie("token", token, {
-        ...productionCookieOptions,
-        domain: ".vercel.app"
-      });
-      
-      // Set tanpa domain constraint
-      res.cookie("token", token, {
-        ...productionCookieOptions,
-        domain: undefined
-      });
-    }
+    console.log("Multiple cookies set for compatibility");
 
-    // Redirect langsung dengan query parameter untuk trigger auth check
-    const redirectUrl = state ? 
-      decodeURIComponent(state) : 
+    // Redirect URL
+    const redirectUrl = state ?
+      decodeURIComponent(state) :
       `${process.env.FRONTEND_URL}/dashboard`;
 
-    // Tambahkan parameter untuk trigger auth recheck
     const finalRedirectUrl = new URL(redirectUrl);
     finalRedirectUrl.searchParams.set('google_login', 'success');
-    finalRedirectUrl.searchParams.set('_t', Date.now().toString()); // Cache buster
+    finalRedirectUrl.searchParams.set('_t', Date.now().toString());
+    
+    // CRITICAL: Add token as URL parameter for mobile fallback
+    finalRedirectUrl.searchParams.set('temp_token', encodeURIComponent(token));
 
     console.log("Redirecting to:", finalRedirectUrl.toString());
 
-    // SOLUSI ALTERNATIF: Gunakan HTML page dengan JavaScript untuk set cookie dan redirect
+    // ENHANCED HTML Response dengan better cookie & localStorage handling
     const htmlResponse = `
     <!DOCTYPE html>
     <html>
     <head>
         <title>Authentication Complete</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script>
-            console.log('Google OAuth callback processing...');
+            console.log('=== GOOGLE OAUTH CALLBACK HTML ===');
+            const token = '${token}';
+            const isProduction = window.location.protocol === 'https:';
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
             
-            // Multiple cookie setting attempts
-            const cookieConfigs = [
-                'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; ${isProduction ? 'secure; samesite=none' : 'samesite=lax'}',
-                'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax',
-                'token=${token}; path=/; max-age=${7 * 24 * 60 * 60}'
-            ];
+            // ENHANCED: Set cookies with multiple strategies for better compatibility
+            const setCookiesAdvanced = () => {
+                console.log('Setting cookies with advanced compatibility...');
+                
+                const cookieConfigs = [
+                    // Primary token cookie
+                    \`token=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    // Auth token cookie (mobile friendly)
+                    \`auth-token=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    // Legacy authToken
+                    \`authToken=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    // Fallback dengan SameSite=Lax
+                    \`token-fallback=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; samesite=lax\`,
+                    // Session token
+                    \`session-token=\${token}; path=/; samesite=lax\`
+                ];
+                
+                cookieConfigs.forEach((config, index) => {
+                    document.cookie = config;
+                    console.log(\`Cookie \${index + 1} set: \${config.split('=')[0]}\`);
+                });
+            };
             
-            cookieConfigs.forEach(config => {
-                document.cookie = config;
-                console.log('Set cookie:', config.substring(0, 50) + '...');
+            // ENHANCED: Multiple localStorage strategies
+            const setStorageAdvanced = () => {
+                console.log('Setting localStorage with advanced strategies...');
+                try {
+                    const storageKeys = ['authToken', 'token', 'jwt', 'auth-token', 'session-token'];
+                    storageKeys.forEach(key => {
+                        localStorage.setItem(key, token);
+                        sessionStorage.setItem(key, token);
+                    });
+                    
+                    localStorage.setItem('isAuthenticated', 'true');
+                    localStorage.setItem('authMethod', 'google');
+                    localStorage.setItem('tokenSetAt', Date.now().toString());
+                    
+                    console.log('Advanced storage tokens set successfully');
+                } catch (e) {
+                    console.error('Storage error:', e);
+                }
+            };
+            
+            // Execute immediately with retry
+            const initAuth = async () => {
+                setCookiesAdvanced();
+                setStorageAdvanced();
+                
+                // Verify tokens were set
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const cookieCheck = document.cookie.includes('token=');
+                const storageCheck = localStorage.getItem('authToken') === token;
+                
+                console.log('Token verification:', { cookieCheck, storageCheck });
+                
+                if (!cookieCheck && !storageCheck) {
+                    console.log('Retrying token setup...');
+                    setCookiesAdvanced();
+                    setStorageAdvanced();
+                }
+            };
+            
+            initAuth().then(() => {
+                console.log('Auth initialization complete');
+                
+                // Redirect dengan delay yang lebih pendek
+                setTimeout(() => {
+                    const redirectUrl = '${finalRedirectUrl.toString()}';
+                    console.log('Redirecting to:', redirectUrl);
+                    window.location.href = redirectUrl;
+                }, 1500);
             });
-            
-            // Verify cookie was set
-            const cookies = document.cookie.split(';').reduce((acc, cookie) => {
-                const [key, value] = cookie.trim().split('=');
-                acc[key] = value;
-                return acc;
-            }, {});
-            
-            console.log('Cookies after setting:', Object.keys(cookies));
-            console.log('Token cookie present:', !!cookies.token);
-            
-            // Store token in localStorage as backup
-            try {
-                localStorage.setItem('authToken', '${token}');
-                console.log('Token stored in localStorage as backup');
-            } catch (e) {
-                console.warn('Could not store token in localStorage:', e);
-            }
-            
-            // Redirect with delay to ensure cookie is set
-            setTimeout(function() {
-                console.log('Redirecting to:', '${finalRedirectUrl.toString()}');
-                window.location.href = '${finalRedirectUrl.toString()}';
-            }, 500);
         </script>
     </head>
     <body>
-        <div style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h2>Authentication Successful</h2>
-            <p>Please wait while we redirect you...</p>
-            <div style="margin-top: 20px;">
-                <div style="display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            </div>
+        <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
+            <h2>Authentication Successful ✓</h2>
+            <p>Setting up your session...</p>
+            <div class="spinner"></div>
+            <p style="margin-top: 20px;">
+                <a href="${finalRedirectUrl.toString()}">Click here if not redirected</a>
+            </p>
         </div>
+        
         <style>
+            .spinner {
+                display: inline-block;
+                width: 40px;
+                height: 40px;
+                border: 4px solid #f3f3f3;
+                border-top: 4px solid #3498db;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 20px 0;
+            }
             @keyframes spin {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
             }
         </style>
-        <script>
-            // Fallback redirect if setTimeout doesn't work
-            window.addEventListener('load', function() {
-                setTimeout(function() {
-                    if (window.location.href.includes('callback')) {
-                        window.location.href = '${finalRedirectUrl.toString()}';
-                    }
-                }, 1000);
-            });
-        </script>
     </body>
     </html>`;
 
-    // Send HTML response instead of direct redirect
-    res.setHeader('Content-Type', 'text/html');
+    // Send HTML response with enhanced headers
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    // Mobile-specific headers
+    res.setHeader('X-UA-Compatible', 'IE=edge');
+    res.setHeader('Vary', 'User-Agent, Cookie');
+    
+    // CORS headers for OAuth
+    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
     res.send(htmlResponse);
 
     console.log("=== GOOGLE CALLBACK END ===");
@@ -261,12 +339,17 @@ router.get("/", async (req, res) => {
   } catch (error) {
     console.error("Google callback error:", error);
 
-    // Clear any potentially invalid cookies
-    res.clearCookie("token", {
+    // Clear any potentially invalid cookies dengan multiple methods
+    const cookieNames = ['token', 'auth-token', 'jwt', 'authToken'];
+    const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/",
+    };
+
+    cookieNames.forEach(name => {
+      res.clearCookie(name, cookieOptions);
     });
 
     // Provide specific error messages
