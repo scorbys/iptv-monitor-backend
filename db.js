@@ -1,7 +1,9 @@
+require('dotenv').config();
+
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
+const uri = process.env.MONGO_URL;
 
-const uri = 'mongodb+srv://mekd1bro:727PlayingCards@cluster0.wnmnw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 let client = null;
 let isConnecting = false;
 
