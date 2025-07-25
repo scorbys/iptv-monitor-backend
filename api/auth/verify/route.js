@@ -27,12 +27,15 @@ router.options("/", (req, res) => {
 });
 
 router.get("/", (req, res) => {
+  const caller = req.headers["user-agent"] || "unknown";
+  console.log(`[VERIFY] Called by: ${caller}`);
+
   try {
     const token =
       req.cookies.token ||
       req.cookies["auth-token"] ||
       req.cookies["authToken"] ||
-      req.headers.authorization?.split(" ")[1]; // Fallback header
+      req.headers.authorization?.split(" ")[1];
 
     if (!token) {
       return res.status(401).json({
@@ -41,10 +44,11 @@ router.get("/", (req, res) => {
       });
     }
 
-    // Verify the token
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Return user info
+    // Jangan biarkan respons dicache
+    res.setHeader("Cache-Control", "no-store");
+
     res.json({
       success: true,
       user: {
@@ -56,13 +60,8 @@ router.get("/", (req, res) => {
   } catch (error) {
     console.error("Token verification error:", error);
 
-    // Clear invalid token
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/",
-    });
+    // ⚠️ Hapus token hanya jika kamu benar-benar ingin — ini bisa jadi agresif
+    // res.clearCookie(...);
 
     res.status(401).json({
       success: false,
