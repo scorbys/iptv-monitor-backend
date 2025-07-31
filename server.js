@@ -21,6 +21,7 @@ const port = process.env.PORT || 3001;
 const verifyRoute = require("./api/auth/verify/route");
 const googleAuthRoute = require("./api/auth/google/route");
 const googleCallbackRoute = require("./api/auth/google/callback/route");
+const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -95,22 +96,26 @@ app.use("/api/auth/google/callback", googleCallbackRoute);
 // Add request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  
+
   // Log cookies untuk debugging
   if (req.path.includes('/auth/')) {
     console.log("Cookies:", req.cookies);
   }
-  
+
   next();
 });
+
+// Inisialisasi bot Telegram di sini
+let telegramBot = null;
+initializeTelegramBot();
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
   console.log("=== AUTHENTICATE TOKEN START ===");
-  
+
   // Cek token dari cookie terlebih dahulu, kemudian dari header
   let token = req.cookies.token;
-  
+
   if (!token && req.headers.authorization) {
     const authHeader = req.headers.authorization;
     if (authHeader.startsWith('Bearer ')) {
@@ -142,11 +147,11 @@ const authenticateToken = (req, res, next) => {
     next();
   } catch (error) {
     console.error("💥 Token verification error:", error);
-    
-    // PERBAIKAN: berikan pesan error yang lebih spesifik
+
+    // berikan pesan error yang lebih spesifik
     let errorMessage = "Invalid token";
     let statusCode = 403;
-    
+
     if (error.name === 'TokenExpiredError') {
       errorMessage = "Token expired";
       statusCode = 401;
@@ -154,15 +159,15 @@ const authenticateToken = (req, res, next) => {
       errorMessage = "Invalid token format";
       statusCode = 401;
     }
-    
-    // PERBAIKAN: Clear cookie jika token invalid
+
+    // Clear cookie jika token invalid
     res.clearCookie("token", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/"
     });
-    
+
     return res.status(statusCode).json({
       success: false,
       error: errorMessage,
@@ -260,14 +265,28 @@ const trackRequestMetrics = (serviceType) => {
   };
 };
 
+// Function untuk inisialisasi Telegram bot
+const initializeTelegramBot = () => {
+  try {
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      telegramBot = new IPTVTelegramBot();
+      console.log('✅ Telegram bot initialized successfully');
+    } else {
+      console.warn('⚠️  TELEGRAM_BOT_TOKEN not found in environment variables');
+    }
+  } catch (error) {
+    console.error('❌ Failed to initialize Telegram bot:', error);
+  }
+};
+
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
   try {
     console.log("=== LOGIN REQUEST START ===");
     console.log("Headers:", req.headers);
-    console.log("Body:", { 
+    console.log("Body:", {
       identifier: req.body.identifier,
-      passwordLength: req.body.password ? req.body.password.length : 0 
+      passwordLength: req.body.password ? req.body.password.length : 0
     });
 
     const { identifier, password } = req.body;
@@ -292,7 +311,7 @@ app.post("/api/auth/login", async (req, res) => {
     });
 
     if (result.success && result.user) {
-      // Generate JWT token - PERBAIKAN: pastikan field yang benar digunakan
+      // Generate JWT token - pastikan field yang benar digunakan
       const tokenPayload = {
         userId: result.user.id || result.user.userId,
         email: result.user.email,
@@ -301,10 +320,10 @@ app.post("/api/auth/login", async (req, res) => {
       };
 
       console.log("🎫 Creating token with payload:", tokenPayload);
-      
+
       const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
 
-      // PERBAIKAN: Set cookie dengan konfigurasi yang lebih kompatibel
+      // Set cookie dengan konfigurasi yang lebih kompatibel
       const cookieOptions = {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -316,7 +335,7 @@ app.post("/api/auth/login", async (req, res) => {
       console.log("🍪 Setting cookie with options:", cookieOptions);
       res.cookie("token", token, cookieOptions);
 
-      // PERBAIKAN: Konsisten dengan field yang digunakan di JWT
+      // Konsisten dengan field yang digunakan di JWT
       const userResponse = {
         id: result.user.id || result.user.userId,
         username: result.user.username,
@@ -410,7 +429,7 @@ app.post("/api/auth/register", async (req, res) => {
         { expiresIn: "24h" }
       );
 
-      // Set HTTP-only cookie - PERBAIKAN: sameSite untuk cross-origin
+      // Set HTTP-only cookie - sameSite untuk cross-origin
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -450,7 +469,7 @@ app.post("/api/auth/logout", (req, res) => {
   try {
     console.log("=== LOGOUT REQUEST START ===");
     console.log("Current cookies:", req.cookies);
-    
+
     // Clear cookie dengan berbagai konfigurasi untuk memastikan terhapus
     const cookieConfigs = [
       {
@@ -468,7 +487,7 @@ app.post("/api/auth/logout", (req, res) => {
       {
         httpOnly: true,
         secure: true,
-        sameSite: "lax", 
+        sameSite: "lax",
         path: "/",
       },
       {
@@ -514,9 +533,9 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
     console.log("Token from header:", req.headers.authorization ? "Present" : "Missing");
     console.log("Decoded user:", req.user);
 
-    // PERBAIKAN: pastikan data user dikembalikan dengan benar
+    // pastikan data user dikembalikan dengan benar
     const user = {
-      id: req.user.userId || req.user.id, // PERBAIKAN: konsisten dengan field
+      id: req.user.userId || req.user.id, // konsisten dengan field
       userId: req.user.userId, // Tetap kirim userId untuk backward compatibility
       username: req.user.username,
       email: req.user.email,
@@ -529,7 +548,7 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
       success: true,
       user: user,
       message: "Token verified successfully",
-      authenticated: true // TAMBAHAN: flag untuk frontend
+      authenticated: true // flag untuk frontend
     });
   } catch (error) {
     console.error("💥 Token verification error:", error);
@@ -544,13 +563,13 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
 // Function database coonection check
 async function checkDatabaseConnection() {
   try {
-    // PERBAIKAN: tambahkan timeout untuk database connection
+    // tambahkan timeout untuk database connection
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Database connection timeout')), 10000);
     });
-    
+
     const dbPromise = getInternationalChannels();
-    
+
     await Promise.race([dbPromise, timeoutPromise]);
     console.log("✅ Database connection successful");
     return true;
@@ -742,22 +761,55 @@ async function getAllChannelsFromDB() {
 async function checkAllChannelsStatus() {
   try {
     const allChannels = await getAllChannelsFromDB();
+    const offlineNotifications = [];
 
     for (const channel of allChannels) {
       try {
+        const previousStatus = channelStatus.get(channel.id)?.status;
         const result = await checkMulticastConnectivity(channel.ipMulticast);
+
         channelStatus.set(channel.id, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi hanya jika status berubah dari online ke offline
+        if (previousStatus === "online" && result.status === "offline") {
+          offlineNotifications.push({
+            source: 'channel',
+            message: `${channel.channelName || 'Unknown Channel'} is now offline`,
+            ipAddr: channel.ipMulticast,
+            deviceName: channel.channelName,
+            timestamp: new Date().toISOString()
+          });
+        }
       } catch (error) {
+        const previousStatus = channelStatus.get(channel.id)?.status;
+
         channelStatus.set(channel.id, {
           status: "offline",
           responseTime: null,
           error: error.message,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi jika status berubah ke offline
+        if (previousStatus === "online") {
+          offlineNotifications.push({
+            source: 'channel',
+            message: `${channel.channelName || 'Unknown Channel'} connection failed`,
+            ipAddr: channel.ipMulticast,
+            deviceName: channel.channelName,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
+    }
+
+    // Kirim notifikasi Telegram jika ada perangkat offline
+    if (offlineNotifications.length > 0 && telegramBot) {
+      await telegramBot.sendOfflineNotification(offlineNotifications);
     }
 
     console.log(`Checked status for ${allChannels.length} channels`);
@@ -770,27 +822,60 @@ async function checkAllChannelsStatus() {
 async function checkAllTVsStatus() {
   try {
     const allTVs = await getHospitalityTVs();
+    const offlineNotifications = [];
 
     for (const tv of allTVs) {
       try {
+        const previousStatus = tvStatus.get(tv.roomNo)?.status;
         const result = await checkTVConnectivity(tv.ipAddress);
+
         tvStatus.set(tv.roomNo, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi jika status berubah dari online ke offline
+        if (previousStatus === "online" && result.status === "offline") {
+          offlineNotifications.push({
+            source: 'tv',
+            message: `Room ${tv.roomNo} TV is now offline`,
+            ipAddr: tv.ipAddress,
+            deviceName: `Room ${tv.roomNo}`,
+            roomNo: tv.roomNo,
+            timestamp: new Date().toISOString()
+          });
+        }
       } catch (error) {
+        const previousStatus = tvStatus.get(tv.roomNo)?.status;
+
         tvStatus.set(tv.roomNo, {
           status: "offline",
           responseTime: null,
           error: error.message,
           lastChecked: new Date().toISOString(),
         });
+
+        if (previousStatus === "online") {
+          offlineNotifications.push({
+            source: 'tv',
+            message: `Room ${tv.roomNo} TV connection failed`,
+            ipAddr: tv.ipAddress,
+            deviceName: `Room ${tv.roomNo}`,
+            roomNo: tv.roomNo,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
     }
 
+    // Kirim notifikasi Telegram
+    if (offlineNotifications.length > 0 && telegramBot) {
+      await telegramBot.sendOfflineNotification(offlineNotifications);
+    }
+
     console.log(
-      `Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
-      }`
+      `Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`
     );
   } catch (error) {
     console.error("Error checking TV status:", error);
@@ -902,15 +987,31 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
 async function checkAllChromecastsStatus() {
   try {
     const allDevices = await getChromecastDevices();
+    const offlineNotifications = [];
 
     for (const device of allDevices) {
       try {
+        const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
         const result = await checkChromecastConnectivity(device.ipAddr);
+
         chromecastStatus.set(device.idCast, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi jika status berubah dari online ke offline
+        if (previousStatus === true && !result.isOnline) {
+          offlineNotifications.push({
+            source: 'chromecast',
+            message: `${device.deviceName || 'Unknown Device'} is now offline`,
+            ipAddr: device.ipAddr,
+            deviceName: device.deviceName,
+            timestamp: new Date().toISOString()
+          });
+        }
       } catch (error) {
+        const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
+
         chromecastStatus.set(device.idCast, {
           isPingable: false,
           isOnline: false,
@@ -921,12 +1022,27 @@ async function checkAllChromecastsStatus() {
           error: error.message,
           lastChecked: new Date().toISOString(),
         });
+
+        if (previousStatus === true) {
+          offlineNotifications.push({
+            source: 'chromecast',
+            message: `${device.deviceName || 'Unknown Device'} connection failed`,
+            ipAddr: device.ipAddr,
+            deviceName: device.deviceName,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
     }
 
+    // Kirim notifikasi Telegram
+    if (offlineNotifications.length > 0 && telegramBot) {
+      await telegramBot.sendOfflineNotification(offlineNotifications);
+    }
+
     console.log(
-      `Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
-      }`
+      `Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`
     );
   } catch (error) {
     console.error("Error checking Chromecast status:", error);
@@ -1820,6 +1936,71 @@ app.get(
   }
 );
 
+/* Manajemen Bot Telegram */
+app.get("/api/telegram/status", authenticateToken, (req, res) => {
+  try {
+    if (!telegramBot) {
+      return res.json({
+        success: false,
+        message: "Telegram bot not initialized",
+        isRunning: false
+      });
+    }
+
+    const subscribers = telegramBot.getActiveSubscribers();
+
+    res.json({
+      success: true,
+      isRunning: true,
+      subscriberCount: subscribers.length,
+      subscribers: subscribers.map(sub => ({
+        chatId: sub.chatId,
+        userName: sub.userName,
+        active: sub.active,
+        pausedUntil: sub.pausedUntil
+      })),
+      message: "Telegram bot is running"
+    });
+  } catch (error) {
+    console.error("Error getting Telegram bot status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get bot status"
+    });
+  }
+});
+
+// Endpoint untuk mengirim notifikasi manual (untuk testing)
+app.post("/api/telegram/test-notification", authenticateToken, async (req, res) => {
+  try {
+    if (!telegramBot) {
+      return res.status(400).json({
+        success: false,
+        message: "Telegram bot not initialized"
+      });
+    }
+
+    const testNotifications = [{
+      source: 'system',
+      message: 'This is a test notification from IPTV Monitor',
+      timestamp: new Date().toISOString()
+    }];
+
+    await telegramBot.sendOfflineNotification(testNotifications);
+
+    res.json({
+      success: true,
+      message: "Test notification sent to all active subscribers"
+    });
+  } catch (error) {
+    console.error("Error sending test notification:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to send test notification"
+    });
+  }
+});
+
 // Endpoint baru untuk network traffic stats
 app.get("/api/network/traffic/stats", authenticateToken, async (req, res) => {
   try {
@@ -2072,15 +2253,15 @@ app.use((req, res) => {
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error("Unhandled error:", error);
-  
-  // PERBAIKAN: jangan gunakan catch-all route yang bermasalah
+
+  // jangan gunakan catch-all route yang bermasalah
   if (res.headersSent) {
     return next(error);
   }
-  
-  // PERBAIKAN: berikan response yang lebih informatif
+
+  // berikan response yang lebih informatif
   const isDevelopment = process.env.NODE_ENV !== 'production';
-  
+
   res.status(500).json({
     success: false,
     error: "Internal server error",
@@ -2114,14 +2295,25 @@ const startPeriodicChecks = () => {
       }
     }, Math.min(TV_STATUS_CONFIG.UPDATE_INTERVAL, CHROMECAST_STATUS_CONFIG.UPDATE_INTERVAL));
   }
+
+  // Cleanup Telegram bot subscribers setiap 1 jam
+  if (telegramBot) {
+    setInterval(() => {
+      try {
+        telegramBot.cleanupSubscribers();
+      } catch (error) {
+        console.error("Error cleaning up Telegram subscribers:", error);
+      }
+    }, 3600000); // Every hour
+  }
 };
 
 
 // Start server
 app.listen(port, async () => {
   console.log(`🚀 Server starting on port ${port}`);
-  
-  // PERBAIKAN: buat database connection check opsional
+
+  // buat database connection check opsional
   const dbConnected = await checkDatabaseConnection();
   if (!dbConnected) {
     console.warn("⚠️  Database connection failed, but server will continue running");
@@ -2133,7 +2325,7 @@ app.listen(port, async () => {
   console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
   console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
 
-  // PERBAIKAN: buat status checks opsional dan tidak crash server
+  // buat status checks opsional dan tidak crash server
   try {
     if (typeof checkAllChannelsStatus === 'function') {
       await checkAllChannelsStatus();
