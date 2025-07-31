@@ -21,6 +21,7 @@ const port = process.env.PORT || 3001;
 const verifyRoute = require("./api/auth/verify/route");
 const googleAuthRoute = require("./api/auth/google/route");
 const googleCallbackRoute = require("./api/auth/google/callback/route");
+const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -95,22 +96,26 @@ app.use("/api/auth/google/callback", googleCallbackRoute);
 // Add request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  
+
   // Log cookies untuk debugging
   if (req.path.includes('/auth/')) {
     console.log("Cookies:", req.cookies);
   }
-  
+
   next();
 });
+
+// Inisialisasi bot Telegram di sini
+let telegramBot = null;
+initializeTelegramBot();
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
   console.log("=== AUTHENTICATE TOKEN START ===");
-  
+
   // Cek token dari cookie terlebih dahulu, kemudian dari header
   let token = req.cookies.token;
-  
+
   if (!token && req.headers.authorization) {
     const authHeader = req.headers.authorization;
     if (authHeader.startsWith('Bearer ')) {
@@ -142,11 +147,11 @@ const authenticateToken = (req, res, next) => {
     next();
   } catch (error) {
     console.error("💥 Token verification error:", error);
-    
-    // PERBAIKAN: berikan pesan error yang lebih spesifik
+
+    // berikan pesan error yang lebih spesifik
     let errorMessage = "Invalid token";
     let statusCode = 403;
-    
+
     if (error.name === 'TokenExpiredError') {
       errorMessage = "Token expired";
       statusCode = 401;
@@ -154,15 +159,15 @@ const authenticateToken = (req, res, next) => {
       errorMessage = "Invalid token format";
       statusCode = 401;
     }
-    
-    // PERBAIKAN: Clear cookie jika token invalid
+
+    // Clear cookie jika token invalid
     res.clearCookie("token", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/"
     });
-    
+
     return res.status(statusCode).json({
       success: false,
       error: errorMessage,
@@ -195,16 +200,30 @@ const CHROMECAST_STATUS_CONFIG = {
   UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
 };
 
+// Function untuk inisialisasi Telegram bot
+const initializeTelegramBot = () => {
+  try {
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      telegramBot = new IPTVTelegramBot();
+      console.log('✅ Telegram bot initialized successfully');
+    } else {
+      console.warn('⚠️  TELEGRAM_BOT_TOKEN not found in environment variables');
+    }
+  } catch (error) {
+    console.error('❌ Failed to initialize Telegram bot:', error);
+  }
+};
+
 // Function database coonection check
 async function checkDatabaseConnection() {
   try {
-    // PERBAIKAN: tambahkan timeout untuk database connection
+    // tambahkan timeout untuk database connection
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Database connection timeout')), 10000);
     });
-    
+
     const dbPromise = getInternationalChannels();
-    
+
     await Promise.race([dbPromise, timeoutPromise]);
     console.log("✅ Database connection successful");
     return true;
@@ -396,22 +415,55 @@ async function getAllChannelsFromDB() {
 async function checkAllChannelsStatus() {
   try {
     const allChannels = await getAllChannelsFromDB();
+    const offlineNotifications = [];
 
     for (const channel of allChannels) {
       try {
+        const previousStatus = channelStatus.get(channel.id)?.status;
         const result = await checkMulticastConnectivity(channel.ipMulticast);
+
         channelStatus.set(channel.id, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi hanya jika status berubah dari online ke offline
+        if (previousStatus === "online" && result.status === "offline") {
+          offlineNotifications.push({
+            source: 'channel',
+            message: `${channel.channelName || 'Unknown Channel'} is now offline`,
+            ipAddr: channel.ipMulticast,
+            deviceName: channel.channelName,
+            timestamp: new Date().toISOString()
+          });
+        }
       } catch (error) {
+        const previousStatus = channelStatus.get(channel.id)?.status;
+
         channelStatus.set(channel.id, {
           status: "offline",
           responseTime: null,
           error: error.message,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi jika status berubah ke offline
+        if (previousStatus === "online") {
+          offlineNotifications.push({
+            source: 'channel',
+            message: `${channel.channelName || 'Unknown Channel'} connection failed`,
+            ipAddr: channel.ipMulticast,
+            deviceName: channel.channelName,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
+    }
+
+    // Kirim notifikasi Telegram jika ada perangkat offline
+    if (offlineNotifications.length > 0 && telegramBot) {
+      await telegramBot.sendOfflineNotification(offlineNotifications);
     }
 
     console.log(`Checked status for ${allChannels.length} channels`);
@@ -424,27 +476,60 @@ async function checkAllChannelsStatus() {
 async function checkAllTVsStatus() {
   try {
     const allTVs = await getHospitalityTVs();
+    const offlineNotifications = [];
 
     for (const tv of allTVs) {
       try {
+        const previousStatus = tvStatus.get(tv.roomNo)?.status;
         const result = await checkTVConnectivity(tv.ipAddress);
+
         tvStatus.set(tv.roomNo, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi jika status berubah dari online ke offline
+        if (previousStatus === "online" && result.status === "offline") {
+          offlineNotifications.push({
+            source: 'tv',
+            message: `Room ${tv.roomNo} TV is now offline`,
+            ipAddr: tv.ipAddress,
+            deviceName: `Room ${tv.roomNo}`,
+            roomNo: tv.roomNo,
+            timestamp: new Date().toISOString()
+          });
+        }
       } catch (error) {
+        const previousStatus = tvStatus.get(tv.roomNo)?.status;
+
         tvStatus.set(tv.roomNo, {
           status: "offline",
           responseTime: null,
           error: error.message,
           lastChecked: new Date().toISOString(),
         });
+
+        if (previousStatus === "online") {
+          offlineNotifications.push({
+            source: 'tv',
+            message: `Room ${tv.roomNo} TV connection failed`,
+            ipAddr: tv.ipAddress,
+            deviceName: `Room ${tv.roomNo}`,
+            roomNo: tv.roomNo,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
     }
 
+    // Kirim notifikasi Telegram
+    if (offlineNotifications.length > 0 && telegramBot) {
+      await telegramBot.sendOfflineNotification(offlineNotifications);
+    }
+
     console.log(
-      `Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
-      }`
+      `Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`
     );
   } catch (error) {
     console.error("Error checking TV status:", error);
@@ -556,15 +641,31 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
 async function checkAllChromecastsStatus() {
   try {
     const allDevices = await getChromecastDevices();
+    const offlineNotifications = [];
 
     for (const device of allDevices) {
       try {
+        const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
         const result = await checkChromecastConnectivity(device.ipAddr);
+
         chromecastStatus.set(device.idCast, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
+
+        // Kirim notifikasi jika status berubah dari online ke offline
+        if (previousStatus === true && !result.isOnline) {
+          offlineNotifications.push({
+            source: 'chromecast',
+            message: `${device.deviceName || 'Unknown Device'} is now offline`,
+            ipAddr: device.ipAddr,
+            deviceName: device.deviceName,
+            timestamp: new Date().toISOString()
+          });
+        }
       } catch (error) {
+        const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
+
         chromecastStatus.set(device.idCast, {
           isPingable: false,
           isOnline: false,
@@ -575,12 +676,27 @@ async function checkAllChromecastsStatus() {
           error: error.message,
           lastChecked: new Date().toISOString(),
         });
+
+        if (previousStatus === true) {
+          offlineNotifications.push({
+            source: 'chromecast',
+            message: `${device.deviceName || 'Unknown Device'} connection failed`,
+            ipAddr: device.ipAddr,
+            deviceName: device.deviceName,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
     }
 
+    // Kirim notifikasi Telegram
+    if (offlineNotifications.length > 0 && telegramBot) {
+      await telegramBot.sendOfflineNotification(offlineNotifications);
+    }
+
     console.log(
-      `Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""
-      }`
+      `Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`
     );
   } catch (error) {
     console.error("Error checking Chromecast status:", error);
@@ -1017,6 +1133,280 @@ app.post("/api/chromecast/:id/check", authenticateToken, async (req, res) => {
   }
 });
 
+/* Manajemen Bot Telegram */
+app.get("/api/telegram/status", authenticateToken, (req, res) => {
+  try {
+    if (!telegramBot) {
+      return res.json({
+        success: false,
+        message: "Telegram bot not initialized",
+        isRunning: false
+      });
+    }
+
+    const subscribers = telegramBot.getActiveSubscribers();
+
+    res.json({
+      success: true,
+      isRunning: true,
+      subscriberCount: subscribers.length,
+      subscribers: subscribers.map(sub => ({
+        chatId: sub.chatId,
+        userName: sub.userName,
+        active: sub.active,
+        pausedUntil: sub.pausedUntil
+      })),
+      message: "Telegram bot is running"
+    });
+  } catch (error) {
+    console.error("Error getting Telegram bot status:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get bot status"
+    });
+  }
+});
+
+// Endpoint untuk mengirim notifikasi manual (untuk testing)
+app.post("/api/telegram/test-notification", authenticateToken, async (req, res) => {
+  try {
+    if (!telegramBot) {
+      return res.status(400).json({
+        success: false,
+        message: "Telegram bot not initialized"
+      });
+    }
+
+    const testNotifications = [{
+      source: 'system',
+      message: 'This is a test notification from IPTV Monitor',
+      timestamp: new Date().toISOString()
+    }];
+
+    await telegramBot.sendOfflineNotification(testNotifications);
+
+    res.json({
+      success: true,
+      message: "Test notification sent to all active subscribers"
+    });
+  } catch (error) {
+    console.error("Error sending test notification:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to send test notification"
+    });
+  }
+});
+
+// Endpoint baru untuk network traffic stats
+app.get("/api/network/traffic/stats", authenticateToken, async (req, res) => {
+  try {
+    const randomMetric = () => ({
+      requests: Math.floor(Math.random() * 20) + 5,
+      responseTime: Math.floor(Math.random() * 200) + 50,
+      errorRate: parseFloat((Math.random() * 5).toFixed(2)),
+      throughput: parseFloat((Math.random() * 5).toFixed(1)),
+      totalRequests: Math.floor(Math.random() * 1000),
+      errorCount: Math.floor(Math.random() * 50)
+    });
+
+    res.json({
+      success: true,
+      data: {
+        channels: randomMetric(),
+        hospitality: randomMetric(),
+        chromecast: randomMetric(),
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error generating dummy stats",
+      error: error.message
+    });
+  }
+});
+
+
+// Endpoint untuk historical data (simulasi berdasarkan time range)
+app.get("/api/network/traffic/history", authenticateToken, async (req, res) => {
+  try {
+    const { timeRange = '1h' } = req.query;
+    const now = new Date();
+    const data = [];
+
+    let intervals, intervalMs, points;
+
+    switch (timeRange) {
+      case '1h':
+        intervals = 60;
+        intervalMs = 60000; // 1 minute intervals
+        points = 60;
+        break;
+      case '6h':
+        intervals = 72;
+        intervalMs = 300000; // 5 minute intervals
+        points = 72;
+        break;
+      case '24h':
+        intervals = 48;
+        intervalMs = 1800000; // 30 minute intervals
+        points = 48;
+        break;
+      default:
+        intervalMs = 60000;
+        points = 60;
+    }
+
+    // This function formats the time based on the time range
+    const pad2 = (n) => String(n).padStart(2, '0');
+
+    const formatTime = (date, timeRange) => {
+      const h = pad2(date.getHours());
+      const m = pad2(date.getMinutes());
+      if (timeRange === '24h') {
+        const d = pad2(date.getDate());
+        const mo = pad2(date.getMonth() + 1);
+        return `${mo}/${d} ${h}:${m}`;
+      }
+      return `${h}:${m}`;
+    };
+
+    // Generate historical data based on current stats with some variation
+    for (let i = points - 1; i >= 0; i--) {
+      const time = new Date(now.getTime() - i * intervalMs);
+      const timeStr = formatTime(time, timeRange);
+
+      data.push({
+        time: timeStr,
+        timestamp: time.toISOString(),
+        channel: Math.floor(Math.random() * 20) + 5,
+        hospitality: Math.floor(Math.random() * 15) + 3,
+        chromecast: Math.floor(Math.random() * 10) + 2
+      });
+    }
+
+
+    res.json({
+      success: true,
+      data: data,
+      timeRange: timeRange
+    });
+  } catch (error) {
+    console.error("Error fetching network traffic history:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching network traffic history",
+      error: error.message
+    });
+  }
+});
+
+// Configuration endpoint to toggle dummy status
+app.post("/api/config/tv-status-mode", async (req, res) => {
+  try {
+    const { useDummyStatus } = req.body;
+
+    if (typeof useDummyStatus === "boolean") {
+      TV_STATUS_CONFIG.USE_DUMMY_STATUS = useDummyStatus;
+
+      // Clear existing status to force refresh
+      tvStatus.clear();
+
+      // Restart status checks with new mode
+      await checkAllTVsStatus();
+
+      res.json({
+        success: true,
+        message: `TV status mode changed to ${useDummyStatus ? "dummy" : "real"
+          } connectivity checks`,
+        config: {
+          useDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
+          onlineProbability: TV_STATUS_CONFIG.ONLINE_PROBABILITY,
+          responseTimeRange: TV_STATUS_CONFIG.RESPONSE_TIME_RANGE,
+        },
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "Invalid parameter. useDummyStatus must be a boolean",
+      });
+    }
+  } catch (error) {
+    console.error("Error updating TV status mode:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating TV status mode",
+      error: error.message,
+    });
+  }
+});
+
+// Get current configuration
+app.get("/api/config", authenticateToken, async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      tvStatus: {
+        useDummyStatus: TV_STATUS_CONFIG.USE_DUMMY_STATUS,
+        onlineProbability: TV_STATUS_CONFIG.ONLINE_PROBABILITY,
+        responseTimeRange: TV_STATUS_CONFIG.RESPONSE_TIME_RANGE,
+        updateInterval: TV_STATUS_CONFIG.UPDATE_INTERVAL,
+      },
+      chromecastStatus: {
+        useDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS,
+        onlineProbability: CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY,
+        signalLevelRange: CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE,
+        speedRange: CHROMECAST_STATUS_CONFIG.SPEED_RANGE,
+        updateInterval: CHROMECAST_STATUS_CONFIG.UPDATE_INTERVAL,
+      },
+    },
+  });
+});
+
+// Configuration endpoint to toggle Chromecast status mode
+app.post("/api/config/chromecast-status-mode", async (req, res) => {
+  try {
+    const { useDummyStatus } = req.body;
+
+    if (typeof useDummyStatus === "boolean") {
+      CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS = useDummyStatus;
+
+      // Clear existing status to force refresh
+      chromecastStatus.clear();
+
+      // Restart status checks with new mode
+      await checkAllChromecastsStatus();
+
+      res.json({
+        success: true,
+        message: `Chromecast status mode changed to ${useDummyStatus ? "dummy" : "real"
+          } connectivity checks`,
+        config: {
+          useDummyStatus: CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS,
+          onlineProbability: CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY,
+          signalLevelRange: CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE,
+          speedRange: CHROMECAST_STATUS_CONFIG.SPEED_RANGE,
+          updateInterval: CHROMECAST_STATUS_CONFIG.UPDATE_INTERVAL,
+        },
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "Invalid parameter. useDummyStatus must be a boolean",
+      });
+    }
+  } catch (error) {
+    console.error("Error updating Chromecast status mode:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating Chromecast status mode",
+      error: error.message,
+    });
+  }
+});
+
 // Health check endpoint
 app.get("/api/health", authenticateToken, async (req, res) => {
   try {
@@ -1060,15 +1450,15 @@ app.use((req, res) => {
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error("Unhandled error:", error);
-  
-  // PERBAIKAN: jangan gunakan catch-all route yang bermasalah
+
+  // jangan gunakan catch-all route yang bermasalah
   if (res.headersSent) {
     return next(error);
   }
-  
-  // PERBAIKAN: berikan response yang lebih informatif
+
+  // berikan response yang lebih informatif
   const isDevelopment = process.env.NODE_ENV !== 'production';
-  
+
   res.status(500).json({
     success: false,
     error: "Internal server error",
@@ -1102,14 +1492,25 @@ const startPeriodicChecks = () => {
       }
     }, Math.min(TV_STATUS_CONFIG.UPDATE_INTERVAL, CHROMECAST_STATUS_CONFIG.UPDATE_INTERVAL));
   }
+
+  // Cleanup Telegram bot subscribers setiap 1 jam
+  if (telegramBot) {
+    setInterval(() => {
+      try {
+        telegramBot.cleanupSubscribers();
+      } catch (error) {
+        console.error("Error cleaning up Telegram subscribers:", error);
+      }
+    }, 3600000); // Every hour
+  }
 };
 
 
 // Start server
 app.listen(port, async () => {
   console.log(`🚀 Server starting on port ${port}`);
-  
-  // PERBAIKAN: buat database connection check opsional
+
+  // buat database connection check opsional
   const dbConnected = await checkDatabaseConnection();
   if (!dbConnected) {
     console.warn("⚠️  Database connection failed, but server will continue running");
@@ -1121,7 +1522,7 @@ app.listen(port, async () => {
   console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
   console.log(`Chromecast Status Mode: ${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
 
-  // PERBAIKAN: buat status checks opsional dan tidak crash server
+  // buat status checks opsional dan tidak crash server
   try {
     if (typeof checkAllChannelsStatus === 'function') {
       await checkAllChannelsStatus();

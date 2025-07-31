@@ -105,10 +105,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Inisialisasi bot Telegram di sini
-let telegramBot = null;
-initializeTelegramBot();
-
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
   console.log("=== AUTHENTICATE TOKEN START ===");
@@ -278,6 +274,10 @@ const initializeTelegramBot = () => {
     console.error('❌ Failed to initialize Telegram bot:', error);
   }
 };
+
+// Inisialisasi bot Telegram di sini
+let telegramBot = null;
+initializeTelegramBot();
 
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {

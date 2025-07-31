@@ -1,6 +1,5 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const fetch = require('node-fetch');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -20,10 +19,26 @@ class IPTVTelegramBot {
         });
         this.subscribers = new Map();
         this.lastNotifications = new Map();
+        this.fetch = null; // Will be initialized asynchronously
+        
+        // Initialize fetch dynamically
+        this.initializeFetch();
+        
         this.setupCommands();
         this.setupErrorHandling();
 
         console.log('🤖 IPTV Telegram Bot initialized');
+    }
+
+    // Initialize fetch asynchronously
+    async initializeFetch() {
+        try {
+            const { default: fetch } = await import('node-fetch');
+            this.fetch = fetch;
+            console.log('✅ node-fetch initialized successfully');
+        } catch (error) {
+            console.error('❌ Failed to initialize node-fetch:', error);
+        }
     }
 
     // Tambahkan method untuk mendapatkan base URL API
@@ -308,8 +323,16 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
     // Fetch data methods (integrate with your existing API endpoints)
     async fetchChannelData() {
         try {
+            if (!this.fetch) {
+                console.warn('Fetch not initialized yet, waiting...');
+                await this.initializeFetch();
+                if (!this.fetch) {
+                    throw new Error('Failed to initialize fetch');
+                }
+            }
+
             const baseUrl = this.getApiBaseUrl();
-            const response = await fetch(`${baseUrl}/api/channels`, {
+            const response = await this.fetch(`${baseUrl}/api/channels`, {
                 headers: {
                     'Content-Type': 'application/json'
                 }
@@ -324,8 +347,16 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 
     async fetchChromecastData() {
         try {
+            if (!this.fetch) {
+                console.warn('Fetch not initialized yet, waiting...');
+                await this.initializeFetch();
+                if (!this.fetch) {
+                    throw new Error('Failed to initialize fetch');
+                }
+            }
+
             const baseUrl = this.getApiBaseUrl();
-            const response = await fetch(`${baseUrl}/api/chromecast`, {
+            const response = await this.fetch(`${baseUrl}/api/chromecast`, {
                 headers: {
                     'Content-Type': 'application/json'
                 }
@@ -340,8 +371,16 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 
     async fetchTVData() {
         try {
+            if (!this.fetch) {
+                console.warn('Fetch not initialized yet, waiting...');
+                await this.initializeFetch();
+                if (!this.fetch) {
+                    throw new Error('Failed to initialize fetch');
+                }
+            }
+
             const baseUrl = this.getApiBaseUrl();
-            const response = await fetch(`${baseUrl}/api/hospitality/tvs`, {
+            const response = await this.fetch(`${baseUrl}/api/hospitality/tvs`, {
                 headers: {
                     'Content-Type': 'application/json'
                 }
