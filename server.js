@@ -261,6 +261,62 @@ const trackRequestMetrics = (serviceType) => {
   };
 };
 
+// Helper untuk parsing user agent dan mendapatkan IP
+const getUserInfo = (req) => {
+  // Get real IP address (considering proxies)
+  const getClientIP = (req) => {
+    return req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+           req.headers['x-real-ip'] ||
+           req.headers['x-client-ip'] ||
+           req.connection?.remoteAddress ||
+           req.socket?.remoteAddress ||
+           req.connection?.socket?.remoteAddress ||
+           req.ip ||
+           'Unknown';
+  };
+
+  // Parse User Agent untuk mendapatkan info browser dan device
+  const parseUserAgent = (userAgent) => {
+    if (!userAgent) return { browser: 'Unknown', device: 'Unknown', os: 'Unknown' };
+
+    // Browser detection
+    let browser = 'Unknown';
+    if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) browser = 'Chrome';
+    else if (userAgent.includes('Firefox')) browser = 'Firefox';
+    else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browser = 'Safari';
+    else if (userAgent.includes('Edg')) browser = 'Edge';
+    else if (userAgent.includes('Opera')) browser = 'Opera';
+
+    // OS detection
+    let os = 'Unknown';
+    if (userAgent.includes('Windows')) os = 'Windows';
+    else if (userAgent.includes('Mac OS')) os = 'macOS';
+    else if (userAgent.includes('Linux')) os = 'Linux';
+    else if (userAgent.includes('Android')) os = 'Android';
+    else if (userAgent.includes('iPhone') || userAgent.includes('iPad')) os = 'iOS';
+
+    // Device type detection
+    let device = 'Desktop';
+    if (userAgent.includes('Mobile')) device = 'Mobile';
+    else if (userAgent.includes('Tablet') || userAgent.includes('iPad')) device = 'Tablet';
+
+    return { browser, device, os };
+  };
+
+  const ip = getClientIP(req);
+  const userAgent = req.headers['user-agent'] || '';
+  const { browser, device, os } = parseUserAgent(userAgent);
+
+  return {
+    ip,
+    browser,
+    device,
+    os,
+    userAgent,
+    timestamp: new Date().toISOString()
+  };
+};
+
 // Function untuk inisialisasi Telegram bot
 const initializeTelegramBot = () => {
   try {
@@ -283,17 +339,34 @@ initializeTelegramBot();
 app.post("/api/auth/login", async (req, res) => {
   try {
     console.log("=== LOGIN REQUEST START ===");
-    console.log("Headers:", req.headers);
-    console.log("Body:", {
+
+    // Get user info
+    const userInfo = getUserInfo(req);
+
+    console.log("📍 Client Info:", {
+      ip: userInfo.ip,
+      browser: userInfo.browser,
+      device: userInfo.device,
+      os: userInfo.os,
+      timestamp: userInfo.timestamp
+    });
+
+    console.log("🔍 User Agent:", userInfo.userAgent);
+
+    console.log("📝 Request Details:", {
       identifier: req.body.identifier,
-      passwordLength: req.body.password ? req.body.password.length : 0
+      passwordLength: req.body.password ? req.body.password.length : 0,
+      headers: {
+        origin: req.headers.origin,
+        referer: req.headers.referer
+      }
     });
 
     const { identifier, password } = req.body;
 
     // Validation
     if (!identifier || !password) {
-      console.log("❌ Missing credentials");
+      console.log(`❌ LOGIN FAILED - Missing credentials from IP: ${userInfo.ip} (${userInfo.browser} on ${userInfo.device})`);
       return res.status(400).json({
         success: false,
         error: "Email/username and password are required",
@@ -303,15 +376,9 @@ app.post("/api/auth/login", async (req, res) => {
     // Authenticate user
     console.log("🔍 Authenticating user...");
     const result = await authenticateUser(identifier, password);
-    console.log("Authentication result:", {
-      success: result.success,
-      userId: result.user?.id,
-      username: result.user?.username,
-      error: result.error
-    });
 
     if (result.success && result.user) {
-      // Generate JWT token - pastikan field yang benar digunakan
+      // Generate JWT token
       const tokenPayload = {
         userId: result.user.id || result.user.userId,
         email: result.user.email,
@@ -319,30 +386,37 @@ app.post("/api/auth/login", async (req, res) => {
         iat: Math.floor(Date.now() / 1000)
       };
 
-      console.log("🎫 Creating token with payload:", tokenPayload);
-
       const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
 
-      // Set cookie dengan konfigurasi yang lebih kompatibel
+      // Set cookie
       const cookieOptions = {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        path: "/" // PENTING: pastikan path cookie
+        maxAge: 24 * 60 * 60 * 1000,
+        path: "/"
       };
 
-      console.log("🍪 Setting cookie with options:", cookieOptions);
       res.cookie("token", token, cookieOptions);
 
-      // Konsisten dengan field yang digunakan di JWT
       const userResponse = {
         id: result.user.id || result.user.userId,
         username: result.user.username,
         email: result.user.email,
       };
 
-      console.log("✅ Login successful for user:", userResponse.username);
+      // Success logging dengan detail lengkap
+      console.log("✅ LOGIN SUCCESS:", {
+        username: userResponse.username,
+        email: userResponse.email,
+        ip: userInfo.ip,
+        browser: userInfo.browser,
+        device: userInfo.device,
+        os: userInfo.os,
+        timestamp: userInfo.timestamp,
+        sessionDuration: "24h"
+      });
+
       console.log("=== LOGIN REQUEST END ===");
 
       res.json({
@@ -351,14 +425,33 @@ app.post("/api/auth/login", async (req, res) => {
         message: "Login successful",
       });
     } else {
-      console.log("❌ Login failed:", result.error);
+      // Failed login logging dengan detail
+      console.log("❌ LOGIN FAILED:", {
+        identifier: identifier,
+        reason: result.error || "Invalid credentials",
+        ip: userInfo.ip,
+        browser: userInfo.browser,
+        device: userInfo.device,
+        os: userInfo.os,
+        timestamp: userInfo.timestamp,
+        userAgent: userInfo.userAgent
+      });
+
       res.status(401).json({
         success: false,
         error: result.error || "Invalid credentials",
       });
     }
   } catch (error) {
-    console.error("💥 Login API error:", error);
+    const userInfo = getUserInfo(req);
+    console.error("💥 LOGIN ERROR:", {
+      error: error.message,
+      ip: userInfo.ip,
+      browser: userInfo.browser,
+      device: userInfo.device,
+      timestamp: userInfo.timestamp
+    });
+
     res.status(500).json({
       success: false,
       error: "Internal server error during login",
@@ -370,15 +463,29 @@ app.post("/api/auth/login", async (req, res) => {
 // Register endpoint
 app.post("/api/auth/register", async (req, res) => {
   try {
-    console.log("Registration attempt:", {
+    // Get user info
+    const userInfo = getUserInfo(req);
+    
+    console.log("=== REGISTRATION REQUEST START ===");
+    console.log("📍 Client Info:", {
+      ip: userInfo.ip,
+      browser: userInfo.browser,
+      device: userInfo.device,
+      os: userInfo.os,
+      timestamp: userInfo.timestamp
+    });
+    
+    console.log("📝 Registration attempt:", {
       username: req.body.username,
       email: req.body.email,
+      userAgent: userInfo.userAgent
     });
 
     const { username, email, password } = req.body;
 
     // Validation
     if (!username || !email || !password) {
+      console.log(`❌ REGISTRATION FAILED - Missing fields from IP: ${userInfo.ip} (${userInfo.browser} on ${userInfo.device})`);
       return res.status(400).json({
         success: false,
         error: "Username, email, and password are required",
@@ -388,6 +495,7 @@ app.post("/api/auth/register", async (req, res) => {
     // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
+      console.log(`❌ REGISTRATION FAILED - Invalid email format from IP: ${userInfo.ip}`);
       return res.status(400).json({
         success: false,
         error: "Please enter a valid email address",
@@ -396,6 +504,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     // Password validation
     if (password.length < 6) {
+      console.log(`❌ REGISTRATION FAILED - Weak password from IP: ${userInfo.ip}`);
       return res.status(400).json({
         success: false,
         error: "Password must be at least 6 characters long",
@@ -404,6 +513,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     // Username validation
     if (username.length < 3) {
+      console.log(`❌ REGISTRATION FAILED - Short username from IP: ${userInfo.ip}`);
       return res.status(400).json({
         success: false,
         error: "Username must be at least 3 characters long",
@@ -412,11 +522,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     // Create user
     const result = await createUser({ username, email, password });
-    console.log("User creation result:", {
-      success: result.success,
-      userId: result.userId,
-    });
-
+    
     if (result.success && result.userId) {
       // Generate JWT token for new user
       const token = jwt.sign(
@@ -429,15 +535,28 @@ app.post("/api/auth/register", async (req, res) => {
         { expiresIn: "24h" }
       );
 
-      // Set HTTP-only cookie - sameSite untuk cross-origin
+      // Set HTTP-only cookie
       res.cookie("token", token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
-      console.log("Registration successful for user:", username);
+      // Success logging dengan detail lengkap
+      console.log("✅ REGISTRATION SUCCESS:", {
+        userId: result.userId,
+        username: username,
+        email: email,
+        ip: userInfo.ip,
+        browser: userInfo.browser,
+        device: userInfo.device,
+        os: userInfo.os,
+        timestamp: userInfo.timestamp,
+        autoLogin: true
+      });
+
+      console.log("=== REGISTRATION REQUEST END ===");
 
       res.status(201).json({
         success: true,
@@ -449,14 +568,33 @@ app.post("/api/auth/register", async (req, res) => {
         },
       });
     } else {
-      console.log("Registration failed:", result.error);
+      // Failed registration logging
+      console.log("❌ REGISTRATION FAILED:", {
+        username: username,
+        email: email,
+        reason: result.error || "Failed to create account",
+        ip: userInfo.ip,
+        browser: userInfo.browser,
+        device: userInfo.device,
+        os: userInfo.os,
+        timestamp: userInfo.timestamp
+      });
+      
       res.status(400).json({
         success: false,
         error: result.error || "Failed to create account",
       });
     }
   } catch (error) {
-    console.error("Register API error:", error);
+    const userInfo = getUserInfo(req);
+    console.error("💥 REGISTRATION ERROR:", {
+      error: error.message,
+      ip: userInfo.ip,
+      browser: userInfo.browser,
+      device: userInfo.device,
+      timestamp: userInfo.timestamp
+    });
+    
     res.status(500).json({
       success: false,
       error: "Internal server error during registration",
@@ -467,10 +605,18 @@ app.post("/api/auth/register", async (req, res) => {
 // Logout endpoint
 app.post("/api/auth/logout", (req, res) => {
   try {
+    const userInfo = getUserInfo(req);
+    
     console.log("=== LOGOUT REQUEST START ===");
-    console.log("Current cookies:", req.cookies);
+    console.log("📍 Logout from:", {
+      ip: userInfo.ip,
+      browser: userInfo.browser,
+      device: userInfo.device,
+      os: userInfo.os,
+      timestamp: userInfo.timestamp
+    });
 
-    // Clear cookie dengan berbagai konfigurasi untuk memastikan terhapus
+    // Clear cookie dengan berbagai konfigurasi
     const cookieConfigs = [
       {
         httpOnly: true,
@@ -497,16 +643,21 @@ app.post("/api/auth/logout", (req, res) => {
         path: "/",
       },
       {
-        path: "/", // Basic clear
+        path: "/",
       }
     ];
 
-    // Clear dengan semua konfigurasi possible
     cookieConfigs.forEach(config => {
       res.clearCookie("token", config);
     });
 
-    console.log("✅ All cookie configurations cleared");
+    console.log("✅ LOGOUT SUCCESS:", {
+      ip: userInfo.ip,
+      browser: userInfo.browser,
+      device: userInfo.device,
+      timestamp: userInfo.timestamp
+    });
+    
     console.log("=== LOGOUT REQUEST END ===");
 
     res.json({
@@ -515,8 +666,13 @@ app.post("/api/auth/logout", (req, res) => {
       authenticated: false
     });
   } catch (error) {
-    console.error("💥 Logout error:", error);
-    // Tetap return success karena logout harus selalu berhasil
+    const userInfo = getUserInfo(req);
+    console.error("💥 LOGOUT ERROR:", {
+      error: error.message,
+      ip: userInfo.ip,
+      timestamp: userInfo.timestamp
+    });
+    
     res.json({
       success: true,
       message: "Logged out successfully",
