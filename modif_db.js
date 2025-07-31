@@ -1,23 +1,34 @@
+require('dotenv').config();
+
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
+const uri = process.env.MONGO_URL;
 
-const uri = 'mongodb+srv://mekd1bro:727PlayingCards@cluster0.wnmnw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 let client = null;
 let isConnecting = false;
 
 async function connectDB() {
   if (client && client.topology?.isConnected()) {
-    const db = client.db('iptv');
-    return {
-      users: db.collection('login_page'),
-      client: client
-    };
+    try {
+      // Test connection with a quick ping
+      await client.db('iptv').admin().ping();
+      const db = client.db('iptv');
+      return {
+        users: db.collection('login_page'),
+        client: client
+      };
+    } catch (error) {
+      console.log('Connection test failed, reconnecting...');
+      client = null;
+    }
   }
 
   // Prevent multiple simultaneous connection attempts
   if (isConnecting) {
-    while (isConnecting) {
+    let attempts = 0;
+    while (isConnecting && attempts < 50) { // Max 5 seconds wait
       await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
     }
     if (client && client.topology?.isConnected()) {
       const db = client.db('iptv');
@@ -30,45 +41,39 @@ async function connectDB() {
 
   try {
     isConnecting = true;
-    console.log('🔄 Connecting to MongoDB...');
-    
-    if (!client) {
-      client = new MongoClient(uri, {
-        maxPoolSize: 10,
-        serverSelectionTimeoutMS: 10000, // Increased timeout
-        socketTimeoutMS: 45000,
-        connectTimeoutMS: 10000,
-        retryWrites: true,
-        retryReads: true
-      });
+    console.log('Connecting to MongoDB...');
+
+    if (client) {
+      try {
+        await client.close();
+      } catch (closeError) {
+        console.log('Error closing existing client:', closeError.message);
+      }
     }
-    
+
+    client = new MongoClient(uri, {
+      maxPoolSize: 5, // Reduced pool size
+      serverSelectionTimeoutMS: 15000, // Reduced timeout
+      socketTimeoutMS: 20000,
+      connectTimeoutMS: 15000,
+      retryWrites: true,
+      retryReads: true,
+      maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
+      heartbeatFrequencyMS: 10000 // Check connection every 10 seconds
+    });
+
     await client.connect();
-    
-    // Test the connection
-    await client.db('iptv').admin().ping();
-    console.log('✅ Connected to MongoDB successfully');
-    
+    console.log('Connected to MongoDB successfully');
+
     const db = client.db('iptv');
-    
-    // Ensure indexes exist for better performance
-    try {
-      await db.collection('login_page').createIndex({ email: 1 }, { unique: true });
-      await db.collection('login_page').createIndex({ username: 1 }, { unique: true });
-      console.log('📊 Database indexes ensured');
-    } catch (indexError) {
-      // Indexes might already exist, which is fine
-      console.log('📊 Database indexes already exist or couldn\'t be created');
-    }
-    
     return {
       users: db.collection('login_page'),
       client: client
     };
   } catch (error) {
-    console.error('❌ Error connecting to MongoDB:', error);
+    console.error('Error connecting to MongoDB:', error);
     client = null;
-    throw new Error(`Database connection failed: ${error.message}`);
+    throw new Error('Database connection failed');
   } finally {
     isConnecting = false;
   }
@@ -80,10 +85,10 @@ async function hashPassword(password) {
   try {
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    console.log('🔐 Password hashed successfully');
+    console.log('Password hashed successfully');
     return hashedPassword;
   } catch (error) {
-    console.error('❌ Error hashing password:', error);
+    console.error('Error hashing password:', error);
     throw new Error('Failed to hash password');
   }
 }
@@ -91,11 +96,32 @@ async function hashPassword(password) {
 async function comparePassword(password, hashedPassword) {
   try {
     const isMatch = await bcrypt.compare(password, hashedPassword);
-    console.log('🔍 Password comparison result:', isMatch);
+    console.log('Password comparison completed');
     return isMatch;
   } catch (error) {
-    console.error('❌ Error comparing password:', error);
+    console.error('Error comparing password:', error);
     throw new Error('Failed to compare password');
+  }
+}
+
+async function updateUserWithGoogleInfo(email, googleData) {
+  try {
+    const { users } = await connectDB();
+    const result = await users.updateOne(
+      { email: email.toLowerCase() },
+      {
+        $set: {
+          googleId: googleData.googleId,
+          avatar: googleData.avatar,
+          provider: 'google',
+          updatedAt: new Date()
+        }
+      }
+    );
+    return result;
+  } catch (error) {
+    console.error('Error updating user with Google info:', error);
+    return null;
   }
 }
 
@@ -104,164 +130,239 @@ async function comparePassword(password, hashedPassword) {
 async function getUserByEmailOrUsername(identifier) {
   try {
     console.log('🔍 Searching for user with identifier:', identifier);
-    
+
     const { users } = await connectDB();
-    const user = await users.findOne({
+
+    // Add timeout for database query
+    const queryPromise = users.findOne({
       $or: [
-        { email: identifier.toLowerCase() }, // Make email search case-insensitive
+        { email: identifier.toLowerCase() },
         { username: identifier }
       ],
-      isActive: { $ne: false } // Only get active users
+      isActive: { $ne: false }
     });
-    
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
     if (user) {
       console.log('✅ User found:', { id: user._id, username: user.username, email: user.email });
+      return user;
     } else {
       console.log('❌ User not found with identifier:', identifier);
+      return null;
     }
-    
-    return user;
   } catch (error) {
     console.error('❌ Error fetching user by email/username:', error);
-    throw new Error('Failed to fetch user');
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
   }
 }
 
 async function getUserById(userId) {
   try {
-    console.log('🔍 Searching for user with ID:', userId);
-    
+    console.log('Searching for user with ID:', userId);
+
     const { users } = await connectDB();
-    
-    const user = await users.findOne({ 
+
+    // Add timeout for database query
+    const queryPromise = users.findOne({
       _id: new ObjectId(userId),
       isActive: { $ne: false }
     });
-    
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
     if (user) {
-      console.log('✅ User found by ID:', { id: user._id, username: user.username });
+      console.log('User found by ID:', { id: user._id, username: user.username });
       // Remove password from returned user object
       const { password, ...userWithoutPassword } = user;
       return userWithoutPassword;
     } else {
-      console.log('❌ User not found with ID:', userId);
+      console.log('User not found with ID:', userId);
+      return null;
     }
-    
-    return null;
   } catch (error) {
-    console.error('❌ Error fetching user by ID:', error);
-    throw new Error('Failed to fetch user by ID');
+    console.error('Error fetching user by ID:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
   }
 }
 
 async function insertUser(userData) {
   try {
-    console.log('➕ Creating new user:', { username: userData.username, email: userData.email });
-    
+    console.log('Creating new user:', { username: userData.username, email: userData.email });
+
     const { users } = await connectDB();
-    
+
     const userDoc = {
       ...userData,
-      email: userData.email.toLowerCase(), // Store email in lowercase
+      email: userData.email.toLowerCase(),
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date()
     };
-    
+
     const result = await users.insertOne(userDoc);
-    console.log(`✅ User created with ID: ${result.insertedId}`);
+    console.log(`User created with ID: ${result.insertedId}`);
     return result.insertedId;
   } catch (error) {
-    console.error('❌ Error inserting user:', error);
-    
+    console.error('Error inserting user:', error);
+
     // Handle duplicate key errors
     if (error.code === 11000) {
       const field = error.keyPattern?.email ? 'email' : 'username';
       throw new Error(`This ${field} is already registered`);
     }
-    
-    throw new Error('Failed to create user');
+
+    throw new Error('Failed to create user in database');
   }
 }
 
-async function updateUserProfile(userId, updateData) {
+async function getUserByEmail(email) {
   try {
-    console.log('📝 Updating user profile:', userId);
-    
+    console.log('🔍 Searching for user by email:', email);
+
     const { users } = await connectDB();
-    
-    // Remove sensitive fields from update
-    const { password, _id, createdAt, ...safeUpdateData } = updateData;
-    
-    const result = await users.updateOne(
-      { _id: new ObjectId(userId) },
-      { 
-        $set: {
-          ...safeUpdateData,
-          updatedAt: new Date()
-        }
-      }
-    );
-    
-    console.log(`✅ Updated user profile: ${userId}`);
-    return result;
+
+    // Add timeout for database query
+    const queryPromise = users.findOne({
+      email: email.toLowerCase(),
+      isActive: { $ne: false }
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
+    if (user) {
+      console.log('✅ User found by email:', { id: user._id, username: user.username, email: user.email });
+      return user;
+    } else {
+      console.log('❌ User not found with email:', email);
+      return null;
+    }
   } catch (error) {
-    console.error('❌ Error updating user profile:', error);
-    throw new Error('Failed to update user profile');
+    console.error('❌ Error fetching user by email:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
   }
 }
 
 // ==================== AUTHENTICATION MAIN FUNCTIONS ====================
 
-async function createUser({ username, email, password }) {
+async function authenticateUser(identifier, password) {
   try {
-    console.log('🚀 Starting user creation process:', { username, email });
-    
-    // Normalize inputs
-    const normalizedEmail = email.toLowerCase().trim();
-    const trimmedUsername = username.trim();
-    
-    // Check if user already exists by email
-    console.log('🔍 Checking if email exists:', normalizedEmail);
-    const existingUserByEmail = await getUserByEmailOrUsername(normalizedEmail);
-    if (existingUserByEmail) {
-      console.log('❌ Email already exists');
-      return {
-        success: false,
-        error: 'An account with this email already exists'
-      };
-    }
+    console.log('Starting authentication process for:', identifier);
 
-    // Check if username exists
-    console.log('🔍 Checking if username exists:', trimmedUsername);
-    const existingUserByUsername = await getUserByEmailOrUsername(trimmedUsername);
-    if (existingUserByUsername) {
-      console.log('❌ Username already exists');
-      return {
-        success: false,
-        error: 'This username is already taken'
-      };
-    }
-
-    // Hash password
-    console.log('🔐 Hashing password...');
-    const hashedPassword = await hashPassword(password);
-    
-    // Create user
-    console.log('➕ Inserting user into database...');
-    const userId = await insertUser({
-      username: trimmedUsername,
-      email: normalizedEmail,
-      password: hashedPassword
+    // Add timeout wrapper
+    const authPromise = performAuthentication(identifier, password);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Authentication timeout')), 10000);
     });
 
-    console.log('✅ User created successfully:', { userId, username: trimmedUsername });
-    return {
-      success: true,
-      userId: userId
-    };
+    const result = await Promise.race([authPromise, timeoutPromise]);
+    return result;
   } catch (error) {
-    console.error('❌ User creation error:', error);
+    console.error('Authentication error:', error);
+
+    // Return specific error messages
+    if (error.message === 'Authentication timeout') {
+      return {
+        success: false,
+        error: 'Authentication request timed out. Please try again.'
+      };
+    }
+
+    if (error.message === 'Database connection failed') {
+      return {
+        success: false,
+        error: 'Database connection failed. Please try again later.'
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Authentication failed. Please check your credentials and try again.'
+    };
+  }
+}
+
+async function performAuthentication(identifier, password) {
+  // Normalize identifier
+  const normalizedIdentifier = identifier.trim();
+
+  // Find user by email or username
+  console.log('Finding user...');
+  const user = await getUserByEmailOrUsername(normalizedIdentifier);
+
+  if (!user) {
+    console.log('User not found');
+    return {
+      success: false,
+      error: 'Invalid email/username or password'
+    };
+  }
+
+  console.log('User found, verifying password...');
+  // Verify password
+  const isValidPassword = await comparePassword(password, user.password);
+
+  if (!isValidPassword) {
+    console.log('Invalid password');
+    return {
+      success: false,
+      error: 'Invalid email/username or password'
+    };
+  }
+
+  console.log('Authentication successful for user:', user.username);
+  return {
+    success: true,
+    user: {
+      userId: user._id.toString(),
+      username: user.username,
+      email: user.email
+    }
+  };
+}
+
+async function createUser({ username, email, password, googleId, avatar, provider }) {
+  try {
+    console.log('🔍 Creating user for provider:', provider || 'local');
+
+    const createPromise = performUserCreation({
+      username,
+      email,
+      password,
+      googleId,
+      avatar,
+      provider
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('User creation timeout')), 10000);
+    });
+
+    const result = await Promise.race([createPromise, timeoutPromise]);
+    return result;
+  } catch (error) {
+    console.error('User creation error:', error);
     return {
       success: false,
       error: error.message || 'Failed to create user'
@@ -269,165 +370,109 @@ async function createUser({ username, email, password }) {
   }
 }
 
-async function authenticateUser(identifier, password) {
-  try {
-    console.log('🔐 Starting authentication process for:', identifier);
-    
-    // Normalize identifier
-    const normalizedIdentifier = identifier.toLowerCase().trim();
-    
-    // Find user by email or username
-    console.log('🔍 Finding user...');
-    const user = await getUserByEmailOrUsername(normalizedIdentifier);
-    
-    if (!user) {
-      console.log('❌ User not found');
-      return {
-        success: false,
-        error: 'Invalid email/username or password'
-      };
-    }
-    
-    console.log('✅ User found, verifying password...');
-    // Verify password
-    const isValidPassword = await comparePassword(password, user.password);
-    
-    if (!isValidPassword) {
-      console.log('❌ Invalid password');
-      return {
-        success: false,
-        error: 'Invalid email/username or password'
-      };
-    }
+async function performUserCreation({ username, email, password, googleId, avatar, provider }) {
+  const normalizedEmail = email.toLowerCase().trim();
+  const trimmedUsername = username.trim();
 
-    console.log('✅ Authentication successful for user:', user.username);
-    return {
-      success: true,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email
-      }
-    };
-  } catch (error) {
-    console.error('❌ Authentication error:', error);
+  // Check existing user
+  const existingUserByEmail = await getUserByEmailOrUsername(normalizedEmail);
+  if (existingUserByEmail) {
     return {
       success: false,
-      error: 'Authentication failed due to server error'
+      error: 'An account with this email already exists'
     };
   }
-}
 
-async function changeUserPassword(userId, currentPassword, newPassword) {
-  try {
-    console.log('🔑 Changing password for user:', userId);
-    
-    const { users } = await connectDB();
-    
-    // Get current user
-    const user = await users.findOne({ _id: new ObjectId(userId) });
-    if (!user) {
-      return { success: false, error: 'User not found' };
-    }
-    
-    // Verify current password
-    const isCurrentPasswordValid = await comparePassword(currentPassword, user.password);
-    if (!isCurrentPasswordValid) {
-      return { success: false, error: 'Current password is incorrect' };
-    }
-    
-    // Hash new password
-    const hashedNewPassword = await hashPassword(newPassword);
-    
-    // Update password
-    await users.updateOne(
-      { _id: new ObjectId(userId) },
-      { 
-        $set: { 
-          password: hashedNewPassword,
-          updatedAt: new Date()
-        }
-      }
-    );
-    
-    console.log(`✅ Password changed for user: ${userId}`);
-    return { success: true };
-  } catch (error) {
-    console.error('❌ Error changing password:', error);
-    return { success: false, error: 'Failed to change password' };
+  // PERBAIKAN: Hash password hanya jika ada password
+  let hashedPassword = null;
+  if (password) {
+    hashedPassword = await hashPassword(password);
   }
+
+  // Create user document
+  const userDoc = {
+    username: trimmedUsername,
+    email: normalizedEmail,
+    password: hashedPassword,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+
+  // PERBAIKAN: Tambahkan fields Google OAuth jika ada
+  if (googleId) {
+    userDoc.googleId = googleId;
+    userDoc.provider = provider || 'google';
+  }
+  if (avatar) {
+    userDoc.avatar = avatar;
+  }
+
+  const userId = await insertUser(userDoc);
+  return {
+    success: true,
+    userId: userId.toString()
+  };
 }
 
-// ==================== UTILITY FUNCTIONS ====================
+// ==================== CONNECTION HEALTH CHECK ====================
 
 async function testConnection() {
   try {
-    console.log('🧪 Testing database connection...');
+    console.log('Testing database connection...');
     const { client } = await connectDB();
-    await client.db('iptv').admin().ping();
-    console.log('✅ Database connection test successful');
+
+    // Add timeout for ping
+    const pingPromise = client.db('iptv').admin().ping();
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Connection test timeout')), 5000);
+    });
+
+    await Promise.race([pingPromise, timeoutPromise]);
+    console.log('Database connection test successful');
     return true;
   } catch (error) {
-    console.error('❌ Database connection test failed:', error);
+    console.error('Database connection test failed:', error);
     return false;
-  }
-}
-
-async function updateConnectedDB() {
-  try {
-    return await connectDB();
-  } catch (error) {
-    console.error('❌ Error connecting to updated DB:', error);
-    throw error;
   }
 }
 
 // ==================== GRACEFUL SHUTDOWN ====================
 
-process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down MongoDB connection...');
+async function closeConnection() {
   if (client) {
     try {
       await client.close();
-      console.log('✅ MongoDB connection closed');
+      client = null;
+      console.log('MongoDB connection closed');
     } catch (error) {
-      console.error('❌ Error closing MongoDB connection:', error);
+      console.error('Error closing MongoDB connection:', error);
     }
   }
-  process.exit(0);
-});
+}
 
-process.on('SIGTERM', async () => {
-  console.log('\n🛑 Shutting down MongoDB connection...');
-  if (client) {
-    try {
-      await client.close();
-      console.log('✅ MongoDB connection closed');
-    } catch (error) {
-      console.error('❌ Error closing MongoDB connection:', error);
-    }
-  }
-  process.exit(0);
-});
+process.on('SIGINT', closeConnection);
+process.on('SIGTERM', closeConnection);
+
+// For Vercel serverless functions
+process.on('beforeExit', closeConnection);
 
 // ==================== EXPORTS ====================
 
 module.exports = {
   // Database connection
   connectDB,
-  updateConnectedDB,
-  testConnection,
 
   // User CRUD functions
   getUserById,
   getUserByEmailOrUsername,
+  getUserByEmail,
   insertUser,
-  updateUserProfile,
-  
+
   // Authentication functions
   createUser,
   authenticateUser,
-  changeUserPassword,
   hashPassword,
-  comparePassword
+  comparePassword,
+  updateUserWithGoogleInfo
 };

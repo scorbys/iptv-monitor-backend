@@ -72,6 +72,7 @@ router.get("/", async (req, res) => {
       const createResult = await createUser({
         email,
         username: name || email.split("@")[0],
+        name: name,
         password: null,
         googleId,
         avatar: picture || null,
@@ -81,7 +82,12 @@ router.get("/", async (req, res) => {
       if (createResult.success) {
         // Get the created user
         user = await getUserByEmailOrUsername(email);
-        console.log("New user created:", user.username);
+        console.log("New user created:", {
+          username: user.username,
+          name: user.name,
+          provider: user.provider,
+          avatar: user.avatar
+        });
       } else {
         console.error("Failed to create user:", createResult.error);
         return res.redirect(
@@ -89,13 +95,19 @@ router.get("/", async (req, res) => {
         );
       }
     } else {
-      console.log("User exists:", user.username);
+      console.log("User exists:", {
+        username: user.username,
+        name: user.name,
+        provider: user.provider
+      });
+
       // Update existing user dengan Google info
       if (!user.googleId) {
         console.log("Updating user with Google info...");
         await updateUserWithGoogleInfo(email, {
           googleId,
           avatar: picture,
+          name: name,
         });
         // Refresh user data
         user = await getUserByEmailOrUsername(email);
@@ -108,11 +120,17 @@ router.get("/", async (req, res) => {
               $set: {
                 googleId,
                 avatar: picture || user.avatar,
+                name: name || user.name,
                 provider: "google",
                 updatedAt: new Date(),
               },
             }
           );
+
+          console.log("User update result:", updateResult);
+
+          // Refresh user data setelah update
+          user = await getUserByEmailOrUsername(email);
         } catch (updateError) {
           console.error("Failed to update user with Google info:", updateError);
         }
@@ -141,10 +159,24 @@ router.get("/", async (req, res) => {
     const tokenPayload = {
       userId: userId,
       username: user.username,
+      name: user.name || user.username,
       email: user.email,
+      provider: user.provider || 'google',
+      googleId: user.googleId || null,
+      avatar: user.avatar || null,
       iat: Math.floor(Date.now() / 1000),
     };
-    console.log("Final token payload:", tokenPayload);
+    
+    console.log("Enhanced token payload:", {
+      userId: tokenPayload.userId,
+      username: tokenPayload.username,
+      name: tokenPayload.name,
+      email: tokenPayload.email,
+      provider: tokenPayload.provider,
+      hasGoogleId: !!tokenPayload.googleId,
+      hasAvatar: !!tokenPayload.avatar
+    });
+
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
     console.log("JWT token generated successfully for user:", userId);
 
@@ -183,7 +215,7 @@ router.get("/", async (req, res) => {
       httpOnly: false,
     });
 
-    // PERBAIKAN UTAMA: Set cookie dengan SameSite=Lax sebagai fallback
+    // Set cookie dengan SameSite=Lax sebagai fallback
     res.cookie("token-fallback", token, {
       ...baseCookieOptions,
       sameSite: "lax",

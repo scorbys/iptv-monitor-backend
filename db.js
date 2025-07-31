@@ -251,6 +251,7 @@ async function updateUserWithGoogleInfo(email, googleData) {
         $set: {
           googleId: googleData.googleId,
           avatar: googleData.avatar,
+          name: googleData.name || null,
           provider: 'google',
           updatedAt: new Date()
         }
@@ -480,7 +481,7 @@ async function performAuthentication(identifier, password) {
   };
 }
 
-async function createUser({ username, email, password, googleId, avatar, provider }) {
+async function createUser({ username, email, password, googleId, avatar, provider, name }) {
   try {
     console.log('🔍 Creating user for provider:', provider || 'local');
 
@@ -490,7 +491,8 @@ async function createUser({ username, email, password, googleId, avatar, provide
       password,
       googleId,
       avatar,
-      provider
+      provider,
+      name
     });
 
     const timeoutPromise = new Promise((_, reject) => {
@@ -508,7 +510,7 @@ async function createUser({ username, email, password, googleId, avatar, provide
   }
 }
 
-async function performUserCreation({ username, email, password, googleId, avatar, provider }) {
+async function performUserCreation({ username, email, password, googleId, avatar, provider, name }) {
   const normalizedEmail = email.toLowerCase().trim();
   const trimmedUsername = username.trim();
 
@@ -521,7 +523,7 @@ async function performUserCreation({ username, email, password, googleId, avatar
     };
   }
 
-  // PERBAIKAN: Hash password hanya jika ada password
+  // Hash password hanya jika ada password
   let hashedPassword = null;
   if (password) {
     hashedPassword = await hashPassword(password);
@@ -530,21 +532,34 @@ async function performUserCreation({ username, email, password, googleId, avatar
   // Create user document
   const userDoc = {
     username: trimmedUsername,
+    name: name || trimmedUsername,
     email: normalizedEmail,
     password: hashedPassword,
-    isActive: true,
+    provider: provider || 'local',
     createdAt: new Date(),
     updatedAt: new Date()
   };
 
-  // PERBAIKAN: Tambahkan fields Google OAuth jika ada
+  // Tambahkan fields Google OAuth jika ada
   if (googleId) {
     userDoc.googleId = googleId;
     userDoc.provider = provider || 'google';
+  } else {
+    userDoc.provider = 'local';
   }
+  
   if (avatar) {
     userDoc.avatar = avatar;
   }
+
+  console.log('Creating user with complete data:', {
+    username: userDoc.username,
+    name: userDoc.name,
+    email: userDoc.email,
+    provider: userDoc.provider,
+    hasAvatar: !!userDoc.avatar,
+    hasGoogleId: !!userDoc.googleId
+  });
 
   const userId = await insertUser(userDoc);
   return {
