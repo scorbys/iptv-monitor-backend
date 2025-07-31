@@ -3,6 +3,8 @@ const TelegramBot = require('node-telegram-bot-api');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+
+
 class IPTVTelegramBot {
     constructor() {
         if (!TELEGRAM_BOT_TOKEN) {
@@ -44,6 +46,19 @@ class IPTVTelegramBot {
     // Tambahkan method untuk mendapatkan base URL API
     getApiBaseUrl() {
         return process.env.BASE_URL || 'http://localhost:3001';
+    }
+
+    getIndonesianTime() {
+        return new Date().toLocaleString('id-ID', {
+            timeZone: 'Asia/Makassar', // WITA timezone
+            hour12: false, // Gunakan format 24 jam
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
     }
 
     setupCommands() {
@@ -143,7 +158,7 @@ Sedang mengecek perangkat offline...
                 this.subscribers.get(chatId).pausedUntil = pausedUntil;
 
                 this.bot.sendMessage(chatId,
-                    `⏸️ *Notifikasi dijeda selama 1 jam*\n\nNotifikasi akan kembali aktif pada:\n${pausedUntil.toLocaleString('id-ID')}`,
+                    `⏸️ *Notifikasi dijeda selama 1 jam*\n\nNotifikasi akan kembali aktif pada:\n${new Date(Date.now() + 60 * 60 * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Makassar', hour12: false })}`,
                     { parse_mode: 'Markdown' }
                 );
                 console.log(`⏸️ User ${chatId} paused notifications until ${pausedUntil}`);
@@ -332,7 +347,7 @@ Sedang mengecek perangkat offline...
 📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online  
 🏨 *TV Hospitality:* ${tvs.length - tvOffline}/${tvs.length} Online
 
-⏰ *Update terakhir:* ${new Date().toLocaleString('id-ID')}
+⏰ *Update terakhir:* ${this.getIndonesianTime()}
 
 ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline : '✅ Semua perangkat berjalan normal'}
         `;
@@ -546,7 +561,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 message += '\n';
             });
 
-            message += `⏰ *Waktu:* ${new Date().toLocaleString('id-ID')}\n\n`;
+            message += `⏰ *Waktu:* ${this.getIndonesianTime()}\n\n`;
             message += `Gunakan perintah untuk info lebih lanjut atau atur notifikasi.`;
 
             await this.bot.sendMessage(chatId, message, {
@@ -616,7 +631,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                     message += '\n';
                 });
 
-                message += `⏰ *Waktu:* ${new Date().toLocaleString('id-ID')}\n\n`;
+                message += `⏰ *Waktu:* ${this.getIndonesianTime()}\n\n`;
                 message += `Ketik /jeda untuk jeda 1 jam atau /stop untuk berhenti menerima notifikasi.`;
 
                 await this.bot.sendMessage(chatId, message, {
@@ -676,7 +691,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online  
 🏨 *TV Hospitality:* ${tvs.length - tvOffline}/${tvs.length} Online
 
-⏰ *Update terakhir:* ${new Date().toLocaleString('id-ID')}
+⏰ *Update terakhir:* ${this.getIndonesianTime()}
 
 ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline : '✅ Semua perangkat berjalan normal'}
         `;
@@ -707,7 +722,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 
                             // Update message untuk konfirmasi
                             await this.bot.editMessageText(
-                                `⏸️ *Notifikasi Dijeda*\n\nNotifikasi akan kembali aktif pada:\n${pausedUntil.toLocaleString('id-ID')}`,
+                                `⏸️ *Notifikasi Dijeda*\n\nNotifikasi akan kembali aktif pada:\n${new Date(Date.now() + 60 * 60 * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Makassar', hour12: false })}`,
                                 {
                                     chat_id: chatId,
                                     message_id: callbackQuery.message.message_id,

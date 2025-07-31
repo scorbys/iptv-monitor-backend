@@ -184,7 +184,7 @@ const TV_STATUS_CONFIG = {
   USE_DUMMY_STATUS: true, // Set to false for real connectivity checks
   ONLINE_PROBABILITY: 0.96, // 96% chance of being online
   RESPONSE_TIME_RANGE: { min: 5, max: 150 }, // Response time in ms
-  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
+  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds
 };
 // Configuration for Chromecast status simulation
 const CHROMECAST_STATUS_CONFIG = {
@@ -193,7 +193,7 @@ const CHROMECAST_STATUS_CONFIG = {
   SIGNAL_LEVEL_RANGE: { min: -70, max: -20 }, // Signal strength in dBm
   SPEED_RANGE: { min: 10, max: 100 }, // Speed in Mbps
   RESPONSE_TIME_RANGE: { min: 10, max: 200 }, // Response time in ms
-  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
+  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds
 };
 
 const networkStats = {
@@ -2389,7 +2389,7 @@ const startPeriodicChecks = () => {
       checkAllChannelsStatus().catch(error => {
         console.error("Error in periodic channel status check:", error);
       });
-    }, 120000); // Every 2 minutes
+    }, 1800000); // Every 30 minutes
   }
 
   // TV and Chromecast status checks
