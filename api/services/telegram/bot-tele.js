@@ -91,6 +91,25 @@ Ketik /help untuk melihat perintah ini lagi.
 
             console.log(`👤 User ${userName} (${chatId}) subscribed to notifications`);
         });
+        
+        console.log(`🤖 Bot initialized with API base URL: ${this.getApiBaseUrl()}`);
+
+        // Test connection on startup
+        setTimeout(async () => {
+            try {
+                console.log('🔍 Testing API connection...');
+                const channels = await this.fetchChannelData();
+                const chromecasts = await this.fetchChromecastData();
+                const tvs = await this.fetchTVData();
+
+                console.log(`📊 API Test Results:`);
+                console.log(`   - Channels: ${channels.length}`);
+                console.log(`   - Chromecasts: ${chromecasts.length}`);
+                console.log(`   - TVs: ${tvs.length}`);
+            } catch (error) {
+                console.error('❌ API connection test failed:', error);
+            }
+        }, 5000); // Test after 5 seconds
 
         // Command /stop
         this.bot.onText(/\/stop/, (msg) => {
@@ -332,12 +351,20 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             }
 
             const baseUrl = this.getApiBaseUrl();
-            const response = await this.fetch(`${baseUrl}/api/channels`, {
+            const response = await this.fetch(`${baseUrl}/api/internal/channels`, {
                 headers: {
-                    'Content-Type': 'application/json'
-                }
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                },
+                timeout: 10000 // 10 second timeout
             });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const result = await response.json();
+            console.log(`✅ Fetched ${result.data?.length || 0} channels for bot`);
             return result.success ? result.data : [];
         } catch (error) {
             console.error('Failed to fetch channel data:', error);
@@ -356,12 +383,20 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             }
 
             const baseUrl = this.getApiBaseUrl();
-            const response = await this.fetch(`${baseUrl}/api/chromecast`, {
+            const response = await this.fetch(`${baseUrl}/api/internal/chromecast`, {
                 headers: {
-                    'Content-Type': 'application/json'
-                }
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                },
+                timeout: 10000
             });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const result = await response.json();
+            console.log(`✅ Fetched ${result.data?.length || 0} chromecast devices for bot`);
             return result.success ? result.data : [];
         } catch (error) {
             console.error('Failed to fetch Chromecast data:', error);
@@ -380,12 +415,20 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             }
 
             const baseUrl = this.getApiBaseUrl();
-            const response = await this.fetch(`${baseUrl}/api/hospitality/tvs`, {
+            const response = await this.fetch(`${baseUrl}/api/internal/hospitality/tvs`, {
                 headers: {
-                    'Content-Type': 'application/json'
-                }
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                },
+                timeout: 10000
             });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const result = await response.json();
+            console.log(`✅ Fetched ${result.data?.length || 0} TV devices for bot`);
             return result.success ? result.data : [];
         } catch (error) {
             console.error('Failed to fetch TV data:', error);

@@ -2001,6 +2001,118 @@ app.post("/api/telegram/test-notification", authenticateToken, async (req, res) 
   }
 });
 
+// Add after other API routes, before the 404 handler
+// Special endpoints for Telegram bot (no auth required, internal use only)
+app.get("/api/internal/channels", async (req, res) => {
+  try {
+    // Validate request is from internal source (optional security check)
+    const userAgent = req.get('User-Agent');
+    if (!userAgent || !userAgent.includes('node')) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
+    }
+
+    const channels = await getAllChannelsFromDB();
+    const channelsWithStatus = channels.map((channel) => {
+      const status = channelStatus.get(channel.id) || {
+        status: "offline",
+        responseTime: null,
+        lastChecked: null,
+        error: "Not checked",
+      };
+      return { ...channel, ...status };
+    });
+
+    res.json({
+      success: true,
+      data: channelsWithStatus
+    });
+  } catch (error) {
+    console.error("Error fetching channels for bot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching channels",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/internal/chromecast", async (req, res) => {
+  try {
+    const userAgent = req.get('User-Agent');
+    if (!userAgent || !userAgent.includes('node')) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
+    }
+
+    const devices = await getChromecastDevices();
+    const devicesWithStatus = devices.map((device) => {
+      const deviceStatus = chromecastStatus.get(device.idCast) || {
+        isPingable: false,
+        isOnline: false,
+        signalLevel: null,
+        speed: null,
+        responseTime: null,
+        lastSeen: null,
+        error: "Not checked",
+        lastChecked: null,
+      };
+      return { ...device, ...deviceStatus };
+    });
+
+    res.json({
+      success: true,
+      data: devicesWithStatus
+    });
+  } catch (error) {
+    console.error("Error fetching chromecast for bot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching chromecast devices",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/internal/hospitality/tvs", async (req, res) => {
+  try {
+    const userAgent = req.get('User-Agent');
+    if (!userAgent || !userAgent.includes('node')) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
+    }
+
+    const tvs = await getHospitalityTVs();
+    const tvsWithStatus = tvs.map((tv) => {
+      const deviceStatus = tvStatus.get(tv.roomNo) || {
+        status: "offline",
+        responseTime: null,
+        lastChecked: null,
+        error: "Not checked",
+      };
+      return { ...tv, ...deviceStatus };
+    });
+
+    res.json({
+      success: true,
+      data: tvsWithStatus
+    });
+  } catch (error) {
+    console.error("Error fetching TVs for bot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching hospitality TVs",
+      error: error.message,
+    });
+  }
+});
+
 // Endpoint baru untuk network traffic stats
 app.get("/api/network/traffic/stats", authenticateToken, async (req, res) => {
   try {
