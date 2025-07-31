@@ -20,10 +20,10 @@ class IPTVTelegramBot {
         this.subscribers = new Map();
         this.lastNotifications = new Map();
         this.fetch = null; // Will be initialized asynchronously
-        
+
         // Initialize fetch dynamically
         this.initializeFetch();
-        
+
         this.setupCommands();
         this.setupErrorHandling();
 
@@ -48,7 +48,7 @@ class IPTVTelegramBot {
 
     setupCommands() {
         // Command /start
-        this.bot.onText(/\/start/, (msg) => {
+        this.bot.onText(/\/start/, async (msg) => {  // Tambahkan async di sini
             const chatId = msg.chat.id;
             const userName = msg.from.first_name || msg.from.username || 'User';
 
@@ -70,28 +70,34 @@ Halo ${userName}! Bot ini akan membantu memantau status perangkat IPTV Anda.
 • /ringkasan - Ringkasan error perangkat
 • /jeda - Jeda notifikasi 1 jam
 • /stop - Berhenti menerima notifikasi
+• /help - Tampilkan bantuan
 
 ✅ *Status:* Aktif menerima notifikasi
 🔔 Anda akan menerima notifikasi otomatis saat ada perangkat offline.
 
-Ketik /help untuk melihat perintah ini lagi.
+Sedang mengecek perangkat offline...
       `;
 
-            this.bot.sendMessage(chatId, welcomeMessage, {
+            await this.bot.sendMessage(chatId, welcomeMessage, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [
                         ['/list-channel', '/list-chromecast'],
                         ['/list-TVhospitality', '/ringkasan'],
-                        ['/jeda', '/stop']
+                        ['/jeda', '/stop', '/help']  // Tambahkan /help di keyboard
                     ],
                     resize_keyboard: true
                 }
             });
 
             console.log(`👤 User ${userName} (${chatId}) subscribed to notifications`);
+
+            // Auto-check untuk perangkat offline setelah /start
+            setTimeout(async () => {
+                await this.checkAndNotifyOfflineDevices(chatId);
+            }, 2000); // Delay 2 detik untuk memastikan setup selesai
         });
-        
+
         console.log(`🤖 Bot initialized with API base URL: ${this.getApiBaseUrl()}`);
 
         // Test connection on startup
@@ -436,6 +442,135 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
         }
     }
 
+    // Method untuk check offline devices khusus untuk user baru
+    async checkAndNotifyOfflineDevices(specificChatId = null) {
+        try {
+            const [channels, chromecasts, tvs] = await Promise.all([
+                this.fetchChannelData(),
+                this.fetchChromecastData(),
+                this.fetchTVData()
+            ]);
+
+            const notifications = [];
+
+            // Check offline channels
+            channels.filter(ch => ch.status === 'offline').forEach(ch => {
+                notifications.push({
+                    source: 'channel',
+                    message: `${ch.channelName || 'Unknown Channel'}`,
+                    ipAddr: ch.ipMulticast
+                });
+            });
+
+            // Check offline chromecasts
+            chromecasts.filter(d => !d.isOnline).forEach(d => {
+                notifications.push({
+                    source: 'chromecast',
+                    message: `${d.deviceName || 'Unknown Device'}`,
+                    ipAddr: d.ipAddr
+                });
+            });
+
+            // Check offline TVs
+            tvs.filter(tv => tv.status === 'offline').forEach(tv => {
+                notifications.push({
+                    source: 'tv',
+                    message: `Room ${tv.roomNo || 'Unknown'}`,
+                    ipAddr: tv.ipAddress
+                });
+            });
+
+            if (notifications.length > 0) {
+                if (specificChatId) {
+                    // Send ke user tertentu (untuk /start)
+                    await this.sendOfflineNotificationToUser(specificChatId, notifications);
+                } else {
+                    // Send ke semua subscriber (untuk monitoring rutin)
+                    await this.sendOfflineNotification(notifications);
+                }
+            } else {
+                if (specificChatId) {
+                    await this.bot.sendMessage(specificChatId,
+                        '✅ *Semua perangkat online!*\n\nTidak ada perangkat yang offline saat ini.',
+                        { parse_mode: 'Markdown' }
+                    );
+                }
+            }
+
+        } catch (error) {
+            console.error('Error checking offline devices:', error);
+            if (specificChatId) {
+                await this.bot.sendMessage(specificChatId,
+                    '❌ Gagal mengecek status perangkat. Silakan coba lagi nanti.'
+                );
+            }
+        }
+    }
+
+    // Method untuk send notification ke user tertentu
+    async sendOfflineNotificationToUser(chatId, notifications) {
+        try {
+            // Check apakah user masih aktif dan tidak paused
+            const subscriber = this.subscribers.get(chatId);
+            if (!subscriber || !subscriber.active) return;
+            if (subscriber.pausedUntil && new Date() < subscriber.pausedUntil) return;
+
+            // Group notifications by type
+            const groupedNotifications = notifications.reduce((acc, notif) => {
+                if (!acc[notif.source]) acc[notif.source] = [];
+                acc[notif.source].push(notif);
+                return acc;
+            }, {});
+
+            let message = '🚨 *Perangkat Offline Terdeteksi*\n\n';
+
+            Object.entries(groupedNotifications).forEach(([source, notifs]) => {
+                const sourceEmoji = {
+                    'channel': '📺',
+                    'chromecast': '📱',
+                    'tv': '🏨'
+                };
+
+                message += `${sourceEmoji[source] || '🔧'} *${source.toUpperCase()}:*\n`;
+
+                notifs.slice(0, 5).forEach(notif => {
+                    message += `• ${notif.message}\n`;
+                    if (notif.ipAddr) {
+                        message += `  IP: ${notif.ipAddr}\n`;
+                    }
+                });
+
+                if (notifs.length > 5) {
+                    message += `  ... dan ${notifs.length - 5} perangkat lainnya\n`;
+                }
+                message += '\n';
+            });
+
+            message += `⏰ *Waktu:* ${new Date().toLocaleString('id-ID')}\n\n`;
+            message += `Gunakan perintah untuk info lebih lanjut atau atur notifikasi.`;
+
+            await this.bot.sendMessage(chatId, message, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '⏸️ Jeda 1 Jam', callback_data: 'pause_1h' },
+                            { text: '🔕 Stop', callback_data: 'stop_notifications' }
+                        ],
+                        [
+                            { text: '📊 Lihat Ringkasan', callback_data: 'show_summary' }
+                        ]
+                    ]
+                }
+            });
+
+            console.log(`📤 Initial notification sent to user ${chatId}`);
+
+        } catch (error) {
+            console.error(`Failed to send initial notification to ${chatId}:`, error);
+        }
+    }
+
     // Method untuk mengirim notifikasi offline devices
     async sendOfflineNotification(notifications) {
         const activeSubscribers = Array.from(this.subscribers.entries())
@@ -513,41 +648,137 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
         }
     }
 
+    // Method sendSummaryToUser untuk callback
+    async sendSummaryToUser(chatId) {
+        try {
+            const [channels, chromecasts, tvs] = await Promise.all([
+                this.fetchChannelData(),
+                this.fetchChromecastData(),
+                this.fetchTVData()
+            ]);
+
+            const channelOffline = channels.filter(ch => ch.status === 'offline').length;
+            const chromecastOffline = chromecasts.filter(d => !d.isOnline).length;
+            const tvOffline = tvs.filter(tv => tv.status === 'offline').length;
+
+            const totalDevices = channels.length + chromecasts.length + tvs.length;
+            const totalOffline = channelOffline + chromecastOffline + tvOffline;
+            const uptime = totalDevices > 0 ? ((totalDevices - totalOffline) / totalDevices * 100).toFixed(1) : '100';
+
+            const message = `
+📊 *Ringkasan Status IPTV*
+
+🎯 *Uptime Keseluruhan:* ${uptime}%
+🔧 *Total Perangkat:* ${totalDevices}
+❌ *Total Offline:* ${totalOffline}
+
+📺 *Channel:* ${channels.length - channelOffline}/${channels.length} Online
+📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online  
+🏨 *TV Hospitality:* ${tvs.length - tvOffline}/${tvs.length} Online
+
+⏰ *Update terakhir:* ${new Date().toLocaleString('id-ID')}
+
+${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline : '✅ Semua perangkat berjalan normal'}
+        `;
+
+            await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('Error generating summary for user:', error);
+            await this.bot.sendMessage(chatId, '❌ Gagal mengambil ringkasan data. Silakan coba lagi.');
+        }
+    }
+
     // Setup callback query handlers
     setupErrorHandling() {
-        this.bot.on('callback_query', (callbackQuery) => {
+        this.bot.on('callback_query', async (callbackQuery) => {
             const chatId = callbackQuery.message.chat.id;
             const data = callbackQuery.data;
 
-            switch (data) {
-                case 'pause_1h':
-                    if (this.subscribers.has(chatId)) {
-                        const pausedUntil = new Date(Date.now() + 60 * 60 * 1000);
-                        this.subscribers.get(chatId).pausedUntil = pausedUntil;
-                        this.bot.answerCallbackQuery(callbackQuery.id, {
-                            text: '⏸️ Notifikasi dijeda selama 1 jam'
-                        });
-                    }
-                    break;
+            try {
+                switch (data) {
+                    case 'pause_1h':
+                        if (this.subscribers.has(chatId)) {
+                            const pausedUntil = new Date(Date.now() + 60 * 60 * 1000);
+                            this.subscribers.get(chatId).pausedUntil = pausedUntil;
 
-                case 'stop_notifications':
-                    if (this.subscribers.has(chatId)) {
-                        this.subscribers.get(chatId).active = false;
-                        this.bot.answerCallbackQuery(callbackQuery.id, {
-                            text: '🔕 Notifikasi dihentikan'
-                        });
-                    }
-                    break;
+                            await this.bot.answerCallbackQuery(callbackQuery.id, {
+                                text: '⏸️ Notifikasi dijeda selama 1 jam'
+                            });
 
-                case 'show_summary':
-                    this.bot.answerCallbackQuery(callbackQuery.id);
-                    // Trigger ringkasan command
-                    this.bot.emit('message', {
-                        chat: { id: chatId },
-                        text: '/ringkasan',
-                        from: callbackQuery.from
-                    });
-                    break;
+                            // Update message untuk konfirmasi
+                            await this.bot.editMessageText(
+                                `⏸️ *Notifikasi Dijeda*\n\nNotifikasi akan kembali aktif pada:\n${pausedUntil.toLocaleString('id-ID')}`,
+                                {
+                                    chat_id: chatId,
+                                    message_id: callbackQuery.message.message_id,
+                                    parse_mode: 'Markdown',
+                                    reply_markup: {
+                                        inline_keyboard: [
+                                            [{ text: '✅ Aktifkan Kembali', callback_data: 'resume_notifications' }]
+                                        ]
+                                    }
+                                }
+                            );
+
+                            console.log(`⏸️ User ${chatId} paused notifications until ${pausedUntil}`);
+                        }
+                        break;
+
+                    case 'resume_notifications':
+                        if (this.subscribers.has(chatId)) {
+                            this.subscribers.get(chatId).pausedUntil = null;
+
+                            await this.bot.answerCallbackQuery(callbackQuery.id, {
+                                text: '✅ Notifikasi diaktifkan kembali'
+                            });
+
+                            await this.bot.editMessageText(
+                                '✅ *Notifikasi Aktif*\n\nAnda akan menerima notifikasi perangkat offline.',
+                                {
+                                    chat_id: chatId,
+                                    message_id: callbackQuery.message.message_id,
+                                    parse_mode: 'Markdown'
+                                }
+                            );
+
+                            console.log(`✅ User ${chatId} resumed notifications`);
+                        }
+                        break;
+
+                    case 'stop_notifications':
+                        if (this.subscribers.has(chatId)) {
+                            this.subscribers.get(chatId).active = false;
+
+                            await this.bot.answerCallbackQuery(callbackQuery.id, {
+                                text: '🔕 Notifikasi dihentikan'
+                            });
+
+                            await this.bot.editMessageText(
+                                '🔕 *Notifikasi Dihentikan*\n\nAnda tidak akan menerima notifikasi lagi.\nKetik /start untuk mengaktifkan kembali.',
+                                {
+                                    chat_id: chatId,
+                                    message_id: callbackQuery.message.message_id,
+                                    parse_mode: 'Markdown',
+                                    reply_markup: { remove_keyboard: true }
+                                }
+                            );
+
+                            console.log(`🔕 User ${chatId} stopped notifications`);
+                        }
+                        break;
+
+                    case 'show_summary':
+                        await this.bot.answerCallbackQuery(callbackQuery.id);
+
+                        // Panggil langsung method ringkasan
+                        await this.sendSummaryToUser(chatId);
+                        break;
+                }
+            } catch (error) {
+                console.error('Error handling callback query:', error);
+                await this.bot.answerCallbackQuery(callbackQuery.id, {
+                    text: '❌ Terjadi kesalahan, silakan coba lagi'
+                });
             }
         });
 
