@@ -262,9 +262,12 @@ Sedang mengecek perangkat offline...
 
                     if (online.length > 0) {
                         message += '🟢 *Chromecast Online:*\n';
-                        online.forEach(d => {
+                        online.slice(0, 15).forEach(d => {
                             message += `• ${d.deviceName || 'Unknown'}\n`;
                         });
+                        if (online.length > 15) {
+                            message += `... dan ${online.length - 15} Chromecast lainnya\n`
+                        }
                     }
                 }
 
