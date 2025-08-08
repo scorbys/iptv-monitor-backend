@@ -98,30 +98,23 @@ router.get("/", async (req, res) => {
       console.log("User exists:", {
         username: user.username,
         name: user.name,
-        provider: user.provider
+        provider: user.provider,
       });
 
       // Update existing user dengan Google info
       if (!user.googleId) {
         console.log("Updating user with Google info...");
-        await updateUserWithGoogleInfo(email, {
-          googleId,
-          avatar: picture,
-          name: name,
-        });
-        // Refresh user data
-        user = await getUserByEmailOrUsername(email);
 
         try {
           const { users } = await require("../../../../db").connectDB();
-          await users.updateOne(
+          const updateResult = await users.updateOne(
             { email: email.toLowerCase() },
             {
               $set: {
                 googleId,
                 avatar: picture || user.avatar,
                 name: name || user.name,
-                provider: "google",
+                provider: user.provider === "local" ? "google" : user.provider, // Preserve existing provider if not local
                 updatedAt: new Date(),
               },
             }
@@ -131,6 +124,13 @@ router.get("/", async (req, res) => {
 
           // Refresh user data setelah update
           user = await getUserByEmailOrUsername(email);
+          console.log("Updated user data:", {
+            username: user.username,
+            name: user.name,
+            provider: user.provider,
+            avatar: user.avatar,
+            googleId: user.googleId,
+          });
         } catch (updateError) {
           console.error("Failed to update user with Google info:", updateError);
         }

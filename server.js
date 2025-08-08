@@ -88,6 +88,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// Static files middleware untuk serve uploaded files
+app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads'), {
+  maxAge: '1y', // Cache selama 1 tahun
+  setHeaders: (res, path) => {
+    // Set proper headers untuk images
+    if (path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (path.endsWith('.gif')) {
+      res.setHeader('Content-Type', 'image/gif');
+    } else if (path.endsWith('.webp')) {
+      res.setHeader('Content-Type', 'image/webp');
+    }
+  }
+}));
+
 // Middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));

@@ -1,7 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
-const { getUserById, updateUserProfile, getUserByEmailOrUsername } = require("../../../db");
+const {
+  getUserById,
+  updateUserProfile,
+  getUserByEmailOrUsername,
+} = require("../../../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -9,11 +13,11 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const authenticateToken = async (req, res, next) => {
   try {
     const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
-    
+
     if (!token) {
       return res.status(401).json({
         success: false,
-        error: "No token provided"
+        error: "No token provided",
       });
     }
 
@@ -23,7 +27,7 @@ const authenticateToken = async (req, res, next) => {
   } catch (error) {
     return res.status(401).json({
       success: false,
-      error: "Invalid token"
+      error: "Invalid token",
     });
   }
 };
@@ -41,15 +45,19 @@ router.put("/", async (req, res) => {
     if (!currentUser) {
       return res.status(404).json({
         success: false,
-        error: "User not found"
+        error: "User not found",
       });
     }
 
     // Check if user is Google user and trying to change username
-    if (currentUser.provider === 'google' && currentUser.googleId && username !== currentUser.username) {
+    if (
+      currentUser.provider === "google" &&
+      currentUser.googleId &&
+      username !== currentUser.username
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Username cannot be changed for Google accounts"
+        error: "Username cannot be changed for Google accounts",
       });
     }
 
@@ -58,14 +66,14 @@ router.put("/", async (req, res) => {
       if (!username || username.trim().length < 3) {
         return res.status(400).json({
           success: false,
-          error: "Username must be at least 3 characters long"
+          error: "Username must be at least 3 characters long",
         });
       }
 
       if (!/^[a-zA-Z0-9_]+$/.test(username)) {
         return res.status(400).json({
           success: false,
-          error: "Username can only contain letters, numbers, and underscores"
+          error: "Username can only contain letters, numbers, and underscores",
         });
       }
 
@@ -74,7 +82,7 @@ router.put("/", async (req, res) => {
       if (existingUser && existingUser._id.toString() !== userId) {
         return res.status(400).json({
           success: false,
-          error: "Username is already taken"
+          error: "Username is already taken",
         });
       }
     }
@@ -82,25 +90,25 @@ router.put("/", async (req, res) => {
     // Update user profile
     const result = await updateUserProfile(userId, {
       username: username.trim(),
-      name: name ? name.trim() : null
+      name: name ? name.trim() : null,
     });
 
     if (result.success) {
       res.json({
         success: true,
-        message: "Profile updated successfully"
+        message: "Profile updated successfully",
       });
     } else {
       res.status(500).json({
         success: false,
-        error: result.error || "Failed to update profile"
+        error: result.error || "Failed to update profile",
       });
     }
   } catch (error) {
     console.error("Error updating profile:", error);
     res.status(500).json({
       success: false,
-      error: "Internal server error"
+      error: "Internal server error",
     });
   }
 });

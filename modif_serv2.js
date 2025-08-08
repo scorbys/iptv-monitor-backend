@@ -54,6 +54,21 @@ const corsOptions = {
   preflightContinue: false,
 };
 
+// Ensure uploads directory exists at startup
+const ensureUploadsDirectory = () => {
+  try {
+    const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'avatars');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      console.log('✅ Created uploads directory:', uploadsDir);
+    } else {
+      console.log('✅ Uploads directory exists:', uploadsDir);
+    }
+  } catch (error) {
+    console.error('❌ Error creating uploads directory:', error);
+  }
+};
+
 // Explicit OPTIONS handler untuk preflight requests
 app.options(/.*/, cors());
 
@@ -82,6 +97,31 @@ app.use((req, res, next) => {
   next();
 });
 
+// Static files middleware untuk serve uploaded files
+app.use('/api/uploads', express.static(path.join(process.cwd(), 'public/uploads'), {
+  maxAge: '1y', // Cache selama 1 tahun
+  setHeaders: (res, filePath) => {
+    // Set proper headers untuk images
+    const ext = path.extname(filePath).toLowerCase();
+    const contentTypes = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp'
+    };
+    
+    const contentType = contentTypes[ext];
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
+    }
+    
+    // Add CORS headers for images
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
+
 // Middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -93,7 +133,6 @@ app.use("/api/auth/google/callback", googleCallbackRoute);
 app.use("/api/user/profile", userProfileRoute);
 app.use("/api/user/password", userPasswordRoute);
 app.use("/api/user/avatar", userAvatarRoute);
-app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // Add request logging middleware
 app.use((req, res, next) => {
@@ -711,6 +750,7 @@ app.listen(port, async () => {
   }
   setTimeout(startPeriodicChecks, 5000); // Start after 5 seconds
   console.log(`✅ Server is running on port ${port}`);
+  ensureUploadsDirectory();
 });
 
 // Debugging endpoint to list all routes
