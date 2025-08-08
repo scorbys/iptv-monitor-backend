@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const dgram = require("dgram");
 const net = require("net");
+const path = require("path");
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -22,6 +23,9 @@ const verifyRoute = require("./api/auth/verify/route");
 const googleAuthRoute = require("./api/auth/google/route");
 const googleCallbackRoute = require("./api/auth/google/callback/route");
 const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
+const userProfileRoute = require("./api/user/profile/route");
+const userPasswordRoute = require("./api/user/password/route");
+const userAvatarRoute = require("./api/user/avatar/route");
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -92,6 +96,10 @@ app.use(cors(corsOptions));
 app.use("/api/auth/verify", verifyRoute);
 app.use("/api/auth/google", googleAuthRoute);
 app.use("/api/auth/google/callback", googleCallbackRoute);
+app.use("/api/user/profile", userProfileRoute);
+app.use("/api/user/password", userPasswordRoute);
+app.use("/api/user/avatar", userAvatarRoute);
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // Add request logging middleware
 app.use((req, res, next) => {

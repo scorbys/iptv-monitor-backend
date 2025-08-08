@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
+const { getUserById } = require("../../../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -26,7 +27,7 @@ router.options("/", (req, res) => {
   res.status(200).end();
 });
 
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const caller = req.headers["user-agent"] || "unknown";
   console.log(`[VERIFY] Called by: ${caller}`);
 
@@ -46,22 +47,55 @@ router.get("/", (req, res) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Jangan biarkan respons dicache
+    // Fetch complete user data from database
+    let user = null;
+    if (decoded.userId) {
+      try {
+        user = await getUserById(decoded.userId);
+        if (user) {
+          // Remove sensitive data
+          const { password, ...userWithoutPassword } = user;
+          user = userWithoutPassword;
+        }
+      } catch (dbError) {
+        console.error("Error fetching user from database:", dbError);
+        // Fallback to token data if database fails
+        user = {
+          id: decoded.userId,
+          userId: decoded.userId,
+          username: decoded.username,
+          email: decoded.email,
+          name: decoded.name,
+          avatar: decoded.avatar,
+          provider: decoded.provider,
+          googleId: decoded.googleId,
+        };
+      }
+    }
+
+    // If no user found, use token data as fallback
+    if (!user) {
+      user = {
+        id: decoded.userId,
+        userId: decoded.userId,
+        username: decoded.username,
+        email: decoded.email,
+        name: decoded.name,
+        avatar: decoded.avatar,
+        provider: decoded.provider,
+        googleId: decoded.googleId,
+      };
+    }
+
+    // Don't let response be cached
     res.setHeader("Cache-Control", "no-store");
 
     res.json({
       success: true,
-      user: {
-        userId: decoded.userId,
-        username: decoded.username,
-        email: decoded.email,
-      },
+      user: user,
     });
   } catch (error) {
     console.error("Token verification error:", error);
-
-    // ⚠️ Hapus token hanya jika kamu benar-benar ingin — ini bisa jadi agresif
-    // res.clearCookie(...);
 
     res.status(401).json({
       success: false,

@@ -266,6 +266,7 @@ async function updateUserWithGoogleInfo(email, googleData) {
 
 // ==================== USER CRUD FUNCTIONS ====================
 
+// Get user by email or username with timeout
 async function getUserByEmailOrUsername(identifier) {
   try {
     console.log('🔍 Searching for user with identifier:', identifier);
@@ -303,8 +304,9 @@ async function getUserByEmailOrUsername(identifier) {
   }
 }
 
+// Get user by ID with complete data including Google info
 async function getUserById(userId) {
-  try {
+  /* try {
     console.log('Searching for user with ID:', userId);
 
     const { users } = await connectDB();
@@ -336,39 +338,12 @@ async function getUserById(userId) {
       throw new Error('Database query timeout');
     }
     throw new Error('Database query failed');
-  }
+  } */
+
+  return await getUserByIdComplete(userId);
 }
 
-async function insertUser(userData) {
-  try {
-    console.log('Creating new user:', { username: userData.username, email: userData.email });
-
-    const { users } = await connectDB();
-
-    const userDoc = {
-      ...userData,
-      email: userData.email.toLowerCase(),
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    const result = await users.insertOne(userDoc);
-    console.log(`User created with ID: ${result.insertedId}`);
-    return result.insertedId;
-  } catch (error) {
-    console.error('Error inserting user:', error);
-
-    // Handle duplicate key errors
-    if (error.code === 11000) {
-      const field = error.keyPattern?.email ? 'email' : 'username';
-      throw new Error(`This ${field} is already registered`);
-    }
-
-    throw new Error('Failed to create user in database');
-  }
-}
-
+// Get user by email (for login)
 async function getUserByEmail(email) {
   try {
     console.log('🔍 Searching for user by email:', email);
@@ -400,6 +375,249 @@ async function getUserByEmail(email) {
       throw new Error('Database query timeout');
     }
     throw new Error('Database query failed');
+  }
+}
+
+// Get user by username (for checking username availability)
+async function getUserByUsername(username) {
+  try {
+    console.log('🔍 Searching for user by username:', username);
+
+    const { users } = await connectDB();
+
+    const queryPromise = users.findOne({
+      username: username,
+      isActive: { $ne: false }
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
+    if (user) {
+      console.log('✅ User found by username:', { id: user._id, username: user.username });
+      return user;
+    } else {
+      console.log('❌ User not found with username:', username);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error fetching user by username:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
+  }
+}
+
+// Enhanced getUserById to return complete user data including Google info
+async function getUserByIdComplete(userId) {
+  try {
+    console.log('Searching for complete user data with ID:', userId);
+
+    const { users } = await connectDB();
+
+    const queryPromise = users.findOne(
+      { _id: new ObjectId(userId), isActive: { $ne: false } },
+      { 
+        projection: { 
+          // Return all fields except password
+          password: 0 
+        }
+      }
+    );
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
+    if (user) {
+      console.log('Complete user found by ID:', { 
+        id: user._id, 
+        username: user.username,
+        hasAvatar: !!user.avatar,
+        provider: user.provider 
+      });
+      return user;
+    } else {
+      console.log('User not found with ID:', userId);
+      return null;
+    }
+  } catch (error) {
+    console.error('Error fetching complete user by ID:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
+  }
+}
+
+// Insert a new user into the database
+async function insertUser(userData) {
+  try {
+    console.log('Creating new user:', { username: userData.username, email: userData.email });
+
+    const { users } = await connectDB();
+
+    const userDoc = {
+      ...userData,
+      email: userData.email.toLowerCase(),
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const result = await users.insertOne(userDoc);
+    console.log(`User created with ID: ${result.insertedId}`);
+    return result.insertedId;
+  } catch (error) {
+    console.error('Error inserting user:', error);
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = error.keyPattern?.email ? 'email' : 'username';
+      throw new Error(`This ${field} is already registered`);
+    }
+
+    throw new Error('Failed to create user in database');
+  }
+}
+
+// Update user password
+async function updateUserProfile(userId, profileData) {
+  try {
+    console.log('Updating user profile:', { userId, profileData });
+
+    const { users } = await connectDB();
+
+    const updateDoc = {
+      updatedAt: new Date()
+    };
+
+    if (profileData.username) {
+      updateDoc.username = profileData.username;
+    }
+
+    if (profileData.name !== undefined) {
+      updateDoc.name = profileData.name;
+    }
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: updateDoc }
+    );
+
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'User not found'
+      };
+    }
+
+    console.log('User profile updated successfully');
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+    
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = error.keyPattern?.username ? 'username' : 'email';
+      return {
+        success: false,
+        error: `This ${field} is already taken`
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Failed to update profile'
+    };
+  }
+}
+
+// Update user profile (username and name)
+async function updateUserPassword(userId, newPassword) {
+  try {
+    console.log('Updating user password for userId:', userId);
+
+    const { users } = await connectDB();
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { 
+        $set: { 
+          password: hashedPassword,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'User not found'
+      };
+    }
+
+    console.log('User password updated successfully');
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('Error updating user password:', error);
+    return {
+      success: false,
+      error: 'Failed to update password'
+    };
+  }
+}
+
+// Update user avatar
+async function updateUserAvatar(userId, avatarUrl) {
+  try {
+    console.log('Updating user avatar:', { userId, avatarUrl });
+
+    const { users } = await connectDB();
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { 
+        $set: { 
+          avatar: avatarUrl,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'User not found'
+      };
+    }
+
+    console.log('User avatar updated successfully');
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('Error updating user avatar:', error);
+    return {
+      success: false,
+      error: 'Failed to update avatar'
+    };
   }
 }
 
@@ -876,6 +1094,11 @@ module.exports = {
   getUserByEmailOrUsername,
   getUserByEmail,
   insertUser,
+  updateUserProfile,
+  updateUserPassword,
+  updateUserAvatar,
+  getUserByUsername,
+  getUserByIdComplete,
 
   // Authentication functions
   createUser,
