@@ -264,6 +264,16 @@ async function updateUserWithGoogleInfo(email, googleData) {
   }
 }
 
+// Helper function to check if user has a valid password
+async function hasValidPassword(passwordField) {
+  return passwordField &&
+    typeof passwordField === 'string' &&
+    passwordField.trim() !== "" &&
+    passwordField !== "null" &&
+    passwordField !== "undefined" &&
+    passwordField.length > 10; // bcrypt hash minimal length
+}
+
 // ==================== USER CRUD FUNCTIONS ====================
 
 // Get user by email or username with timeout
@@ -304,9 +314,9 @@ async function getUserByEmailOrUsername(identifier) {
   }
 }
 
-// Get user by ID with complete data including Google info
+// getUserById to also provide password status indication
 async function getUserById(userId) {
-  /* try {
+  try {
     console.log('Searching for user with ID:', userId);
 
     const { users } = await connectDB();
@@ -327,6 +337,8 @@ async function getUserById(userId) {
       console.log('User found by ID:', { id: user._id, username: user.username });
       // Remove password from returned user object
       const { password, ...userWithoutPassword } = user;
+      userWithoutPassword.password = hasValidPassword(password) ? "exists" : null;
+
       return userWithoutPassword;
     } else {
       console.log('User not found with ID:', userId);
@@ -338,9 +350,7 @@ async function getUserById(userId) {
       throw new Error('Database query timeout');
     }
     throw new Error('Database query failed');
-  } */
-
-  return await getUserByIdComplete(userId);
+  }
 }
 
 // Get user by email (for login)
@@ -378,7 +388,7 @@ async function getUserByEmail(email) {
   }
 }
 
-// Get user by username (for checking username availability)
+// Enhanced getUserById untuk return password info yang lebih akurat
 async function getUserByUsername(username) {
   try {
     console.log('🔍 Searching for user by username:', username);
@@ -421,10 +431,8 @@ async function getUserByIdComplete(userId) {
 
     const queryPromise = users.findOne(
       { _id: new ObjectId(userId), isActive: { $ne: false } },
-      { 
-        projection: { 
-          // Return all fields except password
-          password: 0 
+      {
+        projection: {
         }
       }
     );
@@ -436,13 +444,21 @@ async function getUserByIdComplete(userId) {
     const user = await Promise.race([queryPromise, timeoutPromise]);
 
     if (user) {
-      console.log('Complete user found by ID:', { 
-        id: user._id, 
+      console.log('Complete user found by ID:', {
+        id: user._id,
         username: user.username,
         hasAvatar: !!user.avatar,
-        provider: user.provider 
+        provider: user.provider,
+        hasPassword: hasValidPassword(user.password)
       });
-      return user;
+      // Return password info untuk frontend validation, tapi hash tetap hidden
+      const userResponse = { ...user };
+      if (user.password) {
+        // Instead of removing password completely, give indication
+        userResponse.password = hasValidPassword(user.password) ? "exists" : null;
+      }
+
+      return userResponse;
     } else {
       console.log('User not found with ID:', userId);
       return null;
@@ -525,7 +541,7 @@ async function updateUserProfile(userId, profileData) {
     };
   } catch (error) {
     console.error('Error updating user profile:', error);
-    
+
     // Handle duplicate key errors
     if (error.code === 11000) {
       const field = error.keyPattern?.username ? 'username' : 'email';
@@ -554,8 +570,8 @@ async function updateUserPassword(userId, newPassword) {
 
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
-      { 
-        $set: { 
+      {
+        $set: {
           password: hashedPassword,
           updatedAt: new Date()
         }
@@ -592,8 +608,8 @@ async function updateUserAvatar(userId, avatarUrl) {
 
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },
-      { 
-        $set: { 
+      {
+        $set: {
           avatar: avatarUrl,
           updatedAt: new Date()
         }
@@ -765,7 +781,7 @@ async function performUserCreation({ username, email, password, googleId, avatar
   } else {
     userDoc.provider = 'local';
   }
-  
+
   if (avatar) {
     userDoc.avatar = avatar;
   }
@@ -1104,6 +1120,7 @@ module.exports = {
   createUser,
   authenticateUser,
   hashPassword,
+  hasValidPassword,
   comparePassword,
   updateUserWithGoogleInfo
 };

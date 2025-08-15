@@ -16,7 +16,6 @@ const port = process.env.PORT || 3001;
 const verifyRoute = require("./api/auth/verify/route");
 const googleAuthRoute = require("./api/auth/google/route");
 const googleCallbackRoute = require("./api/auth/google/callback/route");
-const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
 const userProfileRoute = require("./api/user/profile/route");
 const userPasswordRoute = require("./api/user/password/route");
 const userAvatarRoute = require("./api/user/avatar/route");
@@ -54,21 +53,6 @@ const corsOptions = {
   preflightContinue: false,
 };
 
-// Ensure uploads directory exists at startup
-const ensureUploadsDirectory = () => {
-  try {
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'avatars');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-      console.log('✅ Created uploads directory:', uploadsDir);
-    } else {
-      console.log('✅ Uploads directory exists:', uploadsDir);
-    }
-  } catch (error) {
-    console.error('❌ Error creating uploads directory:', error);
-  }
-};
-
 // Explicit OPTIONS handler untuk preflight requests
 app.options(/.*/, cors());
 
@@ -96,31 +80,6 @@ app.use((req, res, next) => {
 
   next();
 });
-
-// Static files middleware untuk serve uploaded files
-app.use('/api/uploads', express.static(path.join(process.cwd(), 'public/uploads'), {
-  maxAge: '1y', // Cache selama 1 tahun
-  setHeaders: (res, filePath) => {
-    // Set proper headers untuk images
-    const ext = path.extname(filePath).toLowerCase();
-    const contentTypes = {
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp'
-    };
-    
-    const contentType = contentTypes[ext];
-    if (contentType) {
-      res.setHeader('Content-Type', contentType);
-    }
-    
-    // Add CORS headers for images
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  }
-}));
 
 // Middleware
 app.use(express.json({ limit: "10mb" }));
@@ -212,6 +171,34 @@ const authenticateToken = (req, res, next) => {
     });
   }
 };
+
+// Static files middleware untuk serve uploaded files
+app.use('/api/uploads', express.static(path.join(process.cwd(), 'public/uploads'), {
+  maxAge: '1y',
+  setHeaders: (res, filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    const contentTypes = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp'
+    };
+    
+    const contentType = contentTypes[ext];
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
+    }
+  }
+}));
+
+app.use('/api/uploads', (req, res, next) => {
+  // Jika file tidak ditemukan oleh static middleware
+  res.status(404).json({
+    success: false,
+    error: 'File not found'
+  });
+});
 
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
@@ -750,7 +737,6 @@ app.listen(port, async () => {
   }
   setTimeout(startPeriodicChecks, 5000); // Start after 5 seconds
   console.log(`✅ Server is running on port ${port}`);
-  ensureUploadsDirectory();
 });
 
 // Debugging endpoint to list all routes

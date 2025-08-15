@@ -53,6 +53,7 @@ router.put("/", async (req, res) => {
     if (
       currentUser.provider === "google" &&
       currentUser.googleId &&
+      username &&
       username !== currentUser.username
     ) {
       return res.status(400).json({
@@ -61,16 +62,20 @@ router.put("/", async (req, res) => {
       });
     }
 
+    const updateData = {};
+
     // Validate username if it's being changed
-    if (username !== currentUser.username) {
-      if (!username || username.trim().length < 3) {
+    if (username && username.trim() !== currentUser.username) {
+      const trimmedUsername = username.trim();
+
+      if (trimmedUsername.length < 3) {
         return res.status(400).json({
           success: false,
           error: "Username must be at least 3 characters long",
         });
       }
 
-      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
         return res.status(400).json({
           success: false,
           error: "Username can only contain letters, numbers, and underscores",
@@ -78,22 +83,53 @@ router.put("/", async (req, res) => {
       }
 
       // Check if username is already taken
-      const existingUser = await getUserByEmailOrUsername(username);
-      if (existingUser && existingUser._id.toString() !== userId) {
-        return res.status(400).json({
+      try {
+        const existingUser = await getUserByEmailOrUsername(trimmedUsername);
+        if (existingUser && existingUser._id.toString() !== userId) {
+          return res.status(400).json({
+            success: false,
+            error: "Username is already taken",
+          });
+        }
+
+        updateData.username = trimmedUsername;
+      } catch (error) {
+        console.error("Error checking username availability:", error);
+        return res.status(500).json({
           success: false,
-          error: "Username is already taken",
+          error: "Error validating username",
         });
       }
     }
 
-    // Update user profile
-    const result = await updateUserProfile(userId, {
-      username: username.trim(),
-      name: name ? name.trim() : null,
+    // Prepare name update
+    if (name !== undefined && name !== currentUser.name) {
+      updateData.name = name ? name.trim() : null;
+    }
+
+    // Only update if there are actual changes
+    if (Object.keys(updateData).length === 0) {
+      return res.json({
+        success: true,
+        message: "No changes to update",
+      });
+    }
+
+    console.log("Profile update:", {
+      userId,
+      updateData,
+      currentUser: {
+        username: currentUser.username,
+        name: currentUser.name,
+        provider: currentUser.provider
+      }
     });
 
+    // Update user profile
+    const result = await updateUserProfile(userId, updateData);
+
     if (result.success) {
+      console.log("Profile updated successfully for user:", userId);
       res.json({
         success: true,
         message: "Profile updated successfully",

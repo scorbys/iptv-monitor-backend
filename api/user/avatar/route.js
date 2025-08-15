@@ -31,7 +31,7 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// Configure multer for avatar upload
+// Configure multer untuk memory storage (Vercel compatible)
 const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
@@ -83,85 +83,71 @@ router.post("/", upload.single("avatar"), async (req, res) => {
       });
     }
 
-    // Create uploads directory structure
-    const uploadsDir = path.join(process.cwd(), "public", "uploads", "avatars");
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-      console.log("Created uploads directory:", uploadsDir);
-    }
+    try {
+      const cloudinary = require('cloudinary').v2;
 
-    // Generate unique filename
-    const fileExtension = path.extname(req.file.originalname);
-    const fileName = `avatar_${userId}_${Date.now()}${fileExtension}`;
-    const filePath = path.join(uploadsDir, fileName);
+      // Configure cloudinary
+      cloudinary.config({
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key: process.env.CLOUDINARY_API_KEY,
+        api_secret: process.env.CLOUDINARY_API_SECRET
+      });
 
-    // FIXED: Use correct URL path for serving uploaded files
-    const avatarUrl = `/api/uploads/avatars/${fileName}`;
+      // Upload to Cloudinary
+      const uploadResult = await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_stream(
+          {
+            resource_type: "image",
+            public_id: `avatar_${userId}_${Date.now()}`,
+            folder: "avatars",
+            transformation: [
+              { width: 200, height: 200, crop: "fill", gravity: "face" }
+            ]
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        ).end(req.file.buffer);
+      });
 
-    console.log("Saving avatar file:", {
-      filePath,
-      avatarUrl,
-      uploadsDir,
-    });
+      const avatarUrl = uploadResult.secure_url;
 
-    // Save file to disk
-    fs.writeFileSync(filePath, req.file.buffer);
-
-    // Verify file was written successfully
-    if (!fs.existsSync(filePath)) {
-      throw new Error("Failed to save file to disk");
-    }
-
-    console.log("Avatar file saved successfully:", filePath);
-
-    // Delete old avatar file if exists and it's not a default/external avatar
-    if (
-      currentUser.avatar &&
-      currentUser.avatar.startsWith("/api/uploads/avatars/")
-    ) {
-      const oldFileName = path.basename(currentUser.avatar);
-      const oldAvatarPath = path.join(uploadsDir, oldFileName);
-      
-      if (fs.existsSync(oldAvatarPath)) {
+      // Delete old avatar from Cloudinary if exists
+      if (currentUser.avatar && currentUser.avatar.includes('cloudinary')) {
         try {
-          fs.unlinkSync(oldAvatarPath);
-          console.log("Old avatar deleted:", oldAvatarPath);
+          const publicId = currentUser.avatar.split('/').pop().split('.')[0];
+          await cloudinary.uploader.destroy(`avatars/${publicId}`);
+          console.log("Old avatar deleted from Cloudinary");
         } catch (error) {
           console.error("Error deleting old avatar:", error);
-          // Continue with upload even if old file deletion fails
-        }
-      }
-    }
-
-    // Update user avatar in database
-    const result = await updateUserAvatar(userId, avatarUrl);
-
-    if (result.success) {
-      console.log("Avatar updated successfully for user:", userId);
-      res.json({
-        success: true,
-        avatar: avatarUrl,
-        message: "Avatar updated successfully",
-      });
-    } else {
-      // Delete uploaded file if database update fails
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-          console.log("Cleanup: Deleted file after DB failure");
-        } catch (error) {
-          console.error(
-            "Error deleting uploaded file after DB failure:",
-            error
-          );
         }
       }
 
+      // Update user avatar in database
+      const result = await updateUserAvatar(userId, avatarUrl);
+
+      if (result.success) {
+        console.log("Avatar updated successfully for user:", userId);
+        res.json({
+          success: true,
+          avatar: avatarUrl,
+          message: "Avatar updated successfully",
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: result.error || "Failed to update avatar",
+        });
+      }
+    } catch (uploadError) {
+      console.error("Error uploading to Cloudinary:", uploadError);
       res.status(500).json({
         success: false,
-        error: result.error || "Failed to update avatar",
+        error: "Failed to upload avatar",
       });
     }
+
   } catch (error) {
     console.error("Error updating avatar:", error);
 

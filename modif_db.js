@@ -113,6 +113,7 @@ async function updateUserWithGoogleInfo(email, googleData) {
         $set: {
           googleId: googleData.googleId,
           avatar: googleData.avatar,
+          name: googleData.name || null,
           provider: 'google',
           updatedAt: new Date()
         }
@@ -125,8 +126,19 @@ async function updateUserWithGoogleInfo(email, googleData) {
   }
 }
 
+// Helper function to check if user has a valid password
+async function hasValidPassword(passwordField) {
+  return passwordField &&
+    typeof passwordField === 'string' &&
+    passwordField.trim() !== "" &&
+    passwordField !== "null" &&
+    passwordField !== "undefined" &&
+    passwordField.length > 10; // bcrypt hash minimal length
+}
+
 // ==================== USER CRUD FUNCTIONS ====================
 
+// Get user by email or username with timeout
 async function getUserByEmailOrUsername(identifier) {
   try {
     console.log('🔍 Searching for user with identifier:', identifier);
@@ -164,6 +176,7 @@ async function getUserByEmailOrUsername(identifier) {
   }
 }
 
+// getUserById to also provide password status indication
 async function getUserById(userId) {
   try {
     console.log('Searching for user with ID:', userId);
@@ -186,6 +199,8 @@ async function getUserById(userId) {
       console.log('User found by ID:', { id: user._id, username: user.username });
       // Remove password from returned user object
       const { password, ...userWithoutPassword } = user;
+      userWithoutPassword.password = hasValidPassword(password) ? "exists" : null;
+      
       return userWithoutPassword;
     } else {
       console.log('User not found with ID:', userId);
@@ -200,36 +215,7 @@ async function getUserById(userId) {
   }
 }
 
-async function insertUser(userData) {
-  try {
-    console.log('Creating new user:', { username: userData.username, email: userData.email });
-
-    const { users } = await connectDB();
-
-    const userDoc = {
-      ...userData,
-      email: userData.email.toLowerCase(),
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    const result = await users.insertOne(userDoc);
-    console.log(`User created with ID: ${result.insertedId}`);
-    return result.insertedId;
-  } catch (error) {
-    console.error('Error inserting user:', error);
-
-    // Handle duplicate key errors
-    if (error.code === 11000) {
-      const field = error.keyPattern?.email ? 'email' : 'username';
-      throw new Error(`This ${field} is already registered`);
-    }
-
-    throw new Error('Failed to create user in database');
-  }
-}
-
+// Get user by email (for login)
 async function getUserByEmail(email) {
   try {
     console.log('🔍 Searching for user by email:', email);
@@ -261,6 +247,255 @@ async function getUserByEmail(email) {
       throw new Error('Database query timeout');
     }
     throw new Error('Database query failed');
+  }
+}
+
+// Enhanced getUserById untuk return password info yang lebih akurat
+async function getUserByUsername(username) {
+  try {
+    console.log('🔍 Searching for user by username:', username);
+
+    const { users } = await connectDB();
+
+    const queryPromise = users.findOne({
+      username: username,
+      isActive: { $ne: false }
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
+    if (user) {
+      console.log('✅ User found by username:', { id: user._id, username: user.username });
+      return user;
+    } else {
+      console.log('❌ User not found with username:', username);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error fetching user by username:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
+  }
+}
+
+// Enhanced getUserById to return complete user data including Google info
+async function getUserByIdComplete(userId) {
+  try {
+    console.log('Searching for complete user data with ID:', userId);
+
+    const { users } = await connectDB();
+
+    const queryPromise = users.findOne(
+      { _id: new ObjectId(userId), isActive: { $ne: false } },
+      {
+        projection: {
+        }
+      }
+    );
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Database query timeout')), 5000);
+    });
+
+    const user = await Promise.race([queryPromise, timeoutPromise]);
+
+    if (user) {
+      console.log('Complete user found by ID:', {
+        id: user._id,
+        username: user.username,
+        hasAvatar: !!user.avatar,
+        provider: user.provider,
+        hasPassword: hasValidPassword(user.password)
+      });
+      // Return password info untuk frontend validation, tapi hash tetap hidden
+      const userResponse = { ...user };
+      if (user.password) {
+        // Instead of removing password completely, give indication
+        userResponse.password = hasValidPassword(user.password) ? "exists" : null;
+      }
+      
+      return userResponse;
+    } else {
+      console.log('User not found with ID:', userId);
+      return null;
+    }
+  } catch (error) {
+    console.error('Error fetching complete user by ID:', error);
+    if (error.message === 'Database query timeout') {
+      throw new Error('Database query timeout');
+    }
+    throw new Error('Database query failed');
+  }
+}
+
+// Insert a new user into the database
+async function insertUser(userData) {
+  try {
+    console.log('Creating new user:', { username: userData.username, email: userData.email });
+
+    const { users } = await connectDB();
+
+    const userDoc = {
+      ...userData,
+      email: userData.email.toLowerCase(),
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const result = await users.insertOne(userDoc);
+    console.log(`User created with ID: ${result.insertedId}`);
+    return result.insertedId;
+  } catch (error) {
+    console.error('Error inserting user:', error);
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = error.keyPattern?.email ? 'email' : 'username';
+      throw new Error(`This ${field} is already registered`);
+    }
+
+    throw new Error('Failed to create user in database');
+  }
+}
+
+// Update user password
+async function updateUserProfile(userId, profileData) {
+  try {
+    console.log('Updating user profile:', { userId, profileData });
+
+    const { users } = await connectDB();
+
+    const updateDoc = {
+      updatedAt: new Date()
+    };
+
+    if (profileData.username) {
+      updateDoc.username = profileData.username;
+    }
+
+    if (profileData.name !== undefined) {
+      updateDoc.name = profileData.name;
+    }
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: updateDoc }
+    );
+
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'User not found'
+      };
+    }
+
+    console.log('User profile updated successfully');
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('Error updating user profile:', error);
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = error.keyPattern?.username ? 'username' : 'email';
+      return {
+        success: false,
+        error: `This ${field} is already taken`
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Failed to update profile'
+    };
+  }
+}
+
+// Update user profile (username and name)
+async function updateUserPassword(userId, newPassword) {
+  try {
+    console.log('Updating user password for userId:', userId);
+
+    const { users } = await connectDB();
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      {
+        $set: {
+          password: hashedPassword,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'User not found'
+      };
+    }
+
+    console.log('User password updated successfully');
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('Error updating user password:', error);
+    return {
+      success: false,
+      error: 'Failed to update password'
+    };
+  }
+}
+
+// Update user avatar
+async function updateUserAvatar(userId, avatarUrl) {
+  try {
+    console.log('Updating user avatar:', { userId, avatarUrl });
+
+    const { users } = await connectDB();
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      {
+        $set: {
+          avatar: avatarUrl,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return {
+        success: false,
+        error: 'User not found'
+      };
+    }
+
+    console.log('User avatar updated successfully');
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('Error updating user avatar:', error);
+    return {
+      success: false,
+      error: 'Failed to update avatar'
+    };
   }
 }
 
@@ -342,7 +577,7 @@ async function performAuthentication(identifier, password) {
   };
 }
 
-async function createUser({ username, email, password, googleId, avatar, provider }) {
+async function createUser({ username, email, password, googleId, avatar, provider, name }) {
   try {
     console.log('🔍 Creating user for provider:', provider || 'local');
 
@@ -352,7 +587,8 @@ async function createUser({ username, email, password, googleId, avatar, provide
       password,
       googleId,
       avatar,
-      provider
+      provider,
+      name
     });
 
     const timeoutPromise = new Promise((_, reject) => {
@@ -370,7 +606,7 @@ async function createUser({ username, email, password, googleId, avatar, provide
   }
 }
 
-async function performUserCreation({ username, email, password, googleId, avatar, provider }) {
+async function performUserCreation({ username, email, password, googleId, avatar, provider, name }) {
   const normalizedEmail = email.toLowerCase().trim();
   const trimmedUsername = username.trim();
 
@@ -383,7 +619,7 @@ async function performUserCreation({ username, email, password, googleId, avatar
     };
   }
 
-  // PERBAIKAN: Hash password hanya jika ada password
+  // Hash password hanya jika ada password
   let hashedPassword = null;
   if (password) {
     hashedPassword = await hashPassword(password);
@@ -392,21 +628,34 @@ async function performUserCreation({ username, email, password, googleId, avatar
   // Create user document
   const userDoc = {
     username: trimmedUsername,
+    name: name || trimmedUsername,
     email: normalizedEmail,
     password: hashedPassword,
-    isActive: true,
+    provider: provider || 'local',
     createdAt: new Date(),
     updatedAt: new Date()
   };
 
-  // PERBAIKAN: Tambahkan fields Google OAuth jika ada
+  // Tambahkan fields Google OAuth jika ada
   if (googleId) {
     userDoc.googleId = googleId;
     userDoc.provider = provider || 'google';
+  } else {
+    userDoc.provider = 'local';
   }
+
   if (avatar) {
     userDoc.avatar = avatar;
   }
+
+  console.log('Creating user with complete data:', {
+    username: userDoc.username,
+    name: userDoc.name,
+    email: userDoc.email,
+    provider: userDoc.provider,
+    hasAvatar: !!userDoc.avatar,
+    hasGoogleId: !!userDoc.googleId
+  });
 
   const userId = await insertUser(userDoc);
   return {
@@ -457,6 +706,7 @@ process.on('SIGTERM', closeConnection);
 // For Vercel serverless functions
 process.on('beforeExit', closeConnection);
 
+
 // ==================== EXPORTS ====================
 
 module.exports = {
@@ -468,11 +718,17 @@ module.exports = {
   getUserByEmailOrUsername,
   getUserByEmail,
   insertUser,
+  updateUserProfile,
+  updateUserPassword,
+  updateUserAvatar,
+  getUserByUsername,
+  getUserByIdComplete,
 
   // Authentication functions
   createUser,
   authenticateUser,
   hashPassword,
+  hasValidPassword,
   comparePassword,
   updateUserWithGoogleInfo
 };
