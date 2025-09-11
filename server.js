@@ -191,7 +191,7 @@ const TV_STATUS_CONFIG = {
   USE_DUMMY_STATUS: true, // Set to false for real connectivity checks
   ONLINE_PROBABILITY: 0.96, // 96% chance of being online
   RESPONSE_TIME_RANGE: { min: 5, max: 150 }, // Response time in ms
-  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds
+  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
 };
 // Configuration for Chromecast status simulation
 const CHROMECAST_STATUS_CONFIG = {
@@ -200,7 +200,7 @@ const CHROMECAST_STATUS_CONFIG = {
   SIGNAL_LEVEL_RANGE: { min: -70, max: -20 }, // Signal strength in dBm
   SPEED_RANGE: { min: 10, max: 100 }, // Speed in Mbps
   RESPONSE_TIME_RANGE: { min: 10, max: 200 }, // Response time in ms
-  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds
+  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
 };
 
 const networkStats = {
@@ -710,10 +710,28 @@ function generateDummyTVStatus() {
     ) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
 
+  // Tambahan data realistis
+  const signalLevel = isOnline ? Math.floor(Math.random() * 30) + 70 : null; // 70-100%
+  const model = ["Samsung Hospitality", "LG Commercial", "Sony Professional"][Math.floor(Math.random() * 3)];
+
   return {
     status: isOnline ? "online" : "offline",
     responseTime,
-    error: isOnline ? null : "Device unreachable",
+    error: isOnline ? null : ["Device unreachable", "Network timeout", "Connection refused"][Math.floor(Math.random() * 3)],
+    signalLevel,
+    model,
+    lastChecked: new Date().toISOString(),
+    // Tambahan metrik jaringan
+    networkStats: isOnline ? {
+      sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
+      received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB  
+      latency: Math.floor(Math.random() * 40) + 8, // 8-48ms
+      jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
+      ttl: Math.floor(Math.random() * 8) + 60, // 60-67
+      packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
+      bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
+      hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
+    } : null
   };
 }
 
@@ -864,9 +882,12 @@ async function checkAllTVsStatus() {
         const previousStatus = tvStatus.get(tv.roomNo)?.status;
         const result = await checkTVConnectivity(tv.ipAddress);
 
+        // Update dengan data yang lebih lengkap
         tvStatus.set(tv.roomNo, {
           ...result,
           lastChecked: new Date().toISOString(),
+          roomNo: tv.roomNo,
+          ipAddress: tv.ipAddress,
         });
 
         // Kirim notifikasi jika status berubah dari online ke offline
@@ -888,6 +909,8 @@ async function checkAllTVsStatus() {
           responseTime: null,
           error: error.message,
           lastChecked: new Date().toISOString(),
+          roomNo: tv.roomNo,
+          ipAddress: tv.ipAddress,
         });
 
         if (previousStatus === "online") {
@@ -904,56 +927,70 @@ async function checkAllTVsStatus() {
       }
     }
 
-    // Kirim notifikasi Telegram
-    if (offlineNotifications.length > 0 && telegramBot) {
-      await telegramBot.sendOfflineNotification(offlineNotifications);
+    // Kirim notifikasi Telegram jika ada
+    if (offlineNotifications.length > 0 && typeof telegramBot !== 'undefined' && telegramBot) {
+      try {
+        await telegramBot.sendOfflineNotification(offlineNotifications);
+      } catch (telegramError) {
+        console.error("Failed to send Telegram notifications:", telegramError.message);
+      }
     }
 
+    const onlineCount = Array.from(tvStatus.values()).filter(s => s.status === "online").length;
+    const offlineCount = allTVs.length - onlineCount;
+
     console.log(
-      `Checked status for ${allTVs.length} TV devices${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`
+      `TV Status Check: ${onlineCount}/${allTVs.length} online${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? " (dummy)" : ""}`
     );
+
+    return {
+      success: true,
+      total: allTVs.length,
+      online: onlineCount,
+      offline: offlineCount,
+      notifications: offlineNotifications.length,
+      timestamp: new Date().toISOString()
+    };
   } catch (error) {
     console.error("Error checking TV status:", error);
+    return {
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
 // Function to generate dummy Chromecast status
 function generateDummyChromecastStatus() {
   const isOnline = Math.random() < CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY;
-  const isPingable = isOnline; // Fixed: Added missing variable
-  const signalLevel = isOnline
-    ? Math.floor(
-      Math.random() *
-      (CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max -
-        CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min +
-        1)
-    ) + CHROMECAST_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min
-    : null;
-  const speed = isOnline
-    ? Math.floor(
-      Math.random() *
-      (CHROMECAST_STATUS_CONFIG.SPEED_RANGE.max -
-        CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min +
-        1)
-    ) + CHROMECAST_STATUS_CONFIG.SPEED_RANGE.min
-    : null;
-  const responseTime = isOnline
-    ? Math.floor(
-      Math.random() *
-      (CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.max -
-        CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min +
-        1)
-    ) + CHROMECAST_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
-    : null;
+  
+  if (!isOnline) {
+    return {
+      isPingable: false,
+      isOnline: false,
+      signalLevel: null,
+      speed: null,
+      responseTime: null,
+      lastSeen: null,
+      error: ["Device unreachable", "Network timeout", "Connection refused"][Math.floor(Math.random() * 3)],
+    };
+  }
+
+  // Generate correlated values for online devices
+  const signalLevel = Math.floor(Math.random() * 50) - 70; // -70 to -20 dBm
+  const baseSpeed = Math.max(10, 100 + signalLevel); // Better signal = better speed
+  const speed = baseSpeed + Math.floor(Math.random() * 20) - 10; // Add some variation
+  const responseTime = Math.max(5, Math.abs(signalLevel) - 20 + Math.floor(Math.random() * 50)); // Worse signal = higher latency
 
   return {
-    isPingable,
-    isOnline,
-    signalLevel,
-    speed,
-    responseTime,
-    lastSeen: isOnline ? new Date().toISOString() : null,
-    error: isOnline ? null : "Device unreachable",
+    isPingable: true,
+    isOnline: true,
+    signalLevel: signalLevel,
+    speed: Math.max(1, speed),
+    responseTime: Math.max(1, responseTime),
+    lastSeen: new Date().toISOString(),
+    error: null,
   };
 }
 
@@ -1023,30 +1060,42 @@ async function checkAllChromecastsStatus() {
   try {
     const allDevices = await getChromecastDevices();
     const offlineNotifications = [];
-
+    let checkedCount = 0;
+    let onlineCount = 0;
+    
+    console.log(`Starting status check for ${allDevices.length} Chromecast devices...`);
+    
     for (const device of allDevices) {
       try {
         const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
         const result = await checkChromecastConnectivity(device.ipAddr);
-
+        
         chromecastStatus.set(device.idCast, {
           ...result,
           lastChecked: new Date().toISOString(),
         });
-
-        // Kirim notifikasi jika status berubah dari online ke offline
+        
+        if (result.isOnline) {
+          onlineCount++;
+        }
+        
+        // Send notification if status changed from online to offline
         if (previousStatus === true && !result.isOnline) {
           offlineNotifications.push({
             source: 'chromecast',
-            message: `${device.deviceName || 'Unknown Device'} is now offline`,
+            message: `${device.deviceName || 'Unknown Device'} went offline`,
             ipAddr: device.ipAddr,
             deviceName: device.deviceName,
+            previousStatus: 'online',
+            currentStatus: 'offline',
             timestamp: new Date().toISOString()
           });
         }
+        
+        checkedCount++;
       } catch (error) {
         const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
-
+        
         chromecastStatus.set(device.idCast, {
           isPingable: false,
           isOnline: false,
@@ -1054,37 +1103,69 @@ async function checkAllChromecastsStatus() {
           speed: null,
           responseTime: null,
           lastSeen: null,
-          error: error.message,
+          error: `Check failed: ${error.message}`,
           lastChecked: new Date().toISOString(),
         });
-
+        
         if (previousStatus === true) {
           offlineNotifications.push({
             source: 'chromecast',
-            message: `${device.deviceName || 'Unknown Device'} connection failed`,
+            message: `${device.deviceName || 'Unknown Device'} check failed`,
             ipAddr: device.ipAddr,
             deviceName: device.deviceName,
             error: error.message,
+            previousStatus: 'online',
+            currentStatus: 'error',
             timestamp: new Date().toISOString()
           });
         }
+        
+        checkedCount++;
       }
     }
-
-    // Kirim notifikasi Telegram
-    if (offlineNotifications.length > 0 && telegramBot) {
-      await telegramBot.sendOfflineNotification(offlineNotifications);
+    
+    // Send Telegram notifications if configured
+    if (offlineNotifications.length > 0 && typeof telegramBot !== 'undefined' && telegramBot) {
+      try {
+        await telegramBot.sendOfflineNotification(offlineNotifications);
+      } catch (telegramError) {
+        console.error("Failed to send Telegram notifications:", telegramError.message);
+      }
     }
-
-    console.log(
-      `Checked status for ${allDevices.length} Chromecast devices${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`
-    );
+    
+    const offlineCount = checkedCount - onlineCount;
+    const statusSummary = {
+      total: allDevices.length,
+      checked: checkedCount,
+      online: onlineCount,
+      offline: offlineCount,
+      notificationsTriggered: offlineNotifications.length
+    };
+    
+    console.log(`Chromecast status check completed: ${onlineCount}/${checkedCount} online${CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS ? " (using dummy status)" : ""}`);
+    console.log(`Status summary:`, statusSummary);
+    
+    // Return summary for potential use by calling functions
+    return {
+      success: true,
+      summary: statusSummary,
+      notifications: offlineNotifications,
+      timestamp: new Date().toISOString()
+    };
+    
   } catch (error) {
-    console.error("Error checking Chromecast status:", error);
+    console.error("Error in checkAllChromecastsStatus:", error);
+    
+    // Return error information
+    return {
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
-// API Routes for Channels
+// ==================== CHANNELS ENDPOINTS ====================
 
 // Get all channels with status
 app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, async (req, res) => {
@@ -1347,57 +1428,99 @@ app.get(
   }
 );
 
-// API Routes for TV Hospitality
+// ==================== HOSPITALITY TV ENDPOINTS ====================
 
 // Get all hospitality TVs with status
 app.get("/api/hospitality/tvs", trackRequestMetrics('hospitality'), authenticateToken, async (req, res) => {
   try {
-    const { status, search, sortBy = "roomNo", sortOrder = "asc" } = req.query;
+    const {
+      status,
+      search,
+      sortBy = "roomNo",
+      sortOrder = "asc",
+    } = req.query;
 
     let tvs = await getHospitalityTVs();
 
-    // Add status information to TVs
+    // Add status information to TVs dengan data yang lebih lengkap
     const tvsWithStatus = tvs.map((tv) => {
-      const deviceStatus = tvStatus.get(tv.roomNo) || {
+      const tvStatusData = tvStatus.get(tv.roomNo) || {
         status: "offline",
         responseTime: null,
-        lastChecked: null,
         error: "Not checked",
+        lastChecked: null,
+        signalLevel: null,
+        networkStats: null
       };
 
       return {
         ...tv,
-        ...deviceStatus,
-        model: tv.model || "Samsung Hospitality",
+        id: tv.id,
+        roomNo: tv.roomNo,
+        ipAddress: tv.ipAddress,
+        status: tvStatusData.status,
+        responseTime: tvStatusData.responseTime,
+        lastChecked: tvStatusData.lastChecked,
+        error: tvStatusData.error,
+        model: tvStatusData.model || tv.model || "Samsung Hospitality",
+        signalLevel: tvStatusData.signalLevel,
+        isOnline: tvStatusData.status === "online",
+        isPingable: tvStatusData.status === "online",
+        // Tambahan computed fields
+        statusText: tvStatusData.status === "online" ? "Online" : "Offline",
+        signalQuality: tvStatusData.signalLevel ? 
+          (tvStatusData.signalLevel > 85 ? "Excellent" :
+           tvStatusData.signalLevel > 70 ? "Good" :
+           tvStatusData.signalLevel > 50 ? "Fair" : "Poor") : null,
+        lastCheckedFormatted: tvStatusData.lastChecked ? 
+          new Date(tvStatusData.lastChecked).toLocaleString() : "Never"
       };
     });
 
-    // Filter by status
+    // Enhanced filtering
     let filteredTVs = tvsWithStatus;
     if (status && status !== "all") {
-      filteredTVs = tvsWithStatus.filter((tv) => tv.status === status);
+      if (status === "online") {
+        filteredTVs = tvsWithStatus.filter((tv) => tv.status === "online");
+      } else if (status === "offline") {
+        filteredTVs = tvsWithStatus.filter((tv) => tv.status === "offline");
+      }
     }
 
-    // Filter by search (room number or IP address)
+    // Enhanced search (room number, IP address, atau model)
     if (search) {
       const searchTerm = search.toLowerCase();
       filteredTVs = filteredTVs.filter(
         (tv) =>
-          tv.roomNo.toString().toLowerCase().includes(searchTerm) ||
-          tv.ipAddress.toLowerCase().includes(searchTerm)
+          (tv.roomNo && tv.roomNo.toLowerCase().includes(searchTerm)) ||
+          (tv.ipAddress && tv.ipAddress.toLowerCase().includes(searchTerm)) ||
+          (tv.model && tv.model.toLowerCase().includes(searchTerm))
       );
     }
 
-    // Sorting
+    // Enhanced sorting
     filteredTVs.sort((a, b) => {
       let aValue = a[sortBy];
       let bValue = b[sortBy];
 
-      // Special handling for room number sorting
+      // Handle numeric sorting untuk roomNo
       if (sortBy === "roomNo") {
-        aValue = parseInt(aValue) || 0;
-        bValue = parseInt(bValue) || 0;
-      } else if (typeof aValue === "string") {
+        const aNum = parseInt(aValue) || 0;
+        const bNum = parseInt(bValue) || 0;
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return sortOrder === "desc" ? bNum - aNum : aNum - bNum;
+        }
+      }
+
+      // Handle numeric sorting untuk responseTime
+      if (sortBy === "responseTime") {
+        const aNum = parseInt(aValue) || 0;
+        const bNum = parseInt(bValue) || 0;
+        return sortOrder === "desc" ? bNum - aNum : aNum - bNum;
+      }
+
+      // Handle string sorting
+      if (typeof aValue === "string") {
         aValue = aValue.toLowerCase();
         bValue = bValue.toLowerCase();
       }
@@ -1409,158 +1532,609 @@ app.get("/api/hospitality/tvs", trackRequestMetrics('hospitality'), authenticate
       }
     });
 
-    res.json({
-      success: true,
-      data: filteredTVs,
+    // Enhanced response dengan summary statistics
+    const summary = {
       totalCount: filteredTVs.length,
-      onlineCount: filteredTVs.filter((tv) => tv.status === "online").length,
-      offlineCount: filteredTVs.filter((tv) => tv.status === "offline").length,
-    });
-  } catch (error) {
-    console.error("Error fetching hospitality TVs:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching hospitality TVs",
-      error: error.message,
-    });
-  }
-});
-
-// Get specific TV by room number
-app.get("/api/hospitality/tvs/:roomNo", authenticateToken, async (req, res) => {
-  try {
-    const roomNo = req.params.roomNo;
-
-    // Validasi parameter roomNo
-    if (!roomNo || roomNo.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid room number.",
-      });
-    }
-
-    const tv = await getHospitalityTVByRoomNo(roomNo);
-
-    if (!tv) {
-      return res.status(404).json({
-        success: false,
-        message: "TV not found",
-      });
-    }
-
-    const deviceStatus = tvStatus.get(roomNo) || {
-      status: "offline",
-      responseTime: null,
-      lastChecked: null,
-      error: "Not checked",
+      onlineCount: filteredTVs.filter((d) => d.status === "online").length,
+      offlineCount: filteredTVs.filter((d) => d.status === "offline").length,
+      avgResponseTime: filteredTVs.filter(d => d.responseTime && d.status === "online")
+        .reduce((sum, d) => sum + d.responseTime, 0) / 
+        Math.max(1, filteredTVs.filter(d => d.responseTime && d.status === "online").length),
+      modelBreakdown: filteredTVs.reduce((acc, tv) => {
+        const model = tv.model || "Unknown";
+        acc[model] = (acc[model] || 0) + 1;
+        return acc;
+      }, {})
     };
 
     res.json({
       success: true,
-      data: {
-        ...tv,
-        ...deviceStatus,
-        model: tv.model || "Samsung Hospitality",
-      },
+      data: filteredTVs,
+      summary,
+      ...summary, // backward compatibility
+      fetchedAt: new Date().toISOString()
     });
   } catch (error) {
-    console.error("Error fetching TV:", error);
+    console.error("Error fetching Hospitality TVs:", error);
     res.status(500).json({
       success: false,
-      message: "Error fetching TV",
+      message: "Error fetching Hospitality TVs",
       error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// TV device fetch endpoint dengan better error handling
+app.get("/api/hospitality/tvs/:id", authenticateToken, async (req, res) => {
+  try {
+    const rawTvId = req.params.id;
+    
+    console.log('Fetching TV with ID:', rawTvId);
+    
+    if (!rawTvId || rawTvId.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "TV identifier is required",
+        error: "INVALID_TV_ID"
+      });
+    }
+
+    let tv = null;
+    const allTVs = await getHospitalityTVs();
+    
+    // Enhanced search strategies
+    const searchStrategies = [
+      rawTvId,                              
+      decodeURIComponent(rawTvId),          
+      decodeURIComponent(decodeURIComponent(rawTvId)),
+      rawTvId.replace(/%20/g, ' '),         
+      rawTvId.replace(/\+/g, ' '),
+      rawTvId.replace(/_/g, ' '),
+      rawTvId.replace(/-/g, ' '),
+    ];
+
+    const uniqueStrategies = [...new Set(searchStrategies.filter(Boolean))];
+    
+    console.log('Search strategies:', uniqueStrategies);
+    console.log('Available TVs:', allTVs.map(d => ({ 
+      id: d.id, 
+      roomNo: d.roomNo,
+      type: typeof d.roomNo
+    })));
+
+    // Try different matching approaches
+    for (const searchTerm of uniqueStrategies) {
+      if (tv) break;
+      
+      console.log(`Trying search term: "${searchTerm}"`);
+      
+      // 1. Exact roomNo match
+      tv = allTVs.find(d => d.roomNo === searchTerm);
+      if (tv) {
+        console.log('Found by exact room match');
+        break;
+      }
+      
+      // 2. Case-insensitive roomNo match
+      tv = allTVs.find(d => 
+        d.roomNo && d.roomNo.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (tv) {
+        console.log('Found by case-insensitive room match');
+        break;
+      }
+      
+      // 3. Partial room match (contains)
+      tv = allTVs.find(d => 
+        d.roomNo && (
+          d.roomNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          searchTerm.toLowerCase().includes(d.roomNo.toLowerCase())
+        )
+      );
+      if (tv) {
+        console.log('Found by partial room match');
+        break;
+      }
+      
+      // 4. ID match (if numeric)
+      if (/^\d+$/.test(searchTerm)) {
+        tv = allTVs.find(d => d.id && d.id.toString() === searchTerm);
+        if (tv) {
+          console.log('Found by ID match');
+          break;
+        }
+      }
+      
+      // 5. MongoDB ObjectId match
+      if (/^[0-9a-fA-F]{24}$/.test(searchTerm)) {
+        try {
+          tv = await getHospitalityTVByRoomNo(searchTerm); // This might need adjustment based on your DB function
+          if (tv) {
+            console.log('Found by ObjectId match');
+            break;
+          }
+        } catch (dbError) {
+          console.warn(`Database lookup failed for ObjectId ${searchTerm}:`, dbError.message);
+        }
+      }
+    }
+
+    if (!tv) {
+      const suggestions = allTVs.slice(0, 5).map(d => ({
+        id: d.id,
+        roomNo: d.roomNo
+      }));
+      
+      return res.status(404).json({
+        success: false,
+        message: `TV device not found`,
+        error: "TV_NOT_FOUND",
+        details: {
+          searchedFor: rawTvId,
+          searchStrategies: uniqueStrategies,
+          suggestions: suggestions,
+          totalTVs: allTVs.length
+        }
+      });
+    }
+
+    // Get enhanced TV status
+    const tvStatusData = tvStatus.get(tv.roomNo) || {
+      status: "offline",
+      responseTime: null,
+      error: "Not checked",
+      lastChecked: null,
+    };
+
+    // Prepare enhanced response
+    const enhancedTV = {
+      ...tv,
+      id: tv.id,
+      roomNo: tv.roomNo,
+      ipAddress: tv.ipAddress,
+      status: tvStatusData.status,
+      responseTime: tvStatusData.responseTime,
+      lastChecked: tvStatusData.lastChecked,
+      error: tvStatusData.error,
+      model: tv.model || "Samsung Hospitality",
+      isOnline: tvStatusData.status === "online",
+      isPingable: tvStatusData.status === "online",
+      // Add computed fields
+      statusText: tvStatusData.status === "online" ? "Online" : "Offline",
+      lastCheckedFormatted: tvStatusData.lastChecked ? 
+        new Date(tvStatusData.lastChecked).toLocaleString() : "Never"
+    };
+
+    console.log(`Successfully returning TV: Room ${tv.roomNo}`);
+
+    res.json({
+      success: true,
+      data: enhancedTV,
+      fetchedAt: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error("Error fetching TV device:", error);
+    
+    let statusCode = 500;
+    let errorMessage = "Internal server error";
+    
+    if (error.message.includes('timeout')) {
+      statusCode = 408;
+      errorMessage = "Request timeout";
+    } else if (error.message.includes('network')) {
+      statusCode = 503;
+      errorMessage = "Network error";
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      message: errorMessage,
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
 // Check specific TV status
-app.post(
-  "/api/hospitality/tvs/:roomNo/check",
-  authenticateToken,
-  async (req, res) => {
-    try {
-      const roomNo = req.params.roomNo;
-
-      // Validasi parameter roomNo
-      if (!roomNo || roomNo.trim() === "") {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid room number.",
-        });
-      }
-
-      const tv = await getHospitalityTVByRoomNo(roomNo);
-
-      if (!tv) {
-        return res.status(404).json({
-          success: false,
-          message: "TV not found",
-        });
-      }
-
-      const result = await checkTVConnectivity(tv.ipAddress);
-      const statusInfo = {
-        ...result,
-        lastChecked: new Date().toISOString(),
-      };
-
-      tvStatus.set(roomNo, statusInfo);
-
-      res.json({
-        success: true,
-        data: {
-          ...tv,
-          ...statusInfo,
-          model: tv.model || "Samsung Hospitality",
-        },
-      });
-    } catch (error) {
-      console.error("Error checking TV status:", error);
-      res.status(500).json({
+app.post("/api/hospitality/tvs/:id/check", authenticateToken, async (req, res) => {
+  try {
+    const rawTvId = req.params.id;
+    
+    if (!rawTvId || rawTvId.trim() === "") {
+      return res.status(400).json({
         success: false,
-        message: "Error checking TV status",
-        error: error.message,
+        message: "TV identifier is required",
+        error: "INVALID_TV_ID"
       });
     }
+
+    // Use same enhanced search logic
+    let tv = null;
+    const allTVs = await getHospitalityTVs();
+    
+    const decodingStrategies = [
+      rawTvId,
+      decodeURIComponent(rawTvId),
+      rawTvId.replace(/%20/g, ' '),
+      rawTvId.replace(/\+/g, ' '),
+    ];
+    
+    const uniqueStrategies = [...new Set(decodingStrategies)];
+    
+    for (const searchTerm of uniqueStrategies) {
+      if (tv) break;
+      
+      tv = allTVs.find(d => d.roomNo === searchTerm);
+      if (tv) break;
+      
+      tv = allTVs.find(d => 
+        d.roomNo && d.roomNo.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (tv) break;
+      
+      if (/^\d+$/.test(searchTerm)) {
+        tv = allTVs.find(d => d.id && d.id.toString() === searchTerm);
+        if (tv) break;
+      }
+    }
+
+    if (!tv) {
+      return res.status(404).json({
+        success: false,
+        message: `TV device not found`,
+        error: "TV_NOT_FOUND"
+      });
+    }
+
+    if (!tv.ipAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "TV IP address not available for connectivity check",
+        error: "NO_IP_ADDRESS"
+      });
+    }
+
+    console.log(`Checking connectivity for TV: Room ${tv.roomNo} (${tv.ipAddress})`);
+
+    // Perform connectivity check
+    const result = await checkTVConnectivity(tv.ipAddress);
+    const statusInfo = {
+      ...result,
+      lastChecked: new Date().toISOString(),
+    };
+
+    // Update status in memory
+    tvStatus.set(tv.roomNo, statusInfo);
+
+    // Log the check result
+    console.log(`TV check completed: Room ${tv.roomNo} - ${result.status}`);
+
+    const enhancedResponse = {
+      ...tv,
+      ...statusInfo,
+      id: tv.id,
+      model: tv.model || "Samsung Hospitality",
+      isOnline: result.status === "online",
+      isPingable: result.status === "online",
+      statusText: result.status === "online" ? "Online" : "Offline"
+    };
+
+    res.json({
+      success: true,
+      message: "TV status checked successfully",
+      data: enhancedResponse,
+      checkedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Error checking TV device status:", error);
+
+    let errorMessage = "Internal server error while checking TV status";
+    let statusCode = 500;
+
+    if (error.message.includes("timeout")) {
+      errorMessage = "TV connection timeout";
+      statusCode = 408;
+    } else if (error.message.includes("unreachable")) {
+      errorMessage = "TV unreachable";
+      statusCode = 503;
+    } else if (error.name === 'NetworkError') {
+      errorMessage = "Network connectivity issue";
+      statusCode = 503;
+    }
+
+    res.status(statusCode).json({
+      success: false,
+      message: errorMessage,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
-);
+});
+
+app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) => {
+  try {
+    const rawTvId = req.params.id;
+    
+    if (!rawTvId || rawTvId.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "TV identifier is required",
+        error: "INVALID_TV_ID"
+      });
+    }
+
+    // Cari TV dengan enhanced search logic
+    let tv = null;
+    const allTVs = await getHospitalityTVs();
+    
+    const decodingStrategies = [
+      rawTvId,
+      decodeURIComponent(rawTvId),
+      rawTvId.replace(/%20/g, ' '),
+      rawTvId.replace(/\+/g, ' '),
+    ];
+    
+    const uniqueStrategies = [...new Set(decodingStrategies)];
+    
+    for (const searchTerm of uniqueStrategies) {
+      if (tv) break;
+      
+      tv = allTVs.find(d => d.roomNo === searchTerm);
+      if (tv) break;
+      
+      tv = allTVs.find(d => 
+        d.roomNo && d.roomNo.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (tv) break;
+      
+      if (/^\d+$/.test(searchTerm)) {
+        tv = allTVs.find(d => d.id && d.id.toString() === searchTerm);
+        if (tv) break;
+      }
+    }
+
+    if (!tv) {
+      return res.status(404).json({
+        success: false,
+        message: `TV "${rawTvId}" not found`,
+        error: "TV_NOT_FOUND"
+      });
+    }
+
+    const tvStatusData = tvStatus.get(tv.roomNo);
+    const isOnline = tvStatusData?.status === "online";
+
+    // Generate realistic network metrics
+    const generateTVNetworkMetrics = (isOnline) => {
+      if (!isOnline) {
+        return {
+          sent: "0.00",
+          received: "0.00", 
+          latency: 0,
+          jitter: 0,
+          ttl: 0,
+          packetLoss: 100,
+          bandwidth: 0,
+          hops: 0
+        };
+      }
+
+      // Generate correlated realistic values
+      const baseLatency = Math.floor(Math.random() * 35) + 8; // 8-43ms
+      const baseJitter = Math.max(1, Math.floor(baseLatency * 0.15) + Math.floor(Math.random() * 8)); // 15% of latency + variation
+      const baseBandwidth = Math.floor(Math.random() * 70) + 25; // 25-95 Mbps
+      const basePacketLoss = parseFloat((Math.random() * 1.2).toFixed(2)); // 0-1.2%
+
+      return {
+        sent: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
+        received: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
+        latency: baseLatency,
+        jitter: baseJitter,
+        ttl: Math.floor(Math.random() * 8) + 60, // 60-67 (realistic TTL)
+        packetLoss: basePacketLoss,
+        bandwidth: baseBandwidth,
+        hops: Math.floor(Math.random() * 12) + 10 // 10-21 hops
+      };
+    };
+
+    const metrics = generateTVNetworkMetrics(isOnline);
+
+    res.json({
+      success: true,
+      data: {
+        ...metrics,
+        timestamp: new Date().toISOString(),
+        roomNo: tv.roomNo,
+        isOnline: isOnline,
+        signalLevel: tvStatusData?.signalLevel || null
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching TV metrics:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching TV network metrics",
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/hospitality/tvs/:id/history", authenticateToken, async (req, res) => {
+  try {
+    const rawTvId = req.params.id;
+    const { timeRange = '24h' } = req.query;
+
+    if (!rawTvId || rawTvId.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "TV identifier is required"
+      });
+    }
+
+    // Enhanced TV search logic
+    let tv = null;
+    const allTVs = await getHospitalityTVs();
+    
+    const decodingStrategies = [
+      rawTvId,
+      decodeURIComponent(rawTvId),
+      rawTvId.replace(/%20/g, ' '),
+      rawTvId.replace(/\+/g, ' '),
+    ];
+    
+    const uniqueStrategies = [...new Set(decodingStrategies)];
+    
+    for (const searchTerm of uniqueStrategies) {
+      if (tv) break;
+      
+      tv = allTVs.find(d => d.roomNo === searchTerm);
+      if (tv) break;
+      
+      tv = allTVs.find(d => 
+        d.roomNo && d.roomNo.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (tv) break;
+      
+      if (/^\d+$/.test(searchTerm)) {
+        tv = allTVs.find(d => d.id && d.id.toString() === searchTerm);
+        if (tv) break;
+      }
+    }
+
+    if (!tv) {
+      return res.status(404).json({
+        success: false,
+        message: `TV "${rawTvId}" not found`
+      });
+    }
+
+    const tvStatusData = tvStatus.get(tv.roomNo);
+    const isOnline = tvStatusData?.status === "online";
+    
+    // Generate consistent historical data untuk TV
+    const generateTVHistoricalData = (timeRange, isOnline) => {
+      const now = new Date();
+      const data = [];
+
+      let points, intervalMs;
+      switch (timeRange) {
+        case '1h':
+          points = 60;
+          intervalMs = 60000; // 1 minute
+          break;
+        case '24h':
+          points = 24;
+          intervalMs = 3600000; // 1 hour
+          break;
+        case '7d':
+          points = 7;
+          intervalMs = 86400000; // 1 day
+          break;
+        default:
+          points = 24;
+          intervalMs = 3600000;
+      }
+
+      // Base values yang konsisten untuk TV
+      const baseLatency = isOnline ? 22 : 0;
+      const baseBandwidth = isOnline ? 65 : 0;
+      const baseJitter = isOnline ? 6 : 0;
+      const basePacketLoss = isOnline ? 0.3 : 0;
+      const baseSent = isOnline ? 4.5 : 0;
+      const baseReceived = isOnline ? 2.8 : 0;
+      const baseHops = isOnline ? 14 : 0;
+
+      for (let i = points - 1; i >= 0; i--) {
+        const time = new Date(now.getTime() - i * intervalMs);
+        const timeStr = timeRange === '1h' 
+          ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
+          : timeRange === '24h'
+          ? `${String(time.getHours()).padStart(2, '0')}:00`
+          : time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+        // Add realistic variation (20% variation)
+        const variation = 0.2;
+        data.push({
+          time: timeStr,
+          timestamp: time.toISOString(),
+          latency: Math.max(0, Math.floor(baseLatency + (Math.random() - 0.5) * baseLatency * variation)),
+          bandwidth: Math.max(0, Math.floor(baseBandwidth + (Math.random() - 0.5) * baseBandwidth * variation)),
+          jitter: Math.max(0, Math.floor(baseJitter + (Math.random() - 0.5) * baseJitter * variation)),
+          packetLoss: Math.max(0, parseFloat((basePacketLoss + (Math.random() - 0.5) * basePacketLoss * variation).toFixed(2))),
+          sent: Math.max(0, parseFloat((baseSent + (Math.random() - 0.5) * baseSent * variation).toFixed(2))),
+          received: Math.max(0, parseFloat((baseReceived + (Math.random() - 0.5) * baseReceived * variation).toFixed(2))),
+          hops: Math.max(0, Math.floor(baseHops + (Math.random() - 0.5) * baseHops * variation))
+        });
+      }
+
+      return data;
+    };
+
+    const historicalData = generateTVHistoricalData(timeRange, isOnline);
+
+    res.json({
+      success: true,
+      data: historicalData,
+      timeRange: timeRange,
+      roomNo: tv.roomNo,
+      isOnline: isOnline,
+      totalPoints: historicalData.length
+    });
+  } catch (error) {
+    console.error("Error fetching TV network history:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching TV network history",
+      error: error.message
+    });
+  }
+});
 
 // Bulk check all TVs status
-app.post("/api/hospitality/tvs/check-all", async (req, res) => {
+app.post("/api/hospitality/tvs/check-all", authenticateToken, async (req, res) => {
   try {
     await checkAllTVsStatus();
 
     const allTVs = await getHospitalityTVs();
 
     const tvsWithStatus = allTVs.map((tv) => {
-      const deviceStatus = tvStatus.get(tv.roomNo) || {
+      const tvStatusData = tvStatus.get(tv.roomNo) || {
         status: "offline",
         responseTime: null,
-        lastChecked: null,
         error: "Not checked",
+        lastChecked: null,
       };
 
       return {
         ...tv,
-        ...deviceStatus,
+        id: tv.id,
+        roomNo: tv.roomNo,
+        ipAddress: tv.ipAddress,
+        status: tvStatusData.status,
+        responseTime: tvStatusData.responseTime,
+        lastChecked: tvStatusData.lastChecked,
+        error: tvStatusData.error,
         model: tv.model || "Samsung Hospitality",
+        isOnline: tvStatusData.status === "online",
+        isPingable: tvStatusData.status === "online"
       };
     });
 
     res.json({
       success: true,
-      message: "All TVs status checked",
+      message: "All TV devices status checked",
       data: tvsWithStatus,
       totalCount: tvsWithStatus.length,
-      onlineCount: tvsWithStatus.filter((tv) => tv.status === "online").length,
-      offlineCount: tvsWithStatus.filter((tv) => tv.status === "offline")
-        .length,
+      onlineCount: tvsWithStatus.filter((d) => d.status === "online").length,
+      offlineCount: tvsWithStatus.filter((d) => d.status === "offline").length,
     });
   } catch (error) {
-    console.error("Error checking all TVs status:", error);
+    console.error("Error checking all TV devices status:", error);
     res.status(500).json({
       success: false,
-      message: "Error checking all TVs status",
+      message: "Error checking all TV devices status",
       error: error.message,
     });
   }
@@ -1568,38 +2142,59 @@ app.post("/api/hospitality/tvs/check-all", async (req, res) => {
 
 // Get hospitality dashboard stats
 app.get(
-  "/api/hospitality/dashboard/stats", trackRequestMetrics('hospitality'),
+  "/api/hospitality/dashboard/stats", 
+  trackRequestMetrics('hospitality'),
   authenticateToken,
   async (req, res) => {
     try {
       const allTVs = await getHospitalityTVs();
+      const statusArray = Array.from(tvStatus.values());
 
       const totalTVs = allTVs.length;
-      const onlineTVs = Array.from(tvStatus.values()).filter(
-        (s) => s.status === "online"
-      ).length;
+      const onlineTVs = statusArray.filter(s => s.status === "online").length;
       const offlineTVs = totalTVs - onlineTVs;
+      const uncheckedTVs = totalTVs - statusArray.length;
 
       // Calculate uptime percentage
-      const uptime =
-        totalTVs > 0 ? ((onlineTVs / totalTVs) * 100).toFixed(1) : "0.0";
+      const uptime = totalTVs > 0 ? ((onlineTVs / totalTVs) * 100).toFixed(1) : "0.0";
 
-      // Floor stats (based on room number patterns)
-      const floorStats = {};
+      // Enhanced model stats
+      const modelStats = {};
       allTVs.forEach((tv) => {
-        const floor = Math.floor(parseInt(tv.roomNo) / 100);
-        if (!floorStats[floor]) {
-          floorStats[floor] = { total: 0, online: 0, offline: 0 };
+        const tvStatusData = tvStatus.get(tv.roomNo);
+        const model = tvStatusData?.model || tv.model || "Samsung Hospitality";
+        
+        if (!modelStats[model]) {
+          modelStats[model] = { total: 0, online: 0, offline: 0, unchecked: 0 };
         }
-        floorStats[floor].total++;
+        modelStats[model].total++;
 
-        const status = tvStatus.get(tv.roomNo);
-        if (status && status.status === "online") {
-          floorStats[floor].online++;
+        if (tvStatusData) {
+          if (tvStatusData.status === "online") {
+            modelStats[model].online++;
+          } else {
+            modelStats[model].offline++;
+          }
         } else {
-          floorStats[floor].offline++;
+          modelStats[model].unchecked++;
         }
       });
+
+      // Enhanced metrics
+      const onlineStatusList = statusArray.filter(s => s.status === "online");
+      const avgResponseTime = onlineStatusList.length > 0
+        ? (onlineStatusList.reduce((sum, s) => sum + (s.responseTime || 0), 0) / onlineStatusList.length).toFixed(1)
+        : null;
+
+      const avgSignalLevel = onlineStatusList.length > 0
+        ? (onlineStatusList.reduce((sum, s) => sum + (s.signalLevel || 0), 0) / onlineStatusList.length).toFixed(1)
+        : null;
+
+      // Recent activity (dalam 1 jam terakhir)
+      const oneHourAgo = new Date(Date.now() - 3600000);
+      const recentChecks = statusArray.filter(s => 
+        s.lastChecked && new Date(s.lastChecked) > oneHourAgo
+      ).length;
 
       res.json({
         success: true,
@@ -1607,23 +2202,45 @@ app.get(
           totalTVs,
           onlineTVs,
           offlineTVs,
+          uncheckedTVs,
           uptime,
-          floorStats,
+          modelStats,
+          avgResponseTime,
+          avgSignalLevel,
+          recentChecks,
+          metrics: {
+            responseTimeDistribution: onlineStatusList.reduce((acc, s) => {
+              const time = s.responseTime || 0;
+              if (time < 50) acc.fast++;
+              else if (time < 100) acc.medium++;
+              else acc.slow++;
+              return acc;
+            }, { fast: 0, medium: 0, slow: 0 }),
+            signalQualityDistribution: onlineStatusList.reduce((acc, s) => {
+              const signal = s.signalLevel || 0;
+              if (signal > 85) acc.excellent++;
+              else if (signal > 70) acc.good++;
+              else if (signal > 50) acc.fair++;
+              else acc.poor++;
+              return acc;
+            }, { excellent: 0, good: 0, fair: 0, poor: 0 })
+          },
           lastUpdated: new Date().toISOString(),
         },
       });
     } catch (error) {
-      console.error("Error fetching hospitality dashboard stats:", error);
+      console.error("Error fetching TV dashboard stats:", error);
       res.status(500).json({
         success: false,
-        message: "Error fetching hospitality dashboard stats",
+        message: "Error fetching TV dashboard stats",
         error: error.message,
+        timestamp: new Date().toISOString()
       });
     }
   }
 );
 
-// API Routes for Chromecast
+// ==================== CHROMECAST ENDPOINTS ====================
 
 // Get all Chromecast devices with status
 app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken, async (req, res) => {
@@ -1716,40 +2333,121 @@ app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken,
   }
 });
 
-// Get specific Chromecast device
+// Enhanced Chromecast device fetch endpoint dengan better error handling
 app.get("/api/chromecast/:id", authenticateToken, async (req, res) => {
   try {
-    const deviceId = req.params.id;
-
-    // Validasi parameter ID yang lebih ketat
-    if (!deviceId || deviceId.trim() === "") {
+    const rawDeviceId = req.params.id;
+    
+    console.log('Fetching device with ID:', rawDeviceId);
+    
+    if (!rawDeviceId || rawDeviceId.trim() === "") {
       return res.status(400).json({
         success: false,
         message: "Device ID is required",
+        error: "INVALID_DEVICE_ID"
       });
     }
 
-    // Validasi format ID - harus ObjectId (24 karakter) atau numeric
-    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(deviceId);
-    const isValidNumeric = /^\d+$/.test(deviceId);
+    let device = null;
+    const allDevices = await getChromecastDevices();
+    
+    // Enhanced search strategies
+    const searchStrategies = [
+      rawDeviceId,                              
+      decodeURIComponent(rawDeviceId),          
+      decodeURIComponent(decodeURIComponent(rawDeviceId)),
+      rawDeviceId.replace(/%20/g, ' '),         
+      rawDeviceId.replace(/\+/g, ' '),
+      rawDeviceId.replace(/_/g, ' '),
+      rawDeviceId.replace(/-/g, ' '),
+    ];
 
-    if (!isValidObjectId && !isValidNumeric) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid device ID format. Must be a valid ObjectId (24 hex characters) or numeric ID.",
-      });
+    const uniqueStrategies = [...new Set(searchStrategies.filter(Boolean))];
+    
+    console.log('Search strategies:', uniqueStrategies);
+    console.log('Available devices:', allDevices.map(d => ({ 
+      id: d.idCast, 
+      name: d.deviceName,
+      type: typeof d.deviceName
+    })));
+
+    // Try different matching approaches
+    for (const searchTerm of uniqueStrategies) {
+      if (device) break;
+      
+      console.log(`Trying search term: "${searchTerm}"`);
+      
+      // 1. Exact deviceName match
+      device = allDevices.find(d => d.deviceName === searchTerm);
+      if (device) {
+        console.log('Found by exact name match');
+        break;
+      }
+      
+      // 2. Case-insensitive deviceName match
+      device = allDevices.find(d => 
+        d.deviceName && d.deviceName.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (device) {
+        console.log('Found by case-insensitive name match');
+        break;
+      }
+      
+      // 3. Partial name match (contains)
+      device = allDevices.find(d => 
+        d.deviceName && (
+          d.deviceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          searchTerm.toLowerCase().includes(d.deviceName.toLowerCase())
+        )
+      );
+      if (device) {
+        console.log('Found by partial name match');
+        break;
+      }
+      
+      // 4. ID match (if numeric)
+      if (/^\d+$/.test(searchTerm)) {
+        device = allDevices.find(d => d.idCast.toString() === searchTerm);
+        if (device) {
+          console.log('Found by ID match');
+          break;
+        }
+      }
+      
+      // 5. MongoDB ObjectId match
+      if (/^[0-9a-fA-F]{24}$/.test(searchTerm)) {
+        try {
+          device = await getChromecastDeviceById(searchTerm);
+          if (device) {
+            console.log('Found by ObjectId match');
+            break;
+          }
+        } catch (dbError) {
+          console.warn(`Database lookup failed for ObjectId ${searchTerm}:`, dbError.message);
+        }
+      }
     }
-
-    const device = await getChromecastDeviceById(deviceId);
 
     if (!device) {
+      const suggestions = allDevices.slice(0, 5).map(d => ({
+        id: d.idCast,
+        name: d.deviceName
+      }));
+      
       return res.status(404).json({
         success: false,
-        message: "Chromecast device not found",
+        message: `Chromecast device not found`,
+        error: "DEVICE_NOT_FOUND",
+        details: {
+          searchedFor: rawDeviceId,
+          searchStrategies: uniqueStrategies,
+          suggestions: suggestions,
+          totalDevices: allDevices.length
+        }
       });
     }
 
+    // Get enhanced device status
     const deviceStatus = chromecastStatus.get(device.idCast) || {
       isPingable: false,
       isOnline: false,
@@ -1761,84 +2459,412 @@ app.get("/api/chromecast/:id", authenticateToken, async (req, res) => {
       lastChecked: null,
     };
 
+    // Prepare enhanced response
+    const enhancedDevice = {
+      ...device,
+      ...deviceStatus,
+      id: device.idCast,
+      type: device.type || "Chromecast",
+      model: device.model || "Google Chromecast",
+      // Add computed fields
+      statusText: deviceStatus.isOnline ? "Online" : "Offline",
+      signalQuality: deviceStatus.signalLevel ? 
+        (deviceStatus.signalLevel > -50 ? "Excellent" :
+         deviceStatus.signalLevel > -60 ? "Good" :
+         deviceStatus.signalLevel > -70 ? "Fair" : "Poor") : "Unknown",
+      lastCheckedFormatted: deviceStatus.lastChecked ? 
+        new Date(deviceStatus.lastChecked).toLocaleString() : "Never"
+    };
+
+    console.log(`Successfully returning device: ${device.deviceName}`);
+
     res.json({
       success: true,
-      data: {
-        ...device,
-        ...deviceStatus,
-        id: device.idCast,
-        type: device.type,
-        model: device.model || "Google Chromecast",
-      },
+      data: enhancedDevice,
+      fetchedAt: new Date().toISOString()
     });
+    
   } catch (error) {
     console.error("Error fetching Chromecast device:", error);
-    res.status(500).json({
+    
+    let statusCode = 500;
+    let errorMessage = "Internal server error";
+    
+    if (error.message.includes('timeout')) {
+      statusCode = 408;
+      errorMessage = "Request timeout";
+    } else if (error.message.includes('network')) {
+      statusCode = 503;
+      errorMessage = "Network error";
+    }
+    
+    res.status(statusCode).json({
       success: false,
-      message: "Error fetching Chromecast device",
+      message: errorMessage,
       error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// Check specific Chromecast device status
+// Enhanced check device endpoint
 app.post("/api/chromecast/:id/check", authenticateToken, async (req, res) => {
   try {
-    const deviceId = req.params.id;
-
-    // Validasi parameter ID yang lebih ketat
-    if (!deviceId || deviceId.trim() === "") {
+    const rawDeviceId = req.params.id;
+    
+    if (!rawDeviceId || rawDeviceId.trim() === "") {
       return res.status(400).json({
         success: false,
-        message: "Device ID is required",
+        message: "Device identifier is required",
+        error: "INVALID_DEVICE_ID"
       });
     }
 
-    // Validasi format ID
-    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(deviceId);
-    const isValidNumeric = /^\d+$/.test(deviceId);
-
-    if (!isValidObjectId && !isValidNumeric) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid device ID format. Must be a valid ObjectId (24 hex characters) or numeric ID.",
-      });
+    // Use same enhanced search logic
+    let device = null;
+    const allDevices = await getChromecastDevices();
+    
+    const decodingStrategies = [
+      rawDeviceId,
+      decodeURIComponent(rawDeviceId),
+      rawDeviceId.replace(/%20/g, ' '),
+      rawDeviceId.replace(/\+/g, ' '),
+    ];
+    
+    const uniqueStrategies = [...new Set(decodingStrategies)];
+    
+    for (const searchTerm of uniqueStrategies) {
+      if (device) break;
+      
+      device = allDevices.find(d => d.deviceName === searchTerm);
+      if (device) break;
+      
+      device = allDevices.find(d => 
+        d.deviceName && d.deviceName.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (device) break;
+      
+      if (/^\d+$/.test(searchTerm)) {
+        device = allDevices.find(d => d.idCast.toString() === searchTerm);
+        if (device) break;
+      }
     }
-
-    const device = await getChromecastDeviceById(deviceId);
 
     if (!device) {
       return res.status(404).json({
         success: false,
-        message: "Chromecast device not found",
+        message: `Chromecast device not found`,
+        error: "DEVICE_NOT_FOUND"
       });
     }
 
+    if (!device.ipAddr) {
+      return res.status(400).json({
+        success: false,
+        message: "Device IP address not available for connectivity check",
+        error: "NO_IP_ADDRESS"
+      });
+    }
+
+    console.log(`Checking connectivity for device: ${device.deviceName} (${device.ipAddr})`);
+
+    // Perform enhanced connectivity check
     const result = await checkChromecastConnectivity(device.ipAddr);
     const statusInfo = {
       ...result,
       lastChecked: new Date().toISOString(),
+      checkDuration: Date.now() - Date.now() // This will be near 0, but shows the concept
     };
 
+    // Update status in memory
     chromecastStatus.set(device.idCast, statusInfo);
+
+    // Log the check result
+    console.log(`Device check completed: ${device.deviceName} - ${result.isOnline ? 'Online' : 'Offline'}`);
+
+    const enhancedResponse = {
+      ...device,
+      ...statusInfo,
+      id: device.idCast,
+      type: device.type || "Chromecast", 
+      model: device.model || "Google Chromecast",
+      statusText: result.isOnline ? "Online" : "Offline",
+      signalQuality: result.signalLevel ? 
+        (result.signalLevel > -50 ? "Excellent" :
+         result.signalLevel > -60 ? "Good" :
+         result.signalLevel > -70 ? "Fair" : "Poor") : "Unknown"
+    };
+
+    res.json({
+      success: true,
+      message: "Device status checked successfully",
+      data: enhancedResponse,
+      checkedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Error checking Chromecast device status:", error);
+
+    let errorMessage = "Internal server error while checking device status";
+    let statusCode = 500;
+
+    if (error.message.includes("timeout")) {
+      errorMessage = "Device connection timeout";
+      statusCode = 408;
+    } else if (error.message.includes("unreachable")) {
+      errorMessage = "Device unreachable";
+      statusCode = 503;
+    } else if (error.name === 'NetworkError') {
+      errorMessage = "Network connectivity issue";
+      statusCode = 503;
+    }
+
+    res.status(statusCode).json({
+      success: false,
+      message: errorMessage,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Endpoint untuk device network metrics
+app.get("/api/chromecast/:id/metrics", authenticateToken, async (req, res) => {
+  try {
+    const deviceId = decodeURIComponent(req.params.id);
+
+    if (!deviceId || deviceId.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Device identifier is required"
+      });
+    }
+
+    // Find device by name or ID using enhanced search logic
+    let device;
+    const allDevices = await getChromecastDevices();
+    
+    // Use same search logic as main device endpoint
+    const decodingStrategies = [
+      deviceId,
+      decodeURIComponent(deviceId),
+      deviceId.replace(/%20/g, ' '),
+      deviceId.replace(/\+/g, ' '),
+    ];
+    
+    const uniqueStrategies = [...new Set(decodingStrategies)];
+    
+    for (const searchTerm of uniqueStrategies) {
+      if (device) break;
+      
+      // Exact match first
+      device = allDevices.find(d => d.deviceName === searchTerm);
+      if (device) break;
+      
+      // Case-insensitive match
+      device = allDevices.find(d => 
+        d.deviceName && d.deviceName.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (device) break;
+      
+      // ID match
+      if (/^\d+$/.test(searchTerm)) {
+        device = allDevices.find(d => d.idCast.toString() === searchTerm);
+        if (device) break;
+      }
+    }
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: `Device '${deviceId}' not found`
+      });
+    }
+
+    const deviceStatus = chromecastStatus.get(device.idCast);
+    const isOnline = deviceStatus?.isOnline || false;
+
+    // Generate realistic network metrics
+    const generateRealisticMetrics = () => {
+      if (!isOnline) {
+        return {
+          sent: "0.00",
+          received: "0.00", 
+          latency: 0,
+          jitter: 0,
+          ttl: 0,
+          packetLoss: 100,
+          bandwidth: 0,
+          speed: 0
+        };
+      }
+
+      // Generate realistic values based on device performance
+      const baseLatency = Math.floor(Math.random() * 30) + 10; // 10-40ms
+      const baseJitter = Math.floor(baseLatency * 0.1) + Math.floor(Math.random() * 10); // 10% of latency + random
+      const baseBandwidth = Math.floor(Math.random() * 80) + 20; // 20-100 Mbps
+      const baseSpeed = Math.floor(baseBandwidth * 0.8) + Math.floor(Math.random() * 20); // 80% of bandwidth + variation
+
+      return {
+        sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
+        received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
+        latency: baseLatency,
+        jitter: baseJitter,
+        ttl: Math.floor(Math.random() * 8) + 58, // 58-65 (realistic TTL range)
+        packetLoss: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
+        bandwidth: baseBandwidth,
+        speed: baseSpeed
+      };
+    };
+
+    const metrics = generateRealisticMetrics();
 
     res.json({
       success: true,
       data: {
-        ...device,
-        ...statusInfo,
-        id: device.idCast,
-        type: device.type,
-        model: device.model || "Google Chromecast",
-      },
+        ...metrics,
+        timestamp: new Date().toISOString(),
+        deviceName: device.deviceName,
+        isOnline: isOnline
+      }
     });
   } catch (error) {
-    console.error("Error checking Chromecast device status:", error);
+    console.error("Error fetching device metrics:", error);
     res.status(500).json({
       success: false,
-      message: "Error checking Chromecast device status",
-      error: error.message,
+      message: "Error fetching device metrics",
+      error: error.message
+    });
+  }
+});
+
+// Endpoint untuk network history
+app.get("/api/chromecast/:id/history", authenticateToken, async (req, res) => {
+  try {
+    const deviceId = decodeURIComponent(req.params.id);
+    const { timeRange = '24h' } = req.query;
+
+    if (!deviceId || deviceId.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Device identifier is required"
+      });
+    }
+
+    // Find device using same enhanced search logic
+    let device;
+    const allDevices = await getChromecastDevices();
+    
+    const decodingStrategies = [
+      deviceId,
+      decodeURIComponent(deviceId),
+      deviceId.replace(/%20/g, ' '),
+      deviceId.replace(/\+/g, ' '),
+    ];
+    
+    const uniqueStrategies = [...new Set(decodingStrategies)];
+    
+    for (const searchTerm of uniqueStrategies) {
+      if (device) break;
+      
+      device = allDevices.find(d => d.deviceName === searchTerm);
+      if (device) break;
+      
+      device = allDevices.find(d => 
+        d.deviceName && d.deviceName.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (device) break;
+      
+      if (/^\d+$/.test(searchTerm)) {
+        device = allDevices.find(d => d.idCast.toString() === searchTerm);
+        if (device) break;
+      }
+    }
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: `Device '${deviceId}' not found`
+      });
+    }
+
+    const deviceStatus = chromecastStatus.get(device.idCast);
+    const isOnline = deviceStatus?.isOnline || false;
+    
+    // Generate consistent historical data
+    const generateHistoricalData = (timeRange, isOnline) => {
+      const now = new Date();
+      const data = [];
+
+      let points, intervalMs;
+      switch (timeRange) {
+        case '1h':
+          points = 60;
+          intervalMs = 60000; // 1 minute
+          break;
+        case '24h':
+          points = 24;
+          intervalMs = 3600000; // 1 hour
+          break;
+        case '7d':
+          points = 7;
+          intervalMs = 86400000; // 1 day
+          break;
+        default:
+          points = 24;
+          intervalMs = 3600000;
+      }
+
+      // Base values for consistency
+      const baseLatency = isOnline ? 25 : 0;
+      const baseBandwidth = isOnline ? 75 : 0;
+      const baseJitter = isOnline ? 8 : 0;
+      const basePacketLoss = isOnline ? 0.5 : 0;
+      const baseSent = isOnline ? 3.2 : 0;
+      const baseReceived = isOnline ? 2.1 : 0;
+      const baseSpeed = isOnline ? 85 : 0;
+
+      for (let i = points - 1; i >= 0; i--) {
+        const time = new Date(now.getTime() - i * intervalMs);
+        const timeStr = timeRange === '1h' 
+          ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
+          : timeRange === '24h'
+          ? `${String(time.getHours()).padStart(2, '0')}:00`
+          : time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+        // Add some realistic variation
+        const variation = 0.3; // 30% variation
+        data.push({
+          time: timeStr,
+          timestamp: time.toISOString(),
+          latency: Math.max(0, Math.floor(baseLatency + (Math.random() - 0.5) * baseLatency * variation)),
+          bandwidth: Math.max(0, Math.floor(baseBandwidth + (Math.random() - 0.5) * baseBandwidth * variation)),
+          jitter: Math.max(0, Math.floor(baseJitter + (Math.random() - 0.5) * baseJitter * variation)),
+          packetLoss: Math.max(0, parseFloat((basePacketLoss + (Math.random() - 0.5) * basePacketLoss * variation).toFixed(2))),
+          sent: Math.max(0, parseFloat((baseSent + (Math.random() - 0.5) * baseSent * variation).toFixed(2))),
+          received: Math.max(0, parseFloat((baseReceived + (Math.random() - 0.5) * baseReceived * variation).toFixed(2))),
+          speed: Math.max(0, Math.floor(baseSpeed + (Math.random() - 0.5) * baseSpeed * variation))
+        });
+      }
+
+      return data;
+    };
+
+    const historicalData = generateHistoricalData(timeRange, isOnline);
+
+    res.json({
+      success: true,
+      data: historicalData,
+      timeRange: timeRange,
+      deviceName: device.deviceName,
+      isOnline: isOnline,
+      totalPoints: historicalData.length
+    });
+  } catch (error) {
+    console.error("Error fetching network history:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching network history",
+      error: error.message
     });
   }
 });
@@ -2424,7 +3450,7 @@ const startPeriodicChecks = () => {
       checkAllChannelsStatus().catch(error => {
         console.error("Error in periodic channel status check:", error);
       });
-    }, 1800000); // Every 30 minutes
+    }, 120000); // Every 2 minutes
   }
 
   // TV and Chromecast status checks
