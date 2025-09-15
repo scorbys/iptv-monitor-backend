@@ -347,6 +347,7 @@ async function getAllChannelsFromDB() {
 
     const intlArray = Array.isArray(internationalChannels) ? internationalChannels : [];
     const localArray = Array.isArray(localChannels) ? localChannels : [];
+
     const allChannels = [...intlArray, ...localArray];
 
     const validChannels = allChannels.filter(channel => {
@@ -1304,47 +1305,6 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
     });
   }
 });
-
-// ==================== INITIALIZATION FUNCTIONS ====================
-async function initializeChannelStatus() {
-  try {
-    const allChannels = await getAllChannelsFromDB();
-
-    if (allChannels.length === 0) {
-      return;
-    }
-
-    // Initialize status for all channels if not exists
-    allChannels.forEach(channel => {
-      if (!channelStatus.has(channel.id)) {
-        channelStatus.set(channel.id, {
-          status: "offline",
-          responseTime: null,
-          lastChecked: null,
-          error: "Not checked yet",
-          signalLevel: null,
-          bitrate: null,
-          networkStats: null
-        });
-      }
-    });
-
-    // Run initial status check
-    await checkAllChannelsStatus();
-  } catch (error) {
-    console.error("Error initializing channel status:", error);
-  }
-}
-
-// Initialize channel status when server starts
-(async () => {
-  try {
-    await initializeChannelStatus();
-    console.log("Channel status initialization completed");
-  } catch (error) {
-    console.error("Failed to initialize channel status:", error);
-  }
-})();
 
 // ==================== CHANNEL ENDPOINTS ====================
 app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, async (req, res) => {

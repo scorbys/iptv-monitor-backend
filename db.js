@@ -96,26 +96,9 @@ async function connectDB() {
 async function getInternationalChannels() {
   try {
     const { international } = await connectDB();
-
-    if (!international) {
-      throw new Error("International collection not available");
-    }
-
     const channels = await international.find({}).toArray();
     console.log(`Retrieved ${channels.length} international channels`);
-
-    // Ensure each channel has required fields
-    const validChannels = channels.map((channel, index) => ({
-      ...channel,
-      id: channel._id || channel.id || index,
-      channelName: channel.channelName || channel.name || `Channel ${channel.channelNumber || index}`,
-      channelNumber: channel.channelNumber || index + 1,
-      category: channel.category || "International",
-      ipMulticast: channel.ipMulticast || channel.ip || "",
-      logo: channel.logo || ""
-    }));
-
-    return validChannels;
+    return channels;
   } catch (error) {
     console.error('Error fetching international channels:', error);
     return [];
@@ -125,26 +108,9 @@ async function getInternationalChannels() {
 async function getLocalChannels() {
   try {
     const { local } = await connectDB();
-
-    if (!local) {
-      throw new Error("Local collection not available");
-    }
-
     const channels = await local.find({}).toArray();
     console.log(`Retrieved ${channels.length} local channels`);
-
-    // Ensure each channel has required fields
-    const validChannels = channels.map((channel, index) => ({
-      ...channel,
-      id: channel._id || channel.id || `local_${index}`,
-      channelName: channel.channelName || channel.name || `Local Channel ${channel.channelNumber || index}`,
-      channelNumber: channel.channelNumber || index + 1,
-      category: channel.category || "Local",
-      ipMulticast: channel.ipMulticast || channel.ip || "",
-      logo: channel.logo || ""
-    }));
-
-    return validChannels;
+    return channels;
   } catch (error) {
     console.error('Error fetching local channels:', error);
     return [];
