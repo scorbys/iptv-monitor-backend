@@ -345,7 +345,23 @@ async function getAllChannelsFromDB() {
       getLocalChannels(),
     ]);
 
-    return [...internationalChannels, ...localChannels];
+    const intlArray = Array.isArray(internationalChannels) ? internationalChannels : [];
+    const localArray = Array.isArray(localChannels) ? localChannels : [];
+    const allChannels = [...intlArray, ...localArray];
+
+    const validChannels = allChannels.filter(channel => {
+      const hasRequiredFields = channel &&
+        typeof channel.id !== 'undefined' &&
+        (channel.channelName || channel.channelNumber);
+
+      if (!hasRequiredFields) {
+        console.warn("Invalid channel found:", channel);
+      }
+
+      return hasRequiredFields;
+    });
+
+    return validChannels;
   } catch (error) {
     console.error("Error fetching channels from database:", error);
     return [];
@@ -1289,6 +1305,47 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
   }
 });
 
+// ==================== INITIALIZATION FUNCTIONS ====================
+async function initializeChannelStatus() {
+  try {
+    const allChannels = await getAllChannelsFromDB();
+
+    if (allChannels.length === 0) {
+      return;
+    }
+
+    // Initialize status for all channels if not exists
+    allChannels.forEach(channel => {
+      if (!channelStatus.has(channel.id)) {
+        channelStatus.set(channel.id, {
+          status: "offline",
+          responseTime: null,
+          lastChecked: null,
+          error: "Not checked yet",
+          signalLevel: null,
+          bitrate: null,
+          networkStats: null
+        });
+      }
+    });
+
+    // Run initial status check
+    await checkAllChannelsStatus();
+  } catch (error) {
+    console.error("Error initializing channel status:", error);
+  }
+}
+
+// Initialize channel status when server starts
+(async () => {
+  try {
+    await initializeChannelStatus();
+    console.log("Channel status initialization completed");
+  } catch (error) {
+    console.error("Failed to initialize channel status:", error);
+  }
+})();
+
 // ==================== CHANNEL ENDPOINTS ====================
 app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, async (req, res) => {
   try {
@@ -1309,6 +1366,15 @@ app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, asy
       channels = await getLocalChannels();
     } else {
       channels = await getAllChannelsFromDB();
+    }
+
+    if (!Array.isArray(channels)) {
+      console.error("Channels is not an array:", typeof channels);
+      return res.status(500).json({
+        success: false,
+        message: "Invalid channels data structure",
+        error: "INVALID_DATA_STRUCTURE"
+      });
     }
 
     const channelsWithStatus = channels.map((channel) => {
@@ -1333,13 +1399,17 @@ app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, asy
       };
 
       let channelType = "unknown";
-      if (type === "international") {
-        channelType = "international";
-      } else if (type === "local") {
-        channelType = "local";
-      } else {
-        const internationalChannels = getInternationalChannels();
-        channelType = internationalChannels.find(c => c.id === channel.id) ? "international" : "local";
+      try {
+        if (type === "international") {
+          channelType = "international";
+        } else if (type === "local") {
+          channelType = "local";
+        } else {
+          channelType = "local";
+        }
+      } catch (error) {
+        console.error("Error determining channel type:", error);
+        channelType = "unknown";
       }
 
       return {
