@@ -6,6 +6,7 @@ const cookieParser = require("cookie-parser");
 const dgram = require("dgram");
 const net = require("net");
 const path = require("path");
+const axios = require('axios');
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -27,6 +28,12 @@ if (!JWT_SECRET) {
   console.error("JWT_SECRET environment variable is required");
   process.exit(1);
 }
+
+// Gemini API
+const GEMINI_CONFIG = {
+  apiKey: process.env.GEMINI_API_KEY,
+  endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+};
 
 // ==================== IMPORTS ====================
 const verifyRoute = require("./api/auth/verify/route");
@@ -369,6 +376,35 @@ async function getAllChannelsFromDB() {
   }
 }
 
+async function getSystemContext() {
+  try {
+    const [channels, tvs, chromecasts] = await Promise.all([
+      getAllChannelsFromDB(),
+      getHospitalityTVs(),
+      getChromecastDevices()
+    ]);
+
+    const channelOnline = channels.filter(c => channelStatus.get(c.id)?.status === 'online').length;
+    const tvOnline = Array.from(tvStatus.values()).filter(s => s.status === 'online').length;
+    const chromecastOnline = Array.from(chromecastStatus.values()).filter(s => s.isOnline).length;
+
+    return {
+      totalChannels: channels.length,
+      channelOnline,
+      channelOffline: channels.length - channelOnline,
+      totalTVs: tvs.length,
+      tvOnline,
+      tvOffline: tvs.length - tvOnline,
+      totalChromecasts: chromecasts.length,
+      chromecastOnline,
+      chromecastOffline: chromecasts.length - chromecastOnline,
+    };
+  } catch (error) {
+    console.error('Error getting system context:', error);
+    return null;
+  }
+}
+
 async function findChannelByIdentifier(allChannels, identifier) {
   if (!identifier || !allChannels || allChannels.length === 0) {
     return null;
@@ -444,6 +480,396 @@ async function findChannelByIdentifier(allChannels, identifier) {
   console.log('Final result for identifier', identifier, ':', channel ? channel.channelName : 'NOT FOUND');
   return channel;
 }
+
+function findRelevantFAQs(query, limit = 3) {
+  const queryLower = query.toLowerCase();
+  const keywords = queryLower.split(' ').filter(word => word.length > 2);
+
+  const scored = FAQ_DATA.map(faq => {
+    let score = 0;
+    const searchText = `${faq.device} ${faq.issue} ${faq.solutions.join(' ')}`.toLowerCase();
+
+    // Keyword matching
+    keywords.forEach(keyword => {
+      if (searchText.includes(keyword)) score += 1;
+      if (faq.device.toLowerCase().includes(keyword)) score += 3;
+      if (faq.issue.toLowerCase().includes(keyword)) score += 5;
+    });
+
+    // Device exact match dengan prioritas lebih tinggi
+    if (queryLower.includes('chromecast') && faq.device === 'Chromecast') score += 10;
+    if (queryLower.includes('iptv') && faq.device === 'IPTV') score += 10;
+    if (queryLower.includes('tv') && faq.device === 'IPTV') score += 8;
+    if (queryLower.includes('channel') && faq.device === 'Channel') score += 10;
+
+    // Boost untuk error keywords yang spesifik
+    if (queryLower.includes('black screen') && faq.id === 10) score += 15;
+    if (queryLower.includes('no device found') && faq.id === 1) score += 15;
+    if (queryLower.includes('offline') && queryLower.includes('chromecast') && faq.id === 1) score += 12;
+    if (queryLower.includes('offline') && (queryLower.includes('tv') || queryLower.includes('kamar')) && faq.id === 3) score += 12;
+
+    // Status query penalty
+    const isStatusQuery = (queryLower.includes('cek') || queryLower.includes('status') ||
+      queryLower.includes('mana saja') || queryLower.includes('berapa')) &&
+      !queryLower.includes('cara') && !queryLower.includes('bagaimana');
+    if (isStatusQuery) {
+      score = Math.max(0, score - 5);
+    }
+
+    return { ...faq, score };
+  });
+
+  return scored
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+// ==================== FAQ DATA CATEGORY ====================
+
+const FAQ_DATA = [
+  {
+    id: 1,
+    category: "Kategori-1",
+    device: "Chromecast",
+    issue: "No Device Found Chromecast",
+    solutions: [
+      "Deactive White list profile",
+      "Restart Chromecast & WIFI",
+      "Radisson Guest Must Be Login",
+      "Forget WIFI Radisson Guest",
+      "Logout WIFI (log-out.me)",
+    ],
+    detailedSteps: [
+      "Buka aplikasi Google Home di perangkat iOS Anda",
+      "Pastikan Chromecast dan perangkat iOS terhubung ke jaringan WiFi yang sama",
+      "Di pengaturan iPhone, buka Settings > Privacy & Security > Local Network",
+      "Aktifkan akses Local Network untuk aplikasi Google Home",
+      "Logout dari WiFi Radisson Guest, lalu login kembali dengan kredensial yang benar",
+      "Restart Chromecast dengan mencabut dan memasang kembali adaptor daya",
+      "Buka browser dan akses log-out.me untuk memastikan tidak ada session yang konflik",
+      "Coba setup Chromecast kembali melalui aplikasi Google Home",
+    ],
+    troubleshooting: [
+      "Jika masih tidak terdeteksi, coba reset Chromecast ke pengaturan pabrik",
+      "Pastikan tidak ada VPN yang aktif di perangkat iOS",
+      "Periksa apakah firewall hotel memblokir koneksi Chromecast",
+    ],
+    actionType: "System",
+    priority: "High",
+    slug: "no-device-found-chromecast",
+  },
+  {
+    id: 2,
+    category: "Kategori-2",
+    device: "IPTV",
+    issue: "Weak Or No Signal",
+    solutions: [
+      "Periksa koneksi LAN pada TV",
+      "Pastikan sumber HDMI diatur ke HDMI-1",
+      "Restart perangkat IPTV",
+      "Periksa indikator LED pada box IPTV",
+    ],
+    detailedSteps: [
+      "Periksa apakah kabel LAN terpasang dengan kuat ke port yang benar",
+      "Pastikan kabel LAN terhubung ke port 'LAN IN' bukan 'LAN OUT'",
+      "Pada remote TV, tekan tombol 'Source' atau 'Input'",
+      "Pilih HDMI-1 sebagai sumber input",
+      "Cabut adaptor daya box IPTV selama 10 detik, lalu pasang kembali",
+      "Tunggu hingga indikator LED berubah menjadi hijau (sekitar 2-3 menit)",
+      "Jika LED masih merah atau berkedip, periksa koneksi internet",
+      "Test koneksi dengan mengganti kabel LAN jika tersedia",
+    ],
+    troubleshooting: [
+      "Jika masih lemah, periksa kabel LAN apakah ada kerusakan fisik",
+      "Pastikan tidak ada bending yang berlebihan pada kabel",
+      "Coba gunakan port LAN yang berbeda jika tersedia di wall outlet",
+    ],
+    actionType: "On Site",
+    priority: "Medium",
+    slug: "weak-or-no-signal",
+  },
+  {
+    id: 3,
+    category: "Kategori-3",
+    device: "IPTV",
+    issue: "Unplug LAN TV",
+    solutions: [
+      "Periksa koneksi LAN (pastikan terpasang di LAN IN)",
+      "Posisikan kabel LAN dengan benar",
+      "Pastikan tidak terpasang di LAN OUT",
+      "Test koneksi dengan kabel LAN lain",
+    ],
+    detailedSteps: [
+      "Matikan TV dan box IPTV terlebih dahulu",
+      "Lepaskan kabel LAN dari box IPTV",
+      "Periksa port pada box IPTV, cari tulisan 'LAN IN' atau 'ETHERNET IN'",
+      "Pastikan kabel LAN dipasang ke port 'LAN IN', bukan 'LAN OUT'",
+      "Tekan kabel hingga terdengar bunyi 'click' yang menandakan terpasang kuat",
+      "Periksa ujung kabel yang terhubung ke wall outlet juga terpasang dengan kuat",
+      "Nyalakan kembali box IPTV dan tunggu proses booting selesai",
+      "Nyalakan TV dan atur input ke HDMI-1",
+      "Jika masih bermasalah, coba gunakan kabel LAN cadangan",
+    ],
+    troubleshooting: [
+      "Periksa apakah ada kerusakan pada konektor RJ45",
+      "Pastikan tidak ada dust atau kotoran di dalam port",
+      "Jika tersedia, test dengan kabel LAN yang berbeda",
+    ],
+    actionType: "On Site",
+    priority: "High",
+    slug: "unplug-lan-tv",
+  },
+  {
+    id: 4,
+    category: "Kategori-4",
+    device: "Chromecast",
+    issue: "Chromecast Setup iOS",
+    solutions: [
+      "Install Google Home app",
+      "Pastikan perangkat dalam satu jaringan WiFi",
+      "Allow local network access pada iPhone",
+      "Follow setup wizard di aplikasi",
+    ],
+    detailedSteps: [
+      "Download dan install aplikasi Google Home dari App Store",
+      "Pastikan Chromecast terhubung ke TV via HDMI dan mendapat daya",
+      "Buka Settings di iPhone > Privacy & Security > Local Network",
+      "Aktifkan toggle untuk aplikasi Google Home",
+      "Buka aplikasi Google Home dan sign in dengan akun Google",
+      "Tap tombol '+' untuk menambah perangkat baru",
+      "Pilih 'Set up device' > 'New devices'",
+      "Pilih rumah/lokasi tempat Chromecast akan disetup",
+      "Aplikasi akan mencari Chromecast di sekitar",
+      "Ikuti instruksi on-screen untuk menyelesaikan setup",
+      "Sambungkan Chromecast ke WiFi 'Radisson Guest'",
+      "Masukkan password WiFi jika diminta",
+    ],
+    troubleshooting: [
+      "Jika Chromecast tidak terdeteksi, restart aplikasi Google Home",
+      "Pastikan iPhone dan Chromecast terhubung ke WiFi yang sama",
+      "Jika setup gagal, reset Chromecast dengan menekan tombol di device selama 25 detik",
+    ],
+    actionType: "System",
+    priority: "Medium",
+    slug: "chromecast-setup-ios",
+  },
+  {
+    id: 5,
+    category: "Kategori-5",
+    device: "Channel",
+    issue: "Error Playing",
+    solutions: [
+      "Channel issue dari Biznet (Testing VIA VLC)",
+      "Restart streaming service",
+      "Check network bandwidth and stability",
+      "Update codec or media player",
+    ],
+    detailedSteps: [
+      "Buka aplikasi VLC Media Player",
+      "Pilih menu 'Media' > 'Open Network Stream'",
+      "Masukkan URL channel yang bermasalah",
+      "Klik 'Play' untuk test streaming",
+      "Jika VLC bisa memutar, masalah ada di aplikasi IPTV",
+      "Jika VLC tidak bisa, masalah ada di provider (Biznet)",
+      "Hubungi technical support untuk konfirmasi channel",
+      "Laporkan hasil test VLC ke tim support",
+    ],
+    troubleshooting: [
+      "Coba channel lain untuk memastikan tidak ada masalah jaringan",
+      "Periksa kecepatan internet dengan speed test",
+      "Restart modem/router jika diperlukan",
+    ],
+    actionType: "System",
+    priority: "Medium",
+    slug: "error-playing",
+  },
+  {
+    id: 6,
+    category: "Kategori-6",
+    device: "Channel",
+    issue: "Error_Player_Error_Err",
+    solutions: [
+      "Hbrowser & Widget Solution incorrect",
+      "Channel issue Biznet (Testing VLC)",
+      "Update browser to latest version",
+      "Clear browser cache and cookies",
+    ],
+    detailedSteps: [
+      "Identifikasi jenis error yang muncul",
+      "Periksa konfigurasi HBrowser di set-top box",
+      "Buka menu pengaturan aplikasi IPTV",
+      "Cari pengaturan 'Widget' atau 'Player Settings'",
+      "Reset konfigurasi widget ke default",
+      "Restart aplikasi IPTV setelah perubahan",
+      "Test channel yang bermasalah",
+      "Jika masih error, lakukan test dengan VLC seperti prosedur sebelumnya",
+    ],
+    troubleshooting: [
+      "Backup konfigurasi sebelum melakukan reset",
+      "Catat pengaturan yang berhasil untuk referensi",
+      "Hubungi support jika error persisten setelah reset",
+    ],
+    actionType: "System",
+    priority: "High",
+    slug: "error-player-error",
+  },
+  {
+    id: 7,
+    category: "Kategori-7",
+    device: "Channel",
+    issue: "Connection_Failure",
+    solutions: [
+      "Reinstall Widget Solution",
+      "Reload IGCMP",
+      "Confirmed IP conflict, changed IP, issue resolved",
+      "Check firewall settings and open required ports",
+    ],
+    detailedSteps: [
+      "Identifikasi penyebab connection failure",
+      "Periksa status koneksi internet",
+      "Buka pengaturan jaringan di set-top box",
+      "Catat IP address yang sedang digunakan",
+      "Scan untuk IP conflict di jaringan",
+      "Ubah IP address ke range yang available",
+      "Restart set-top box dengan IP baru",
+      "Reinstall widget solution jika diperlukan",
+      "Reload IGCMP service",
+      "Test koneksi channel setelah perubahan",
+    ],
+    troubleshooting: [
+      "Gunakan IP scanner untuk detect conflict",
+      "Dokumentasikan perubahan IP untuk referensi",
+      "Monitor stabilitas koneksi setelah perubahan",
+    ],
+    actionType: "System",
+    priority: "Medium",
+    slug: "connection-failure",
+  },
+  {
+    id: 8,
+    category: "Kategori-8",
+    device: "Chromecast",
+    issue: "Reset Configuration",
+    solutions: [
+      "Restart Chromecast",
+      "Reset Chromecast dibawa ke ruang server pencet tombol poer 10 Detik",
+      "Factory reset melalui aplikasi Google Home",
+      "Cabut kabel power selama 30 detik lalu hubungkan kembali",
+    ],
+    detailedSteps: [
+      "Identifikasi masalah yang memerlukan reset",
+      "Coba restart sederhana terlebih dahulu",
+      "Cabut adaptor daya Chromecast selama 10 detik",
+      "Pasang kembali adaptor daya",
+      "Tunggu Chromecast boot up (LED akan berubah)",
+      "Jika masalah persisten, lakukan factory reset",
+      "Bawa Chromecast ke ruang server",
+      "Tekan dan tahan tombol reset selama 10 detik",
+      "LED akan berkedip menandakan proses reset",
+      "Setup ulang Chromecast dari awal",
+    ],
+    troubleshooting: [
+      "Backup pengaturan penting sebelum factory reset",
+      "Siapkan kredensial WiFi untuk setup ulang",
+      "Test fungsi basic setelah reset",
+    ],
+    actionType: "On Site",
+    priority: "Low",
+    slug: "reset-configuration",
+  },
+  {
+    id: 9,
+    category: "Kategori-9",
+    device: "IPTV",
+    issue: "No Device Logged",
+    solutions: [
+      "Pastikan Allow local Network pada Setingan iPhone",
+      "Periksa pengaturan VPN dan Cast",
+      "Restart aplikasi IPTV",
+      "Pastikan perangkat dalam satu jaringan WiFi yang sama",
+    ],
+    detailedSteps: [
+      "Buka Settings di iPhone",
+      "Scroll ke bawah dan pilih Privacy & Security",
+      "Tap Local Network",
+      "Cari aplikasi yang memerlukan akses network (Google Home, dll)",
+      "Aktifkan toggle untuk aplikasi tersebut",
+      "Periksa apakah VPN sedang aktif di iPhone",
+      "Jika VPN aktif, matikan sementara selama setup",
+      "Restart aplikasi yang digunakan untuk casting",
+      "Coba deteksi perangkat kembali",
+    ],
+    troubleshooting: [
+      "Jika masih tidak terdeteksi, restart iPhone",
+      "Pastikan perangkat target dan iPhone dalam jaringan WiFi yang sama",
+      "Coba forget dan reconnect ke WiFi",
+    ],
+    actionType: "On Site",
+    priority: "High",
+    slug: "no-device-logged",
+  },
+  {
+    id: 10,
+    category: "Kategori-10",
+    device: "Chromecast",
+    issue: "Chromecast Black Screen",
+    solutions: [
+      "Chromecast Power Adaptor Rusak",
+      "Check Adaptor Chromecast",
+      "Coba port HDMI yang berbeda pada TV",
+      "Periksa koneksi kabel HDMI",
+    ],
+    detailedSteps: [
+      "Periksa LED indicator pada Chromecast",
+      "Jika LED tidak menyala, periksa adaptor daya",
+      "Coba gunakan adaptor daya yang berbeda (5V 1A minimum)",
+      "Pastikan kabel micro USB tidak rusak",
+      "Periksa koneksi HDMI ke TV",
+      "Coba port HDMI yang berbeda di TV",
+      "Restart TV dan ubah input source ke HDMI yang digunakan",
+      "Jika masih black screen, coba reset Chromecast",
+    ],
+    troubleshooting: [
+      "Jika LED berkedip, kemungkinan masalah koneksi WiFi",
+      "Jika LED solid tapi layar hitam, periksa HDMI connection",
+      "Coba Chromecast di TV lain untuk isolasi masalah",
+    ],
+    actionType: "System",
+    priority: "Medium",
+    slug: "chromecast-black-screen",
+  },
+  {
+    id: 11,
+    category: "Kategori-11",
+    device: "Channel",
+    issue: "Channel Not Found",
+    solutions: [
+      "LAN Out Terpasang bukan LAN In",
+      "Verify correct cable connection (LAN In vs LAN Out)",
+      "Refresh channel list or rescan channels",
+      "Check IGMP configuration",
+    ],
+    detailedSteps: [
+      "Periksa bagian belakang set-top box atau TV",
+      "Cari port yang berlabel 'LAN IN' atau 'ETHERNET IN'",
+      "Pastikan kabel LAN terpasang di port IN, bukan OUT",
+      "Port OUT biasanya digunakan untuk daisy-chain ke device lain",
+      "Lepaskan kabel dari port OUT jika salah pasang",
+      "Pasang kabel ke port LAN IN dengan benar",
+      "Tunggu beberapa saat hingga koneksi tersambung",
+      "Restart aplikasi channel atau reboot set-top box",
+    ],
+    troubleshooting: [
+      "Jika masih tidak ada channel, periksa konfigurasi IPTV",
+      "Pastikan subscription channel masih aktif",
+      "Hubungi technical support untuk verifikasi channel list",
+    ],
+    actionType: "System",
+    priority: "Low",
+    slug: "channel-not-found",
+  },
+];
 
 // ==================== STATUS GENERATION FUNCTIONS ====================
 function generateDummyChannelStatus() {
@@ -1305,6 +1731,355 @@ app.get("/api/auth/verify", authenticateToken, (req, res) => {
     });
   }
 });
+
+// ==================== LIVE CHAT QUERY ENDPOINT ====================
+
+app.post("/api/chat/query", authenticateToken, async (req, res) => {
+  try {
+    const { message, conversationHistory = [] } = req.body;
+
+    if (!message || typeof message !== 'string' || message.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required and must be a non-empty string'
+      });
+    }
+
+    const lowerMsg = message.toLowerCase();
+
+    // Status query detection (tetap seperti sebelumnya)
+    const isSimpleStatusQuery = (
+      (lowerMsg.includes('cek') || lowerMsg.includes('status') ||
+        lowerMsg.includes('mana saja') || lowerMsg.includes('berapa')) &&
+      !lowerMsg.includes('cara') && !lowerMsg.includes('bagaimana') &&
+      !lowerMsg.includes('solusi') && !lowerMsg.includes('mengatasi') &&
+      !lowerMsg.includes('masalah') && !lowerMsg.includes('perbaiki')
+    );
+
+    const systemContext = await getSystemContext();
+
+    if (isSimpleStatusQuery) {
+      let quickResponse = '';
+
+      if (lowerMsg.includes('chromecast')) {
+        quickResponse = `Saat ini ada ${systemContext.chromecastOffline} Chromecast offline dari total ${systemContext.totalChromecasts} device. Detail lengkap ada di dashboard.`;
+      } else if (lowerMsg.includes('channel')) {
+        quickResponse = `Saat ini ada ${systemContext.channelOffline} Channel offline dari total ${systemContext.totalChannels} channel.`;
+      } else if (lowerMsg.includes('tv')) {
+        quickResponse = `Saat ini ada ${systemContext.tvOffline} TV offline dari total ${systemContext.totalTVs} TV.`;
+      } else {
+        quickResponse = `Status: Channels ${systemContext.channelOnline}/${systemContext.totalChannels} online, TVs ${systemContext.tvOnline}/${systemContext.totalTVs} online, Chromecasts ${systemContext.chromecastOnline}/${systemContext.totalChromecasts} online`;
+      }
+
+      return res.json({
+        success: true,
+        response: quickResponse,
+        detailedInfo: null,
+        relatedFAQs: [],
+        systemContext: systemContext,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Semua troubleshooting → ke AI
+    const relatedFAQs = findRelevantFAQs(message.trim(), 3);
+    const contextPrompt = buildGeminiPrompt(message, relatedFAQs, systemContext, conversationHistory);
+
+    let aiResponse = '';
+    let detailedInfo = null;
+
+    try {
+      aiResponse = await callGeminiAPI(contextPrompt);
+
+      // TETAP attach detailed info untuk tombol "Lihat Detail Lengkap"
+      if (relatedFAQs.length > 0 && relatedFAQs[0].score > 5) {
+        const topFAQ = relatedFAQs[0];
+        detailedInfo = {
+          detailedSteps: topFAQ.detailedSteps || [],
+          troubleshooting: topFAQ.troubleshooting || [],
+          actionType: topFAQ.actionType,
+          priority: topFAQ.priority
+        };
+      }
+    } catch (aiError) {
+      console.error('Gemini API error:', aiError);
+
+      // Fallback natural (BUKAN format list)
+      if (relatedFAQs.length > 0) {
+        const topFAQ = relatedFAQs[0];
+        aiResponse = `Untuk masalah ${topFAQ.device} ini, biasanya bisa dicoba: ${topFAQ.solutions.slice(0, 2).join(', atau ')}. Kalau masih belum solve, coba langkah lainnya di tombol Detail Lengkap.`;
+
+        detailedInfo = {
+          detailedSteps: topFAQ.detailedSteps || [],
+          troubleshooting: topFAQ.troubleshooting || [],
+          actionType: topFAQ.actionType,
+          priority: topFAQ.priority
+        };
+      } else {
+        aiResponse = 'Hmm, tidak ada solusi spesifik untuk kasus ini. Coba restart device dulu, atau hubungi technical support kalau masih bermasalah.';
+      }
+    }
+
+    res.json({
+      success: true,
+      response: aiResponse,
+      detailedInfo: detailedInfo,
+      relatedFAQs: relatedFAQs.slice(0, 3).map(faq => ({
+        id: faq.id,
+        issue: faq.issue,
+        device: faq.device,
+        priority: faq.priority,
+        slug: faq.slug,
+        solutions: faq.solutions
+      })),
+      systemContext: systemContext,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Chat API error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Terjadi kesalahan pada server. Silakan coba lagi.',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Endpoint tambahan untuk get detailed FAQ
+app.get("/api/chat/faq/:id", authenticateToken, async (req, res) => {
+  try {
+    const faqId = parseInt(req.params.id);
+    const faq = FAQ_DATA.find(f => f.id === faqId);
+
+    if (!faq) {
+      return res.status(404).json({
+        success: false,
+        error: 'FAQ not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: faq
+    });
+  } catch (error) {
+    console.error('FAQ fetch error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post("/api/chat/notification-query", authenticateToken, async (req, res) => {
+  try {
+    const { message, notificationId } = req.body;
+
+    if (!message || typeof message !== 'string' || message.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required'
+      });
+    }
+
+    // Jika ada notificationId, ambil detail notifikasi tersebut
+    let notificationContext = '';
+    if (notificationId) {
+      // Di sini Anda bisa fetch detail notifikasi dari database
+      // Untuk sekarang, kita gunakan info dari request
+      notificationContext = `User sedang melihat notifikasi spesifik dengan ID: ${notificationId}. `;
+    }
+
+    const lowerMsg = message.toLowerCase();
+    const relatedFAQs = findRelevantFAQs(message.trim(), 3);
+    const systemContext = await getSystemContext();
+
+    // Build prompt khusus untuk notification context
+    let prompt = `${notificationContext}Kamu teknisi IPTV yang membantu analisis notifikasi sistem.
+
+Pertanyaan: "${message}"
+
+DATA SISTEM:
+- Channels: ${systemContext?.channelOnline}/${systemContext?.totalChannels} online
+- TVs: ${systemContext?.tvOnline}/${systemContext?.totalTVs} online
+- Chromecasts: ${systemContext?.chromecastOnline}/${systemContext?.totalChromecasts} online
+
+`;
+
+    if (relatedFAQs.length > 0 && relatedFAQs[0].score > 3) {
+      const faq = relatedFAQs[0];
+      prompt += `\nSOLUSI YANG RELEVAN:
+${faq.device} - ${faq.issue}
+Biasanya: ${faq.solutions.slice(0, 2).join(', ')}
+
+`;
+    }
+
+    prompt += `Jawab dengan natural dan langsung. Fokus pada:
+1. Analisis masalah dari notifikasi
+2. Root cause yang mungkin
+3. Solusi praktis yang bisa dicoba
+4. Preventive action
+
+Maksimal 4-5 kalimat, to the point.
+
+Jawab:`;
+
+    const aiResponse = await callGeminiAPI(prompt);
+
+    let detailedInfo = null;
+    if (relatedFAQs.length > 0 && relatedFAQs[0].score > 5) {
+      const topFAQ = relatedFAQs[0];
+      detailedInfo = {
+        detailedSteps: topFAQ.detailedSteps || [],
+        troubleshooting: topFAQ.troubleshooting || [],
+        actionType: topFAQ.actionType,
+        priority: topFAQ.priority
+      };
+    }
+
+    res.json({
+      success: true,
+      response: aiResponse,
+      detailedInfo: detailedInfo,
+      relatedFAQs: relatedFAQs.slice(0, 3).map(faq => ({
+        id: faq.id,
+        issue: faq.issue,
+        device: faq.device,
+        priority: faq.priority,
+        slug: faq.slug
+      })),
+      systemContext: systemContext,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Notification query error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Gagal memproses query notifikasi'
+    });
+  }
+});
+
+// ==================== GEMINI AI FUNCTIONS ====================
+
+function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
+  const lowerMsg = userMessage.toLowerCase();
+
+  // Detect channel analysis query
+  const isChannelAnalysis =
+    lowerMsg.includes('analisis kondisi channel') ||
+    lowerMsg.includes('trend network') ||
+    (lowerMsg.includes('channel') && lowerMsg.includes('status online')) ||
+    (lowerMsg.includes('channel') && lowerMsg.includes('status offline'));
+
+  if (isChannelAnalysis) {
+    const isOnline = lowerMsg.includes('status online');
+
+    if (isOnline) {
+      return `Kamu teknisi IPTV senior yang sedang review channel monitoring data.
+
+      ${userMessage}
+
+      Berikan analisis mendalam dengan struktur:
+      1. Assessment trend network (latency/bandwidth/packet loss naik/turun signifikan atau tidak)
+      2. Evaluasi signal strength dan response time (bagus/concern/critical)
+      3. Identifikasi potential bottleneck atau degradation pattern
+      4. Rekomendasi preventive atau corrective action yang spesifik
+
+      Jawab dalam 5-7 kalimat yang insightful, fokus ke interpretasi data bukan repeat angka. Kalau ada concern wajib sebut apa risikonya.`;
+    } else {
+      return `Kamu teknisi IPTV senior yang troubleshooting channel offline.
+
+      ${userMessage}
+
+      Berikan analisis troubleshooting dengan struktur:
+      1. Identifikasi most likely root cause dari symptoms yang ada
+      2. Prioritas troubleshooting steps (mulai dari simplest/quickest)
+      3. Expected result dari tiap step
+      4. Escalation path kalau basic troubleshooting gagal
+
+      Jawab dalam 6-8 kalimat yang actionable, fokus ke diagnostic logic dan practical steps.`;
+    }
+  }
+
+  // Standard troubleshooting query
+  let knowledgeContext = '';
+  if (relatedFAQs.length > 0) {
+    const faq = relatedFAQs[0];
+    knowledgeContext = `\nContext: Issue ${faq.issue} biasanya solved dengan ${faq.solutions[0]}.`;
+  }
+
+  return `Kamu teknisi IPTV yang ngobrol santai tapi informatif.
+
+  ${knowledgeContext}
+
+  Pertanyaan: "${userMessage}"
+
+  Jawab natural 3-4 kalimat, langsung kasih solusi praktis tanpa format list atau bold berlebihan.`;
+}
+
+async function callGeminiAPI(prompt) {
+  const apiKey = GEMINI_CONFIG.apiKey;
+
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY not configured in environment variables');
+  }
+
+  try {
+    const response = await axios.post(
+      `${GEMINI_CONFIG.endpoint}?key=${apiKey}`,
+      {
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1024,
+          topP: 0.8,
+          topK: 40
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          }
+        ]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000 // 15 detik timeout
+      }
+    );
+
+    if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      return response.data.candidates[0].content.parts[0].text.trim();
+    }
+
+    throw new Error('Invalid Gemini API response structure');
+  } catch (error) {
+    if (error.response) {
+      console.error('Gemini API error response:', error.response.data);
+      throw new Error(`Gemini API error: ${error.response.status} - ${error.response.data?.error?.message || 'Unknown error'}`);
+    } else if (error.request) {
+      throw new Error('Gemini API no response received - check internet connection');
+    } else {
+      throw error;
+    }
+  }
+}
 
 // ==================== CHANNEL ENDPOINTS ====================
 app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, async (req, res) => {
