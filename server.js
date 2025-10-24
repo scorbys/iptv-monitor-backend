@@ -1970,40 +1970,42 @@ Jawab:`;
 function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
   const lowerMsg = userMessage.toLowerCase();
 
-  // Detect channel analysis query
-  const isChannelAnalysis =
-    lowerMsg.includes('analisis kondisi channel') ||
+  // Detect TV/Chromecast/Channel analysis query
+  const isDeviceAnalysis =
+    lowerMsg.includes('analisis kondisi') ||
     lowerMsg.includes('trend network') ||
+    (lowerMsg.includes('status online') && (lowerMsg.includes('tv') || lowerMsg.includes('chromecast'))) ||
+    (lowerMsg.includes('status offline') && (lowerMsg.includes('tv') || lowerMsg.includes('chromecast'))) ||
     (lowerMsg.includes('channel') && lowerMsg.includes('status online')) ||
     (lowerMsg.includes('channel') && lowerMsg.includes('status offline'));
 
-  if (isChannelAnalysis) {
+  if (isDeviceAnalysis) {
     const isOnline = lowerMsg.includes('status online');
 
     if (isOnline) {
-      return `Kamu teknisi IPTV senior yang sedang review channel monitoring data.
+      return `Kamu teknisi IPTV senior yang sedang review device monitoring data.
 
-      ${userMessage}
+  ${userMessage}
 
-      Berikan analisis mendalam dengan struktur:
-      1. Assessment trend network (latency/bandwidth/packet loss naik/turun signifikan atau tidak)
-      2. Evaluasi signal strength dan response time (bagus/concern/critical)
-      3. Identifikasi potential bottleneck atau degradation pattern
-      4. Rekomendasi preventive atau corrective action yang spesifik
+  Berikan analisis mendalam dengan struktur:
+  1. Assessment trend network (latency/bandwidth/packet loss naik/turun signifikan atau tidak)
+  2. Evaluasi signal strength dan response time (bagus/concern/critical)
+  3. Identifikasi potential bottleneck atau degradation pattern
+  4. Rekomendasi preventive atau corrective action yang spesifik
 
-      Jawab dalam 5-7 kalimat yang insightful, fokus ke interpretasi data bukan repeat angka. Kalau ada concern wajib sebut apa risikonya.`;
+  Jawab dalam 5-7 kalimat yang insightful, fokus ke interpretasi data bukan repeat angka. Kalau ada concern wajib sebut apa risikonya.`;
     } else {
-      return `Kamu teknisi IPTV senior yang troubleshooting channel offline.
+      return `Kamu teknisi IPTV senior yang troubleshooting device offline.
 
-      ${userMessage}
+  ${userMessage}
 
-      Berikan analisis troubleshooting dengan struktur:
-      1. Identifikasi most likely root cause dari symptoms yang ada
-      2. Prioritas troubleshooting steps (mulai dari simplest/quickest)
-      3. Expected result dari tiap step
-      4. Escalation path kalau basic troubleshooting gagal
+  Berikan analisis troubleshooting dengan struktur:
+  1. Identifikasi most likely root cause dari symptoms yang ada
+  2. Prioritas troubleshooting steps (mulai dari simplest/quickest)
+  3. Expected result dari tiap step
+  4. Escalation path kalau basic troubleshooting gagal
 
-      Jawab dalam 6-8 kalimat yang actionable, fokus ke diagnostic logic dan practical steps.`;
+  Jawab dalam 6-8 kalimat yang actionable, fokus ke diagnostic logic dan practical steps.`;
     }
   }
 
