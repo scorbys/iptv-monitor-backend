@@ -3745,23 +3745,27 @@ app.post("/api/chromecast/:id/check", authenticateToken, async (req, res) => {
 
 app.get("/api/chromecast/:id/metrics", authenticateToken, async (req, res) => {
   try {
-    const deviceId = decodeURIComponent(req.params.id);
+    const rawDeviceId = req.params.id;
 
-    if (!deviceId || deviceId.trim() === "") {
+    if (!rawDeviceId || rawDeviceId.trim() === "") {
       return res.status(400).json({
         success: false,
-        message: "Device identifier is required"
+        message: "Chromecast device identifier is required",
+        error: "INVALID_DEVICE_ID"
       });
     }
 
-    let device;
+    let device = null;
     const allDevices = await getChromecastDevices();
 
+    // Enhanced search strategies similar to channel and hospitality endpoints
     const decodingStrategies = [
-      deviceId,
-      decodeURIComponent(deviceId),
-      deviceId.replace(/%20/g, ' '),
-      deviceId.replace(/\+/g, ' '),
+      rawDeviceId,
+      decodeURIComponent(rawDeviceId),
+      rawDeviceId.replace(/%20/g, ' '),
+      rawDeviceId.replace(/\+/g, ' '),
+      rawDeviceId.replace(/_/g, ' '),
+      rawDeviceId.replace(/-/g, ' '),
     ];
 
     const uniqueStrategies = [...new Set(decodingStrategies)];
@@ -3769,102 +3773,158 @@ app.get("/api/chromecast/:id/metrics", authenticateToken, async (req, res) => {
     for (const searchTerm of uniqueStrategies) {
       if (device) break;
 
+      // Exact match by device name
       device = allDevices.find(d => d.deviceName === searchTerm);
-      if (device) break;
+      if (device) {
+        break;
+      }
 
+      // Case-insensitive match by device name
       device = allDevices.find(d =>
         d.deviceName && d.deviceName.toLowerCase() === searchTerm.toLowerCase()
       );
-      if (device) break;
+      if (device) {
+        break;
+      }
 
+      // Partial match by device name
+      device = allDevices.find(d =>
+        d.deviceName && (
+          d.deviceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          searchTerm.toLowerCase().includes(d.deviceName.toLowerCase())
+        )
+      );
+      if (device) {
+        break;
+      }
+
+      // Numeric search by idCast
       if (/^\d+$/.test(searchTerm)) {
-        device = allDevices.find(d => d.idCast.toString() === searchTerm);
-        if (device) break;
+        const numericSearch = parseInt(searchTerm);
+        device = allDevices.find(d => d.idCast === numericSearch);
+        if (device) {
+          break;
+        }
+        device = allDevices.find(d => d.id && d.id.toString() === searchTerm);
+        if (device) {
+          break;
+        }
       }
     }
 
     if (!device) {
       return res.status(404).json({
         success: false,
-        message: `Device '${deviceId}' not found`
+        message: `Chromecast device "${rawDeviceId}" not found`,
+        error: "DEVICE_NOT_FOUND"
       });
     }
 
-    const deviceStatus = chromecastStatus.get(device.idCast);
-    const isOnline = deviceStatus?.isOnline || false;
+    if (!device.ipAddr) {
+      return res.status(400).json({
+        success: false,
+        message: "Chromecast device IP address not available for connectivity check",
+        error: "NO_IP_ADDRESS"
+      });
+    }
 
-    const generateRealisticMetrics = () => {
-      if (!isOnline) {
-        return {
-          sent: "0.00",
-          received: "0.00",
-          latency: 0,
-          jitter: 0,
-          ttl: 0,
-          packetLoss: 100,
-          bandwidth: 0,
-          speed: 0
-        };
-      }
-
-      const baseLatency = Math.floor(Math.random() * 30) + 10; // 10-40ms
-      const baseJitter = Math.floor(baseLatency * 0.1) + Math.floor(Math.random() * 10); // 10% of latency + random
-      const baseBandwidth = Math.floor(Math.random() * 80) + 20; // 20-100 Mbps
-      const baseSpeed = Math.floor(baseBandwidth * 0.8) + Math.floor(Math.random() * 20); // 80% of bandwidth + variation
-
-      return {
-        sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
-        received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
-        latency: baseLatency,
-        jitter: baseJitter,
-        ttl: Math.floor(Math.random() * 8) + 58, // 58-65 (realistic TTL range)
-        packetLoss: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
-        bandwidth: baseBandwidth,
-        speed: baseSpeed
-      };
+    // Perform real-time connectivity check
+    const result = await checkChromecastConnectivity(device.ipAddr);
+    const statusInfo = {
+      ...result,
+      lastChecked: new Date().toISOString(),
     };
 
-    const metrics = generateRealisticMetrics();
+    // Update device status in memory
+    chromecastStatus.set(device.idCast, statusInfo);
+
+    // Enhanced response with network stats integration
+    let networkStats = null;
+
+    if (result.isOnline && CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
+      // Generate realistic network stats when device is online
+      networkStats = {
+        sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
+        received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB
+        latency: result.responseTime || Math.floor(Math.random() * 40) + 8, // 8-48ms
+        jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
+        ttl: Math.floor(Math.random() * 8) + 60, // 60-67
+        packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
+        bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
+        hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
+        signalStrength: result.signalLevel || Math.floor(Math.random() * 50) - 70, // -70 to -20 dBm
+        speed: result.speed || Math.max(1, (result.signalLevel || -50) + Math.floor(Math.random() * 20) - 10)
+      };
+    }
+
+    const enhancedResponse = {
+      ...device,
+      ...statusInfo,
+      id: device.idCast,
+      deviceName: device.deviceName,
+      isOnline: result.isOnline,
+      isPingable: result.isPingable,
+      statusText: result.isOnline ? "Online" : "Offline",
+      networkStats: networkStats
+    };
 
     res.json({
       success: true,
-      data: {
-        ...metrics,
-        timestamp: new Date().toISOString(),
-        deviceName: device.deviceName,
-        isOnline: isOnline
-      }
+      message: "Chromecast device metrics retrieved successfully",
+      data: enhancedResponse,
+      checkedAt: new Date().toISOString()
     });
+
   } catch (error) {
-    console.error("Error fetching device metrics:", error);
-    res.status(500).json({
+    console.error("Error fetching chromecast device metrics:", error);
+
+    let errorMessage = "Internal server error while checking chromecast device";
+    let statusCode = 500;
+
+    if (error.message.includes("timeout")) {
+      errorMessage = "Chromecast device connection timeout";
+      statusCode = 408;
+    } else if (error.message.includes("unreachable") || error.message.includes("ENOTFOUND")) {
+      errorMessage = "Chromecast device unreachable";
+      statusCode = 503;
+    } else if (error.name === 'NetworkError' || error.code === 'ECONNREFUSED') {
+      errorMessage = "Network connectivity issue";
+      statusCode = 503;
+    }
+
+    res.status(statusCode).json({
       success: false,
-      message: "Error fetching device metrics",
-      error: error.message
+      message: errorMessage,
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
 app.get("/api/chromecast/:id/history", authenticateToken, async (req, res) => {
   try {
-    const deviceId = decodeURIComponent(req.params.id);
+    const rawDeviceId = req.params.id;
     const { timeRange = '24h' } = req.query;
 
-    if (!deviceId || deviceId.trim() === "") {
+    if (!rawDeviceId || rawDeviceId.trim() === "") {
       return res.status(400).json({
         success: false,
-        message: "Device identifier is required"
+        message: "Chromecast device identifier is required",
+        error: "INVALID_DEVICE_ID"
       });
     }
 
-    let device;
+    let device = null;
     const allDevices = await getChromecastDevices();
 
+    // Enhanced search strategies consistent with metrics endpoint
     const decodingStrategies = [
-      deviceId,
-      decodeURIComponent(deviceId),
-      deviceId.replace(/%20/g, ' '),
-      deviceId.replace(/\+/g, ' '),
+      rawDeviceId,
+      decodeURIComponent(rawDeviceId),
+      rawDeviceId.replace(/%20/g, ' '),
+      rawDeviceId.replace(/\+/g, ' '),
+      rawDeviceId.replace(/_/g, ' '),
+      rawDeviceId.replace(/-/g, ' '),
     ];
 
     const uniqueStrategies = [...new Set(decodingStrategies)];
@@ -3872,24 +3932,50 @@ app.get("/api/chromecast/:id/history", authenticateToken, async (req, res) => {
     for (const searchTerm of uniqueStrategies) {
       if (device) break;
 
+      // Exact match by device name
       device = allDevices.find(d => d.deviceName === searchTerm);
-      if (device) break;
+      if (device) {
+        break;
+      }
 
+      // Case-insensitive match by device name
       device = allDevices.find(d =>
         d.deviceName && d.deviceName.toLowerCase() === searchTerm.toLowerCase()
       );
-      if (device) break;
+      if (device) {
+        break;
+      }
 
+      // Partial match by device name
+      device = allDevices.find(d =>
+        d.deviceName && (
+          d.deviceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          searchTerm.toLowerCase().includes(d.deviceName.toLowerCase())
+        )
+      );
+      if (device) {
+        break;
+      }
+
+      // Numeric search by idCast
       if (/^\d+$/.test(searchTerm)) {
-        device = allDevices.find(d => d.idCast.toString() === searchTerm);
-        if (device) break;
+        const numericSearch = parseInt(searchTerm);
+        device = allDevices.find(d => d.idCast === numericSearch);
+        if (device) {
+          break;
+        }
+        device = allDevices.find(d => d.id && d.id.toString() === searchTerm);
+        if (device) {
+          break;
+        }
       }
     }
 
     if (!device) {
       return res.status(404).json({
         success: false,
-        message: `Device '${deviceId}' not found`
+        message: `Chromecast device "${rawDeviceId}" not found`,
+        error: "DEVICE_NOT_FOUND"
       });
     }
 

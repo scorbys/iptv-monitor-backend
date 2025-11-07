@@ -21,7 +21,7 @@ const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  maxAge: 60 * 60 * 1000, // 1 hour in milliseconds
   path: "/"
 };
 
@@ -81,7 +81,7 @@ router.post("/", validateLoginInput, async (req, res) => {
       iat: Math.floor(Date.now() / 1000)
     };
 
-    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "1h" });
 
     console.log("Login successful for:", authResult.user.username);
 

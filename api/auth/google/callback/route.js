@@ -177,7 +177,7 @@ router.get("/", async (req, res) => {
       hasAvatar: !!tokenPayload.avatar
     });
 
-    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "1h" });
     console.log("JWT token generated successfully for user:", userId);
 
     // Enhanced cookie configuration
@@ -192,7 +192,7 @@ router.get("/", async (req, res) => {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 60 * 60 * 1000, // 1 hour
       path: "/",
       // CRITICAL FIX: Set domain explicitly untuk cross-origin
       domain: isProduction ? process.env.COOKIE_DOMAIN || undefined : undefined,
@@ -264,13 +264,13 @@ router.get("/", async (req, res) => {
                 
                 const cookieConfigs = [
                     // Primary token cookie
-                    \`token=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    \`token=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
                     // Auth token cookie (mobile friendly)
-                    \`auth-token=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    \`auth-token=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
                     // Legacy authToken
-                    \`authToken=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    \`authToken=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
                     // Fallback dengan SameSite=Lax
-                    \`token-fallback=\${token}; path=/; max-age=\${7 * 24 * 60 * 60}; samesite=lax\`,
+                    \`token-fallback=\${token}; path=/; max-age=\${60 * 60}; samesite=lax\`,
                     // Session token
                     \`session-token=\${token}; path=/; samesite=lax\`
                 ];

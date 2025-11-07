@@ -47,8 +47,12 @@ router.post("/", (req, res) => {
     ];
 
     // Clear dengan semua konfigurasi
+    const cookieNames = ["token", "auth-token", "authToken", "token-fallback", "session-token"];
+
     cookieConfigs.forEach(config => {
-      res.clearCookie("token", config);
+      cookieNames.forEach(name => {
+        res.clearCookie(name, config);
+      });
     });
 
     console.log("✅ Express logout successful - all cookies cleared");
