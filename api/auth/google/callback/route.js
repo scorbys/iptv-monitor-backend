@@ -187,15 +187,72 @@ router.get("/", async (req, res) => {
         req.headers["user-agent"] || ""
       );
 
-    // FIXED: More robust cookie configuration
+    // CRITICAL FIX: Extract dynamic domain from frontend URL or referer
+    // This ensures cookies work with BOTH production and deployment preview URLs
+    const getCookieDomain = (urlString) => {
+      if (!urlString || !isProduction) return undefined;
+
+      try {
+        const url = new URL(urlString);
+        const hostname = url.hostname;
+
+        // CRITICAL: For Vercel deployment preview URLs, DON'T set domain
+        // Deployment preview URLs use pattern: {project}-{id}-{hash}.vercel.app
+        // Setting domain to '.vercel.app' does NOT work for these URLs
+        // Only set domain for production custom domains with 2 levels
+
+        const parts = hostname.split('.');
+
+        // Vercel deployment preview (3+ parts like xxx-yyy-zzz.vercel.app)
+        // -> DON'T set domain (undefined), cookie will be host-specific
+        if (hostname.endsWith('.vercel.app') && parts.length > 2) {
+          console.log('Vercel deployment preview detected - using host-specific cookies');
+          return undefined;
+        }
+
+        // Production Vercel domain (2 parts like xxx.vercel.app)
+        // -> Set domain to .vercel.app for sharing across subdomains
+        if (hostname.endsWith('.vercel.app') && parts.length === 2) {
+          console.log('Vercel production domain detected - using .vercel.app domain');
+          return '.vercel.app';
+        }
+
+        // Custom domain with subdomain (subdomain.example.com)
+        // -> Set domain to .example.com for sharing
+        if (parts.length >= 2) {
+          const rootDomain = `.${parts.slice(-2).join('.')}`;
+          console.log('Custom domain detected - using root domain:', rootDomain);
+          return rootDomain;
+        }
+
+        return undefined;
+      } catch (e) {
+        console.error('Failed to parse URL for cookie domain:', e);
+        return undefined;
+      }
+    };
+
+    // Try multiple sources to get the frontend URL
+    const frontendUrl = state || req.headers.referer || process.env.FRONTEND_URL;
+    const dynamicDomain = getCookieDomain(frontendUrl);
+
+    console.log('Cookie domain configuration:', {
+      frontendUrl,
+      hostname: frontendUrl ? new URL(frontendUrl).hostname : 'N/A',
+      dynamicDomain,
+      isProduction,
+      source: state ? 'state' : req.headers.referer ? 'referer' : 'env'
+    });
+
+    // FIXED: More robust cookie configuration with DYNAMIC domain
     const baseCookieOptions = {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? "none" : "lax",
       maxAge: 60 * 60 * 1000, // 1 hour
       path: "/",
-      // CRITICAL FIX: Set domain explicitly untuk cross-origin
-      domain: isProduction ? process.env.COOKIE_DOMAIN || undefined : undefined,
+      // CRITICAL FIX: Use DYNAMIC domain instead of hardcoded COOKIE_DOMAIN
+      domain: dynamicDomain,
     };
 
     console.log("Setting auth cookie with options:", baseCookieOptions);
@@ -257,24 +314,58 @@ router.get("/", async (req, res) => {
             const token = '${token}';
             const isProduction = window.location.protocol === 'https:';
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            
+
+            // CRITICAL: Dynamic cookie domain based on current hostname
+            const getCookieDomain = () => {
+                if (!isProduction) return '';
+
+                const hostname = window.location.hostname;
+                const parts = hostname.split('.');
+
+                // Vercel deployment preview (3+ parts like xxx-yyy-zzz.vercel.app)
+                // -> DON'T set domain attribute
+                if (hostname.endsWith('.vercel.app') && parts.length > 2) {
+                    console.log('Vercel deployment preview detected - no domain attribute');
+                    return '';
+                }
+
+                // Production Vercel domain (2 parts like xxx.vercel.app)
+                // -> Set domain to .vercel.app
+                if (hostname.endsWith('.vercel.app') && parts.length === 2) {
+                    console.log('Vercel production domain detected - using .vercel.app');
+                    return '; domain=.vercel.app';
+                }
+
+                // Custom domain with subdomain
+                if (parts.length >= 2) {
+                    const rootDomain = parts.slice(-2).join('.');
+                    console.log('Custom domain detected - using root domain:', rootDomain);
+                    return '; domain=.' + rootDomain;
+                }
+
+                return '';
+            };
+
+            const cookieDomainSuffix = getCookieDomain();
+
             // ENHANCED: Set cookies with multiple strategies for better compatibility
             const setCookiesAdvanced = () => {
                 console.log('Setting cookies with advanced compatibility...');
-                
+                console.log('Cookie domain suffix:', cookieDomainSuffix);
+
                 const cookieConfigs = [
-                    // Primary token cookie
-                    \`token=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    // Primary token cookie with DYNAMIC domain
+                    \`token=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\${cookieDomainSuffix}\`,
                     // Auth token cookie (mobile friendly)
-                    \`auth-token=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
+                    \`auth-token=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\${cookieDomainSuffix}\`,
                     // Legacy authToken
-                    \`authToken=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\`,
-                    // Fallback dengan SameSite=Lax
+                    \`authToken=\${token}; path=/; max-age=\${60 * 60}; \${isProduction ? 'secure; samesite=none' : 'samesite=lax'}\${cookieDomainSuffix}\`,
+                    // Fallback dengan SameSite=Lax (no domain for maximum compatibility)
                     \`token-fallback=\${token}; path=/; max-age=\${60 * 60}; samesite=lax\`,
-                    // Session token
+                    // Session token (no domain)
                     \`session-token=\${token}; path=/; samesite=lax\`
                 ];
-                
+
                 cookieConfigs.forEach((config, index) => {
                     document.cookie = config;
                     console.log(\`Cookie \${index + 1} set: \${config.split('=')[0]}\`);
