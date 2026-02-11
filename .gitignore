@@ -1,0 +1,68 @@
+# ==================== DEPENDENCIES ====================
+# Dependencies di-install oleh npm saat Railway build
+node_modules/
+package-lock.json
+
+# ==================== NEXT.JS / TURBO ====================
+# Build output (tidak perlu di-deploy)
+.next/
+.turbo/
+out/
+
+# ==================== ENVIRONMENT & SECRETS ====================
+# JANGAN commit sensitive data ke git!
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# ==================== LOGS ====================
+# Log files (tidak perlu di version control)
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==================== DATABASE ====================
+# Local database files
+*.db
+*.sqlite
+*.sqlite
+
+# ==================== IDE & EDITOR ====================
+# Editor files dan folders
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# ==================== TEMP FILES ====================
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# ==================== COVERAGE ====================
+# Test coverage files
+coverage/
+.nyc_output/
+
+# ==================== BUILD OUTPUT ====================
+# Additional build outputs
+dist/
+build/
+
+# ==================== OS FILES ====================
+# Operating system files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ==================== CLOUDINARY ====================
+# Cloudinary temp files jika ada
+.cloudinary

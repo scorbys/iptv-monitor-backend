@@ -3,12 +3,19 @@ const TelegramBot = require('node-telegram-bot-api');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-
+// Singleton pattern to prevent multiple instances
+let botInstance = null;
 
 class IPTVTelegramBot {
     constructor() {
         if (!TELEGRAM_BOT_TOKEN) {
             throw new Error('TELEGRAM_BOT_TOKEN is required');
+        }
+
+        // Prevent multiple instances
+        if (botInstance) {
+            console.warn('⚠️ Bot instance already exists, returning existing instance');
+            return botInstance;
         }
 
         this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, {
@@ -22,12 +29,17 @@ class IPTVTelegramBot {
         this.subscribers = new Map();
         this.lastNotifications = new Map();
         this.fetch = null; // Will be initialized asynchronously
+        this.isShuttingDown = false;
 
         // Initialize fetch dynamically
         this.initializeFetch();
 
         this.setupCommands();
         this.setupErrorHandling();
+        this.setupGracefulShutdown();
+
+        // Store singleton instance
+        botInstance = this;
 
         console.log('🤖 IPTV Telegram Bot initialized');
     }
@@ -45,7 +57,16 @@ class IPTVTelegramBot {
 
     // Tambahkan method untuk mendapatkan base URL API
     getApiBaseUrl() {
-        return process.env.BASE_URL || 'http://localhost:3001';
+        // Production: use BASE_URL from env
+        // Development: fallback to localhost
+        // Railway: auto-detect from PORT
+        if (process.env.BASE_URL) {
+            return process.env.BASE_URL;
+        }
+
+        // Fallback for local development
+        const port = process.env.PORT || 3001;
+        return `http://localhost:${port}`;
     }
 
     getIndonesianTime() {
@@ -801,11 +822,40 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
         });
 
         this.bot.on('polling_error', (error) => {
-            console.error('Telegram polling error:', error);
+            // Handle error gracefully
+            const errorMessage = error.message || error.response?.body?.description || 'Unknown polling error';
+            const errorCode = error.code || error.response?.statusCode || 'UNKNOWN';
+
+            // Only log important errors, not repetitive ones
+            if (errorCode !== 'ETELEGRAM' || !errorMessage.includes('Conflict')) {
+                console.error('Telegram polling error:', {
+                    code: errorCode,
+                    message: errorMessage,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // If it's a conflict error, wait before retry
+            if (errorMessage.includes('Conflict')) {
+                console.warn('⚠️ Conflict detected - bot instance may be restarting');
+                setTimeout(() => {
+                    if (!this.isShuttingDown) {
+                        console.log('🔄 Restarting bot polling...');
+                        this.bot.startPolling();
+                    }
+                }, 5000);
+            }
         });
 
         this.bot.on('error', (error) => {
-            console.error('Telegram bot error:', error);
+            const errorMessage = error.message || error.response?.body?.description || 'Unknown error';
+            const errorCode = error.code || error.response?.statusCode || 'UNKNOWN';
+
+            console.error('Telegram bot error:', {
+                code: errorCode,
+                message: errorMessage,
+                timestamp: new Date().toISOString()
+            });
         });
     }
 
@@ -830,6 +880,42 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
         }
 
         console.log(`🧹 Cleaned up ${cleaned} inactive subscribers`);
+    }
+
+    // Graceful shutdown method
+    setupGracefulShutdown() {
+        const shutdown = async (signal) => {
+            if (this.isShuttingDown) {
+                console.log('⚠️ Shutdown already in progress...');
+                return;
+            }
+
+            this.isShuttingDown = true;
+            console.log(`\n🛑 ${signal} received: Starting graceful shutdown...`);
+
+            try {
+                // Stop bot polling first
+                if (this.bot && this.bot._polling) {
+                    console.log('⏹️ Stopping Telegram bot polling...');
+                    await this.bot.stopPolling();
+                    console.log('✅ Bot polling stopped');
+                }
+
+                // Clear singleton instance
+                botInstance = null;
+
+                console.log('✅ Graceful shutdown completed');
+                process.exit(0);
+            } catch (error) {
+                console.error('❌ Error during shutdown:', error);
+                process.exit(1);
+            }
+        };
+
+        // Handle shutdown signals
+        process.on('SIGINT', () => shutdown('SIGINT'));
+        process.on('SIGTERM', () => shutdown('SIGTERM'));
+        process.on('SIGUSR2', () => shutdown('SIGUSR2')); // Nodemon restart
     }
 }
 
