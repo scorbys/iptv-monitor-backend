@@ -76,6 +76,14 @@ router.get("/", async (req, res) => {
   const caller = req.headers["user-agent"] || "unknown";
   console.log(`[VERIFY] Called by: ${caller}`);
 
+  // Debug: Log all headers and cookies
+  console.log(`[VERIFY] Request headers:`, {
+    authorization: req.headers.authorization ? `${req.headers.authorization.substring(0, 30)}...` : 'none',
+    allHeaders: Object.keys(req.headers),
+    cookies: Object.keys(req.cookies),
+    tokenCookie: req.cookies.token ? 'exists' : 'none'
+  });
+
   try {
     const token =
       req.cookies.token ||
@@ -83,7 +91,15 @@ router.get("/", async (req, res) => {
       req.cookies["authToken"] ||
       req.headers.authorization?.split(" ")[1];
 
+    console.log(`[VERIFY] Token extraction result:`, {
+      fromCookie: !!req.cookies.token,
+      fromAuth: !!req.headers.authorization,
+      tokenFound: !!token,
+      tokenLength: token?.length
+    });
+
     if (!token) {
+      console.log(`[VERIFY] No token found - returning 401`);
       return res.status(401).json({
         success: false,
         error: "No token provided",

@@ -155,7 +155,8 @@ const corsOptions = {
 };
 
 // ==================== MIDDLEWARE SETUP ====================
-app.options(/.*/, cors());
+// Preflight CORS must use corsOptions to avoid wildcard
+app.options(/.*/, cors(corsOptions));
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
