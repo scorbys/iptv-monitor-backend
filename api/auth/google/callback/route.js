@@ -23,7 +23,7 @@ router.get("/", async (req, res) => {
     console.log("User-Agent:", req.headers["user-agent"]);
 
     const code = req.query.code;
-    const state = req.query.state;
+    const state = req.query.state ? decodeURIComponent(req.query.state) : null;
     const error = req.query.error;
 
     // Handle OAuth errors
@@ -238,7 +238,13 @@ router.get("/", async (req, res) => {
 
     console.log('Cookie domain configuration:', {
       frontendUrl,
-      hostname: frontendUrl ? new URL(frontendUrl).hostname : 'N/A',
+      hostname: frontendUrl ? (() => {
+        try {
+          return new URL(frontendUrl).hostname;
+        } catch (e) {
+          return 'Invalid URL';
+        }
+      })() : 'N/A',
       dynamicDomain,
       isProduction,
       source: state ? 'state' : req.headers.referer ? 'referer' : 'env'
@@ -288,9 +294,9 @@ router.get("/", async (req, res) => {
 
     console.log("Multiple cookies set for compatibility");
 
-    // Redirect URL
+    // Redirect URL - state is already decoded above
     const redirectUrl = state
-      ? decodeURIComponent(state)
+      ? state
       : `${process.env.FRONTEND_URL}/dashboard`;
 
     const finalRedirectUrl = new URL(redirectUrl);

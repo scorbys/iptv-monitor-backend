@@ -108,19 +108,43 @@ const networkStats = {
 // ==================== CORS CONFIGURATION ====================
 const corsOptions = {
   origin: function (origin, callback) {
-    const allowedOrigins = [
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "https://iptv-monitor2.vercel.app",
-    ];
+    // Dynamic origin support for Vercel deployments
+    let allowedOrigin = null;
 
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      // Same-origin request or server-to-server
+      return callback(null, true);
+    }
 
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log("CORS blocked origin:", origin);
-      callback(new Error("Not allowed by CORS"));
+    try {
+      const originUrl = new URL(origin);
+      const hostname = originUrl.hostname;
+
+      // Allow any Vercel deployment (both production and preview)
+      if (hostname.endsWith('.vercel.app')) {
+        allowedOrigin = origin;
+        console.log(`[CORS] Allowing Vercel origin: ${origin}`);
+      }
+      // Allow localhost for development
+      else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        allowedOrigin = origin;
+        console.log(`[CORS] Allowing localhost origin: ${origin}`);
+      }
+      // Allow IP addresses for local network testing
+      else if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
+        allowedOrigin = origin;
+        console.log(`[CORS] Allowing local network origin: ${origin}`);
+      }
+      // Default to production if unknown
+      else {
+        console.warn(`[CORS] Unknown origin: ${origin}, blocking request`);
+        return callback(new Error("Not allowed by CORS"));
+      }
+
+      return callback(null, allowedOrigin);
+    } catch (e) {
+      console.error('[CORS] Invalid origin:', origin);
+      return callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
@@ -135,14 +159,39 @@ app.options(/.*/, cors());
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const allowedOrigins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "https://iptv-monitor2.vercel.app",
-  ];
 
-  if (allowedOrigins.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
+  // Dynamic origin support for Vercel deployments
+  let allowedOrigin = null;
+
+  if (origin) {
+    try {
+      const originUrl = new URL(origin);
+      const hostname = originUrl.hostname;
+
+      // Allow any Vercel deployment (both production and preview)
+      if (hostname.endsWith('.vercel.app')) {
+        allowedOrigin = origin;
+      }
+      // Allow localhost for development
+      else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        allowedOrigin = origin;
+      }
+      // Allow IP addresses for local network testing
+      else if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
+        allowedOrigin = origin;
+      }
+      // Default to production origin if unknown (don't set custom header)
+      else {
+        console.warn(`[MIDDLEWARE CORS] Unknown origin: ${origin}, not setting CORS header`);
+      }
+    } catch (e) {
+      console.error('[MIDDLEWARE CORS] Invalid origin:', origin);
+    }
+  }
+
+  // Only set Access-Control-Allow-Origin if we validated the origin
+  if (allowedOrigin) {
+    res.header("Access-Control-Allow-Origin", allowedOrigin);
   }
 
   res.header("Access-Control-Allow-Credentials", "true");

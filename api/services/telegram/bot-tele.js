@@ -28,8 +28,10 @@ class IPTVTelegramBot {
         });
         this.subscribers = new Map();
         this.lastNotifications = new Map();
-        this.fetch = null; // Will be initialized asynchronously
+        this.conflictCount = 0;
+        this.lastConflictLog = 0;
         this.isShuttingDown = false;
+        this.fetch = null; // Will be initialized asynchronously
 
         // Initialize fetch dynamically
         this.initializeFetch();
@@ -835,15 +837,34 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 });
             }
 
-            // If it's a conflict error, wait before retry
+            // If it's a conflict error, use exponential backoff with reduced logging
             if (errorMessage.includes('Conflict')) {
-                console.warn('⚠️ Conflict detected - bot instance may be restarting');
+                this.conflictCount++;
+
+                // Only log every 5th conflict or once per minute
+                const now = Date.now();
+                const shouldLog = this.conflictCount % 5 === 0 || (now - this.lastConflictLog) > 60000;
+
+                if (shouldLog) {
+                    console.warn(`⚠️ Conflict detected (count: ${this.conflictCount}) - Railway may be restarting`);
+                    this.lastConflictLog = now;
+                }
+
+                // Exponential backoff: 10s, 15s, 20s, max 30s
+                const delay = Math.min(10000 + (this.conflictCount * 5000), 30000);
+
                 setTimeout(() => {
                     if (!this.isShuttingDown) {
-                        console.log('🔄 Restarting bot polling...');
+                        // Reset count on successful restart attempt
+                        if (this.conflictCount > 0) {
+                            console.log(`🔄 Restarting bot polling (attempt ${this.conflictCount})...`);
+                        }
                         this.bot.startPolling();
                     }
-                }, 5000);
+                }, delay);
+            } else {
+                // Reset conflict count on non-conflict errors
+                this.conflictCount = 0;
             }
         });
 
@@ -898,10 +919,15 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 if (this.bot && this.bot._polling) {
                     console.log('⏹️ Stopping Telegram bot polling...');
                     await this.bot.stopPolling();
+
+                    // Wait for Telegram to register the stop
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+
                     console.log('✅ Bot polling stopped');
                 }
 
-                // Clear singleton instance
+                // Clear singleton instance after delay to prevent conflicts
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 botInstance = null;
 
                 console.log('✅ Graceful shutdown completed');

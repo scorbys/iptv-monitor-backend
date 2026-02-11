@@ -5,18 +5,63 @@ const { getUserById } = require("../../../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// CORS middleware
+// CORS middleware - Dynamic origin based on Origin header or Referer
 const setCorsHeaders = (req, res, next) => {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "https://iptv-monitor2.vercel.app"
-  );
+  // Get origin from request headers
+  const requestOrigin = req.headers.origin || req.headers.referer;
+
+  // List of allowed origins (both production and deployment previews)
+  const allowedOrigins = [
+    // Production domain
+    'https://iptv-monitor2.vercel.app',
+    // Allow any Vercel deployment preview (using wildcard pattern)
+    // We'll check if it matches *.vercel.app
+  ];
+
+  // Check if origin is from Vercel or is in our allowed list
+  let allowedOrigin = requestOrigin;
+
+  if (requestOrigin) {
+    try {
+      const originUrl = new URL(requestOrigin);
+
+      // Allow any Vercel deployment (both production and preview)
+      if (originUrl.hostname.endsWith('.vercel.app')) {
+        allowedOrigin = requestOrigin;
+      }
+      // Allow localhost for development
+      else if (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1') {
+        allowedOrigin = requestOrigin;
+      }
+      // Check against explicit allowed origins
+      else if (allowedOrigins.includes(requestOrigin)) {
+        allowedOrigin = requestOrigin;
+      }
+      // Default to production if unknown
+      else {
+        console.warn(`[CORS] Unknown origin: ${requestOrigin}, using production origin`);
+        allowedOrigin = 'https://iptv-monitor2.vercel.app';
+      }
+    } catch (e) {
+      console.error('[CORS] Invalid origin:', requestOrigin);
+      allowedOrigin = 'https://iptv-monitor2.vercel.app';
+    }
+  } else {
+    // No origin header, assume same-origin or production
+    allowedOrigin = 'https://iptv-monitor2.vercel.app';
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
   res.setHeader(
     "Access-Control-Allow-Methods",
     "GET, POST, PUT, DELETE, OPTIONS"
   );
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Vary", "Origin"); // Important for caching
+
+  console.log(`[CORS] Allowing origin: ${allowedOrigin}`);
+
   next();
 };
 
