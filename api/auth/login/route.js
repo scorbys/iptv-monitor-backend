@@ -125,12 +125,20 @@ router.post("/", validateLoginInput, async (req, res) => {
 
     // CRITICAL FIX: Include token in response for frontend to save
     // Frontend needs to save token to localStorage for cross-domain compatibility
-    res.json({
+    const responseData = {
       success: true,
       user: authResult.user,
       token: token,
       message: "Login successful"
+    };
+
+    console.log("📤 [LOGIN RESPONSE] Sending response with token:", {
+      hasToken: !!responseData.token,
+      tokenLength: responseData.token?.length,
+      userKeys: Object.keys(responseData.user)
     });
+
+    res.json(responseData);
 
   } catch (error) {
     console.error("Login API error:", error);
