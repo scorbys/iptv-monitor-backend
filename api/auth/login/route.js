@@ -110,7 +110,7 @@ router.post("/", validateLoginInput, async (req, res) => {
 
     // Create JWT token
     const tokenPayload = {
-      userId: authResult.user.userId,
+      userId: authResult.user._id.toString(),
       username: authResult.user.username,
       email: authResult.user.email,
       iat: Math.floor(Date.now() / 1000)
