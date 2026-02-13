@@ -196,23 +196,23 @@ router.get("/", async (req, res) => {
         const url = new URL(urlString);
         const hostname = url.hostname;
 
-        // CRITICAL: For Vercel deployment preview URLs, DON'T set domain
-        // Deployment preview URLs use pattern: {project}-{id}-{hash}.vercel.app
-        // Setting domain to '.vercel.app' does NOT work for these URLs
-        // Only set domain for production custom domains with 2 levels
+        // CRITICAL FIX: Distinguish between deployment preview and production subdomains
+        // - Deployment preview: {project}-{git-branch}-{random-hash}.vercel.app (4+ parts)
+        // - Production subdomain: {subdomain}.vercel.app (3 parts: iptv-monitor2.vercel.app)
 
         const parts = hostname.split('.');
 
-        // Vercel deployment preview (3+ parts like xxx-yyy-zzz.vercel.app)
+        // Vercel deployment preview (4+ parts like xxx-yyy-zzz-www.vercel.app)
         // -> DON'T set domain (undefined), cookie will be host-specific
-        if (hostname.endsWith('.vercel.app') && parts.length > 2) {
+        if (hostname.endsWith('.vercel.app') && parts.length > 3) {
           console.log('Vercel deployment preview detected - using host-specific cookies');
           return undefined;
         }
 
-        // Production Vercel domain (2 parts like xxx.vercel.app)
+        // Production Vercel domain with subdomain (3 parts like iptv-monitor2.vercel.app)
+        // OR simple production domain (2 parts like xxx.vercel.app)
         // -> Set domain to .vercel.app for sharing across subdomains
-        if (hostname.endsWith('.vercel.app') && parts.length === 2) {
+        if (hostname.endsWith('.vercel.app') && parts.length >= 2) {
           console.log('Vercel production domain detected - using .vercel.app domain');
           return '.vercel.app';
         }
