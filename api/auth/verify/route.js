@@ -47,8 +47,17 @@ const setCorsHeaders = (req, res, next) => {
       allowedOrigin = 'https://iptv-monitor2.vercel.app';
     }
   } else {
-    // No origin header, assume same-origin or production
-    allowedOrigin = 'https://iptv-monitor2.vercel.app';
+    // No origin header - this is a same-origin request (likely from localhost)
+    // For development, we should allow same-origin requests
+    const host = req.headers.host;
+    if (host && (host.includes('localhost') || host.includes('127.0.0.1'))) {
+      // Local development - allow the request
+      allowedOrigin = '*'; // Allow any origin for local dev
+      console.log(`[CORS] Local development detected (host: ${host}), allowing all origins`);
+    } else {
+      // Production without origin header
+      allowedOrigin = 'https://iptv-monitor2.vercel.app';
+    }
   }
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin);

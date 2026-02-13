@@ -232,7 +232,7 @@ app.use((req, res, next) => {
 });
 
 // Static files middleware
-app.use('/api/uploads', express.static(path.join(process.cwd(), 'public/uploads'), {
+app.use('/api/uploads', express.static(path.join(__dirname, 'api/uploads'), {
   maxAge: '1y',
   setHeaders: (res, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
@@ -1744,39 +1744,6 @@ app.post("/api/auth/logout", (req, res) => {
     res.json({
       success: true,
       message: "Logged out successfully",
-      authenticated: false
-    });
-  }
-});
-
-app.get("/api/auth/verify", authenticateToken, (req, res) => {
-  try {
-    console.log("=== TOKEN VERIFICATION START ===");
-    console.log("Token from cookie:", req.cookies.token ? "Present" : "Missing");
-    console.log("Token from header:", req.headers.authorization ? "Present" : "Missing");
-    console.log("Decoded user:", req.user);
-
-    const user = {
-      id: req.user.userId || req.user.id,
-      userId: req.user.userId,
-      username: req.user.username,
-      email: req.user.email,
-    };
-
-    console.log("✅ Token verification successful for user:", user.username);
-    console.log("=== TOKEN VERIFICATION END ===");
-
-    res.json({
-      success: true,
-      user: user,
-      message: "Token verified successfully",
-      authenticated: true
-    });
-  } catch (error) {
-    console.error("Token verification error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Error verifying token",
       authenticated: false
     });
   }
