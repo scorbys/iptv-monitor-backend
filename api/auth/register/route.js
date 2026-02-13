@@ -127,7 +127,8 @@ router.post("/", validateRegisterInput, async (req, res) => {
     // Set cookie
     res.cookie("token", token, cookieOptions);
 
-    // Send response
+    // CRITICAL FIX: Include token in response for frontend to save
+    // Frontend needs to save token to localStorage for cross-domain compatibility
     res.json({
       success: true,
       user: {
@@ -135,6 +136,7 @@ router.post("/", validateRegisterInput, async (req, res) => {
         username: username,
         email: email
       },
+      token: token,
       message: "Registration successful"
     });
 
