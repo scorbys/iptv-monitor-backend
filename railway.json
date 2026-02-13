@@ -1,9 +1,0 @@
-{
-  "build": {
-    "builder": "NIXPACKAGES"
-  },
-  "deploy": {
-    "startCommand": "node server.js",
-    "healthcheckPath": "/health"
-  }
-}
