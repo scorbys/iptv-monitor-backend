@@ -1,0 +1,9 @@
+# Force Railway to always rebuild from source
+# This file tells Railway to NOT use cached builds
+
+[build]
+# Use NIXPACKAGES builder (faster builds)
+builder = "NIXPACKAGES"
+
+# Always rebuild, don't use cache
+# This ensures Railway uses the latest code with token in response
