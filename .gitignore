@@ -1,7 +1,7 @@
 # ==================== DEPENDENCIES ====================
 # Dependencies di-install oleh npm saat Railway build
 node_modules/
-package-lock.json
+# package-lock.json - JANGAN di-ignore! Railway perlu ini untuk dependencies yang tepat
 
 # ==================== NEXT.JS / TURBO ====================
 # Build output (tidak perlu di-deploy)
