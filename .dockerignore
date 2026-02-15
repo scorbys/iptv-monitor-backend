@@ -1,0 +1,77 @@
+# ==================== DEPENDENCIES ====================
+# Dependencies will be installed in container
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# ==================== ENVIRONMENT & SECRETS ====================
+# Never commit sensitive data
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# ==================== LOGS ====================
+logs/
+*.log
+
+# ==================== GIT ====================
+.git/
+.gitignore
+.gitattributes
+
+# ==================== IDE & EDITOR ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.code-workspace
+
+# ==================== TESTS & COVERAGE ====================
+coverage/
+.nyc_output/
+*.test.js
+*.spec.js
+__tests__/
+test/
+
+# ==================== DOCKER ====================
+# Don't include Docker files in image
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# ==================== DOCUMENTATION ====================
+README.md
+CHANGELOG.md
+LICENSE
+docs/
+
+# ==================== TEMP FILES ====================
+tmp/
+temp/
+*.tmp
+
+# ==================== BUILD OUTPUT ====================
+# Any build output if using TypeScript
+dist/
+build/
+.next/
+out/
+
+# ==================== OS FILES ====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==================== MISC ====================
+.editorconfig
+.prettierignore
+.eslintrc*
+.prettierrc*

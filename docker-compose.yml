@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # ==================== BACKEND API ====================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: iptv-backend
+    restart: unless-stopped
+    ports:
+      - "3010:3001"
+    environment:
+      # Server Configuration
+      - NODE_ENV=production
+      - PORT=3001
+
+      # Database (MongoDB)
+      - MONGO_URL=${MONGO_URL}
+
+      # JWT & Security
+      - JWT_SECRET=${JWT_SECRET}
+
+      # Google OAuth
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+
+      # Frontend URL (for CORS & cookies)
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - BASE_URL=${BASE_URL:-http://localhost:3001}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN}
+
+      # Gemini API (if needed)
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+      # Telegram Bot (optional)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+    env_file:
+      - .env
+    networks:
+      - iptv-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/auth/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    # Optional: Add resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ==================== MONGODB (Optional - for local development) ====================
+  # Uncomment if you want to run MongoDB locally
+  # mongodb:
+  #   image: mongo:7
+  #   container_name: iptv-mongodb
+  #   restart: unless-stopped
+  #   ports:
+  #     - "27017:27017"
+  #   environment:
+  #     - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME:-admin}
+  #     - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+  #     - MONGO_INITDB_DATABASE=${MONGO_DB_NAME:-iptv_monitor}
+  #   volumes:
+  #     - mongodb_data:/data/db
+  #     - mongodb_config:/data/configdb
+  #   networks:
+  #     - iptv-network
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+
+networks:
+  iptv-network:
+    driver: bridge
+
+# volumes:
+#   mongodb_data:
+#   mongodb_config:

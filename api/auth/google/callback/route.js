@@ -209,12 +209,12 @@ router.get("/", async (req, res) => {
           return undefined;
         }
 
-        // Production Vercel domain with subdomain (3 parts like iptv-monitor.vercel.app)
-        // OR simple production domain (2 parts like xxx.vercel.app)
-        // -> Set domain to .vercel.app for sharing across subdomains
-        if (hostname.endsWith('.vercel.app') && parts.length >= 2) {
-          console.log('Vercel production domain detected - using .vercel.app domain');
-          return '.vercel.app';
+        // Vercel domains (both production and preview)
+        // -> DO NOT set cookie domain for Vercel apps
+        // Browser will handle it correctly with explicit domain
+        if (hostname.endsWith('.vercel.app')) {
+          console.log('Vercel domain detected - using undefined domain (browser will handle)');
+          return undefined;
         }
 
         // Custom domain with subdomain (subdomain.example.com)
