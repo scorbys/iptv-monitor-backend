@@ -1,9 +1,9 @@
-# ==================== BASE IMAGE ====================
-# Use lightweight Node.js image
-FROM node:20-alpine AS base
+# ==================== SIMPLE PRODUCTION DOCKERFILE ====================
+# Optimized for Pure JavaScript Node.js Application (No Build Step Required)
+
+FROM node:20-alpine
 
 # Install dependencies for native modules (bcrypt, mongodb)
-# Some native modules need Python and make tools
 RUN apk add --no-cache \
     python3 \
     make \
@@ -13,41 +13,28 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# ==================== DEPENDENCIES ====================
-FROM base AS dependencies
-
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies WITHOUT NODE_ENV to ensure devDependencies are installed
-# Remove --include=dev flag as it's deprecated in newer npm
-RUN npm ci && \
+# Install dependencies
+# Use npm install instead of npm ci for more compatibility
+RUN npm install --production=false && \
     npm cache clean --force
 
-# ==================== PRODUCTION ====================
-FROM base AS production
-
-# Set NODE_ENV to production AFTER dependencies are installed
-ENV NODE_ENV=production
-
-# Copy all dependencies from dependencies stage
-COPY --from=dependencies /app/node_modules ./node_modules
-
-# Copy source code
+# Copy all source code
 COPY . .
-
-# Install ONLY production dependencies (remove devDependencies)
-RUN npm prune --production
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Set ownership of app directory
-RUN chown -R nodejs:nodejs /app
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
 # Switch to non-root user
 USER nodejs
+
+# Set environment
+ENV NODE_ENV=production
+ENV PORT=3001
 
 # Expose port
 EXPOSE 3001
