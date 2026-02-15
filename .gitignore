@@ -1,6 +1,7 @@
 # ==================== DEPENDENCIES ====================
 # Dependencies di-install oleh npm saat Railway build
 node_modules/
+/node_modules
 # package-lock.json - JANGAN di-ignore! Railway perlu ini untuk dependencies yang tepat
 
 # ==================== NEXT.JS / TURBO ====================
@@ -66,3 +67,6 @@ desktop.ini
 # ==================== CLOUDINARY ====================
 # Cloudinary temp files jika ada
 .cloudinary
+
+# Claude
+.claude/

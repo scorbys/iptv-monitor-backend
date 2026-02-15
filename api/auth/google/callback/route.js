@@ -198,7 +198,7 @@ router.get("/", async (req, res) => {
 
         // CRITICAL FIX: Distinguish between deployment preview and production subdomains
         // - Deployment preview: {project}-{git-branch}-{random-hash}.vercel.app (4+ parts)
-        // - Production subdomain: {subdomain}.vercel.app (3 parts: iptv-monitor2.vercel.app)
+        // - Production subdomain: {subdomain}.vercel.app (3 parts: iptv-monitor.vercel.app)
 
         const parts = hostname.split('.');
 
@@ -209,7 +209,7 @@ router.get("/", async (req, res) => {
           return undefined;
         }
 
-        // Production Vercel domain with subdomain (3 parts like iptv-monitor2.vercel.app)
+        // Production Vercel domain with subdomain (3 parts like iptv-monitor.vercel.app)
         // OR simple production domain (2 parts like xxx.vercel.app)
         // -> Set domain to .vercel.app for sharing across subdomains
         if (hostname.endsWith('.vercel.app') && parts.length >= 2) {

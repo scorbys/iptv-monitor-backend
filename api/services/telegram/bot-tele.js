@@ -1,5 +1,5 @@
 require('dotenv').config();
-const TelegramBot = require('node-telegram-bot-api');
+const { Bot, GrammyError } = require('grammy');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -18,14 +18,8 @@ class IPTVTelegramBot {
             return botInstance;
         }
 
-        this.bot = new TelegramBot(TELEGRAM_BOT_TOKEN, {
-            polling: {
-                interval: 300,
-                params: {
-                    timeout: 10
-                }
-            }
-        });
+        // Initialize Grammy bot
+        this.bot = new Bot(TELEGRAM_BOT_TOKEN);
         this.subscribers = new Map();
         this.lastNotifications = new Map();
         this.conflictCount = 0;
@@ -36,6 +30,7 @@ class IPTVTelegramBot {
         // Initialize fetch dynamically
         this.initializeFetch();
 
+        // Setup commands and handlers
         this.setupCommands();
         this.setupErrorHandling();
         this.setupGracefulShutdown();
@@ -43,7 +38,7 @@ class IPTVTelegramBot {
         // Store singleton instance
         botInstance = this;
 
-        console.log('🤖 IPTV Telegram Bot initialized');
+        console.log('🤖 IPTV Telegram Bot initialized with Grammy');
     }
 
     // Initialize fetch asynchronously
@@ -53,7 +48,7 @@ class IPTVTelegramBot {
             this.fetch = fetch;
             console.log('✅ node-fetch initialized successfully');
         } catch (error) {
-            console.error('❌ Failed to initialize node-fetch:', error);
+            console.error('❌ Failed to initialize fetch:', error);
         }
     }
 
@@ -86,9 +81,9 @@ class IPTVTelegramBot {
 
     setupCommands() {
         // Command /start
-        this.bot.onText(/\/start/, async (msg) => {  // Tambahkan async di sini
-            const chatId = msg.chat.id;
-            const userName = msg.from.first_name || msg.from.username || 'User';
+        this.bot.command('start', async (ctx) => {
+            const chatId = ctx.chat.id;
+            const userName = ctx.from.first_name || ctx.from.username || 'User';
 
             this.subscribers.set(chatId, {
                 active: true,
@@ -104,7 +99,7 @@ Halo ${userName}! Bot ini akan membantu memantau status perangkat IPTV Anda.
 📋 *Fitur yang tersedia:*
 • /list-channel - Daftar status channel
 • /list-chromecast - Daftar status Chromecast
-• /list-TVhospitality - Daftar status TV Hospitality  
+• /list-TVhospitality - Daftar status TV Hospitality
 • /ringkasan - Ringkasan error perangkat
 • /jeda - Jeda notifikasi 1 jam
 • /stop - Berhenti menerima notifikasi
@@ -116,13 +111,13 @@ Halo ${userName}! Bot ini akan membantu memantau status perangkat IPTV Anda.
 Sedang mengecek perangkat offline...
       `;
 
-            await this.bot.sendMessage(chatId, welcomeMessage, {
+            await ctx.reply(welcomeMessage, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [
-                        ['/list-channel', '/list-chromecast'],
-                        ['/list-TVhospitality', '/ringkasan'],
-                        ['/jeda', '/stop', '/help']  // Tambahkan /help di keyboard
+                        [{ text: '/list-channel' }, { text: '/list-chromecast' }],
+                        [{ text: '/list-TVhospitality' }, { text: '/ringkasan' }],
+                        [{ text: '/jeda' }, { text: '/stop' }, { text: '/help' }]
                     ],
                     resize_keyboard: true
                 }
@@ -156,12 +151,12 @@ Sedang mengecek perangkat offline...
         }, 5000); // Test after 5 seconds
 
         // Command /stop
-        this.bot.onText(/\/stop/, (msg) => {
-            const chatId = msg.chat.id;
+        this.bot.command('stop', async (ctx) => {
+            const chatId = ctx.chat.id;
 
             if (this.subscribers.has(chatId)) {
                 this.subscribers.get(chatId).active = false;
-                this.bot.sendMessage(chatId,
+                await ctx.reply(
                     '🔕 *Notifikasi dihentikan*\n\nAnda tidak akan menerima notifikasi lagi.\nKetik /start untuk mengaktifkan kembali.',
                     {
                         parse_mode: 'Markdown',
@@ -173,14 +168,14 @@ Sedang mengecek perangkat offline...
         });
 
         // Command /jeda
-        this.bot.onText(/\/jeda/, (msg) => {
-            const chatId = msg.chat.id;
+        this.bot.command('jeda', async (ctx) => {
+            const chatId = ctx.chat.id;
 
             if (this.subscribers.has(chatId)) {
                 const pausedUntil = new Date(Date.now() + 60 * 60 * 1000); // 1 jam
                 this.subscribers.get(chatId).pausedUntil = pausedUntil;
 
-                this.bot.sendMessage(chatId,
+                await ctx.reply(
                     `⏸️ *Notifikasi dijeda selama 1 jam*\n\nNotifikasi akan kembali aktif pada:\n${new Date(Date.now() + 60 * 60 * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Makassar', hour12: false })}`,
                     { parse_mode: 'Markdown' }
                 );
@@ -189,9 +184,7 @@ Sedang mengecek perangkat offline...
         });
 
         // Command /help
-        this.bot.onText(/\/help/, (msg) => {
-            const chatId = msg.chat.id;
-
+        this.bot.command('help', async (ctx) => {
             const helpMessage = `
 🆘 *Bantuan IPTV Monitor Bot*
 
@@ -209,18 +202,19 @@ Sedang mengecek perangkat offline...
 ℹ️ Bot akan otomatis mengirim notifikasi saat ada perangkat yang offline.
       `;
 
-            this.bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
+            await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
         });
 
-        // Command untuk list data
+        // Setup list commands
         this.setupListCommands();
+
+        // Setup callback query handler
+        this.setupCallbackHandler();
     }
 
     setupListCommands() {
         // List Channels
-        this.bot.onText(/\/list-channel/, async (msg) => {
-            const chatId = msg.chat.id;
-
+        this.bot.command('list-channel', async (ctx) => {
             try {
                 const channels = await this.fetchChannelData();
                 let message = '📺 *Status Channel IPTV*\n\n';
@@ -252,17 +246,15 @@ Sedang mengecek perangkat offline...
                     }
                 }
 
-                this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+                await ctx.reply(message, { parse_mode: 'Markdown' });
             } catch (error) {
                 console.error('Error fetching channel data:', error);
-                this.bot.sendMessage(chatId, '❌ Gagal mengambil data channel. Silakan coba lagi.');
+                await ctx.reply('❌ Gagal mengambil data channel. Silakan coba lagi.');
             }
         });
 
         // List Chromecast
-        this.bot.onText(/\/list-chromecast/, async (msg) => {
-            const chatId = msg.chat.id;
-
+        this.bot.command('list-chromecast', async (ctx) => {
             try {
                 const devices = await this.fetchChromecastData();
                 let message = '📱 *Status Chromecast*\n\n';
@@ -294,17 +286,15 @@ Sedang mengecek perangkat offline...
                     }
                 }
 
-                this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+                await ctx.reply(message, { parse_mode: 'Markdown' });
             } catch (error) {
                 console.error('Error fetching Chromecast data:', error);
-                this.bot.sendMessage(chatId, '❌ Gagal mengambil data Chromecast. Silakan coba lagi.');
+                await ctx.reply('❌ Gagal mengambil data Chromecast. Silakan coba lagi.');
             }
         });
 
         // List TV Hospitality
-        this.bot.onText(/\/list-TVhospitality/, async (msg) => {
-            const chatId = msg.chat.id;
-
+        this.bot.command('list-TVhospitality', async (ctx) => {
             try {
                 const tvs = await this.fetchTVData();
                 let message = '🏨 *Status TV Hospitality*\n\n';
@@ -336,17 +326,15 @@ Sedang mengecek perangkat offline...
                     }
                 }
 
-                this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+                await ctx.reply(message, { parse_mode: 'Markdown' });
             } catch (error) {
                 console.error('Error fetching TV data:', error);
-                this.bot.sendMessage(chatId, '❌ Gagal mengambil data TV. Silakan coba lagi.');
+                await ctx.reply('❌ Gagal mengambil data TV. Silakan coba lagi.');
             }
         });
 
         // Ringkasan
-        this.bot.onText(/\/ringkasan/, async (msg) => {
-            const chatId = msg.chat.id;
-
+        this.bot.command('ringkasan', async (ctx) => {
             try {
                 const [channels, chromecasts, tvs] = await Promise.all([
                     this.fetchChannelData(),
@@ -360,7 +348,7 @@ Sedang mengecek perangkat offline...
 
                 const totalDevices = channels.length + chromecasts.length + tvs.length;
                 const totalOffline = channelOffline + chromecastOffline + tvOffline;
-                const uptime = ((totalDevices - totalOffline) / totalDevices * 100).toFixed(1);
+                const uptime = totalDevices > 0 ? ((totalDevices - totalOffline) / totalDevices * 100).toFixed(1) : '100';
 
                 const message = `
 📊 *Ringkasan Status IPTV*
@@ -370,7 +358,7 @@ Sedang mengecek perangkat offline...
 ❌ *Total Offline:* ${totalOffline}
 
 📺 *Channel:* ${channels.length - channelOffline}/${channels.length} Online
-📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online  
+📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online
 🏨 *TV Hospitality:* ${tvs.length - tvOffline}/${tvs.length} Online
 
 ⏰ *Update terakhir:* ${this.getIndonesianTime()}
@@ -378,10 +366,99 @@ Sedang mengecek perangkat offline...
 ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline : '✅ Semua perangkat berjalan normal'}
         `;
 
-                this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+                await ctx.reply(message, { parse_mode: 'Markdown' });
             } catch (error) {
                 console.error('Error generating summary:', error);
-                this.bot.sendMessage(chatId, '❌ Gagal mengambil ringkasan data. Silakan coba lagi.');
+                await ctx.reply('❌ Gagal mengambil ringkasan data. Silakan coba lagi.');
+            }
+        });
+    }
+
+    // Setup callback query handler
+    setupCallbackHandler() {
+        this.bot.on('callback_query:data', async (ctx) => {
+            const chatId = ctx.chat.id;
+            const data = ctx.callbackQuery.data;
+
+            try {
+                switch (data) {
+                    case 'pause_1h':
+                        if (this.subscribers.has(chatId)) {
+                            const pausedUntil = new Date(Date.now() + 60 * 60 * 1000);
+                            this.subscribers.get(chatId).pausedUntil = pausedUntil;
+
+                            await ctx.answerCallbackQuery({
+                                text: '⏸️ Notifikasi dijeda selama 1 jam'
+                            });
+
+                            // Update message untuk konfirmasi
+                            await ctx.editMessageText(
+                                `⏸️ *Notifikasi Dijeda*\n\nNotifikasi akan kembali aktif pada:\n${new Date(Date.now() + 60 * 60 * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Makassar', hour12: false })}`,
+                                {
+                                    parse_mode: 'Markdown',
+                                    reply_markup: {
+                                        inline_keyboard: [
+                                            [{ text: '✅ Aktifkan Kembali', callback_data: 'resume_notifications' }]
+                                        ]
+                                    }
+                                }
+                            );
+
+                            console.log(`⏸️ User ${chatId} paused notifications until ${pausedUntil}`);
+                        }
+                        break;
+
+                    case 'resume_notifications':
+                        if (this.subscribers.has(chatId)) {
+                            this.subscribers.get(chatId).pausedUntil = null;
+
+                            await ctx.answerCallbackQuery({
+                                text: '✅ Notifikasi diaktifkan kembali'
+                            });
+
+                            await ctx.editMessageText(
+                                '✅ *Notifikasi Aktif*\n\nAnda akan menerima notifikasi perangkat offline.',
+                                {
+                                    parse_mode: 'Markdown'
+                                }
+                            );
+
+                            console.log(`✅ User ${chatId} resumed notifications`);
+                        }
+                        break;
+
+                    case 'stop_notifications':
+                        if (this.subscribers.has(chatId)) {
+                            this.subscribers.get(chatId).active = false;
+
+                            await ctx.answerCallbackQuery({
+                                text: '🔕 Notifikasi dihentikan'
+                            });
+
+                            await ctx.editMessageText(
+                                '🔕 *Notifikasi Dihentikan*\n\nAnda tidak akan menerima notifikasi lagi.\nKetik /start untuk mengaktifkan kembali.',
+                                {
+                                    parse_mode: 'Markdown',
+                                    reply_markup: { remove_keyboard: true }
+                                }
+                            );
+
+                            console.log(`🔕 User ${chatId} stopped notifications`);
+                        }
+                        break;
+
+                    case 'show_summary':
+                        await ctx.answerCallbackQuery();
+
+                        // Panggil langsung method ringkasan
+                        await this.sendSummaryToUser(chatId);
+                        break;
+                }
+            } catch (error) {
+                console.error('Error handling callback query:', error);
+                await ctx.answerCallbackQuery({
+                    text: '❌ Terjadi kesalahan, silakan coba lagi'
+                });
             }
         });
     }
@@ -531,7 +608,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 }
             } else {
                 if (specificChatId) {
-                    await this.bot.sendMessage(specificChatId,
+                    await this.bot.api.sendMessage(specificChatId,
                         '✅ *Semua perangkat online!*\n\nTidak ada perangkat yang offline saat ini.',
                         { parse_mode: 'Markdown' }
                     );
@@ -541,7 +618,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
         } catch (error) {
             console.error('Error checking offline devices:', error);
             if (specificChatId) {
-                await this.bot.sendMessage(specificChatId,
+                await this.bot.api.sendMessage(specificChatId,
                     '❌ Gagal mengecek status perangkat. Silakan coba lagi nanti.'
                 );
             }
@@ -590,7 +667,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             message += `⏰ *Waktu:* ${this.getIndonesianTime()}\n\n`;
             message += `Gunakan perintah untuk info lebih lanjut atau atur notifikasi.`;
 
-            await this.bot.sendMessage(chatId, message, {
+            await this.bot.api.sendMessage(chatId, message, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
@@ -660,7 +737,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 message += `⏰ *Waktu:* ${this.getIndonesianTime()}\n\n`;
                 message += `Ketik /jeda untuk jeda 1 jam atau /stop untuk berhenti menerima notifikasi.`;
 
-                await this.bot.sendMessage(chatId, message, {
+                await this.bot.api.sendMessage(chatId, message, {
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [
@@ -681,7 +758,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 console.error(`Failed to send notification to ${chatId}:`, error);
 
                 // Remove invalid chat IDs
-                if (error.response && error.response.statusCode === 403) {
+                if (error.error_code === 403) {
                     this.subscribers.delete(chatId);
                     console.log(`🗑️ Removed blocked user ${chatId}`);
                 }
@@ -714,7 +791,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 ❌ *Total Offline:* ${totalOffline}
 
 📺 *Channel:* ${channels.length - channelOffline}/${channels.length} Online
-📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online  
+📱 *Chromecast:* ${chromecasts.length - chromecastOffline}/${chromecasts.length} Online
 🏨 *TV Hospitality:* ${tvs.length - tvOffline}/${tvs.length} Online
 
 ⏰ *Update terakhir:* ${this.getIndonesianTime()}
@@ -722,161 +799,25 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline : '✅ Semua perangkat berjalan normal'}
         `;
 
-            await this.bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+            await this.bot.api.sendMessage(chatId, message, { parse_mode: 'Markdown' });
         } catch (error) {
             console.error('Error generating summary for user:', error);
-            await this.bot.sendMessage(chatId, '❌ Gagal mengambil ringkasan data. Silakan coba lagi.');
+            await this.bot.api.sendMessage(chatId, '❌ Gagal mengambil ringkasan data. Silakan coba lagi.');
         }
     }
 
-    // Setup callback query handlers
+    // Setup error handling
     setupErrorHandling() {
-        this.bot.on('callback_query', async (callbackQuery) => {
-            const chatId = callbackQuery.message.chat.id;
-            const data = callbackQuery.data;
+        // Handle errors
+        this.bot.catch((err) => {
+            const ctx = err.ctx;
+            console.error(`Error while handling update ${ctx.update.update_id}:`);
 
-            try {
-                switch (data) {
-                    case 'pause_1h':
-                        if (this.subscribers.has(chatId)) {
-                            const pausedUntil = new Date(Date.now() + 60 * 60 * 1000);
-                            this.subscribers.get(chatId).pausedUntil = pausedUntil;
-
-                            await this.bot.answerCallbackQuery(callbackQuery.id, {
-                                text: '⏸️ Notifikasi dijeda selama 1 jam'
-                            });
-
-                            // Update message untuk konfirmasi
-                            await this.bot.editMessageText(
-                                `⏸️ *Notifikasi Dijeda*\n\nNotifikasi akan kembali aktif pada:\n${new Date(Date.now() + 60 * 60 * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Makassar', hour12: false })}`,
-                                {
-                                    chat_id: chatId,
-                                    message_id: callbackQuery.message.message_id,
-                                    parse_mode: 'Markdown',
-                                    reply_markup: {
-                                        inline_keyboard: [
-                                            [{ text: '✅ Aktifkan Kembali', callback_data: 'resume_notifications' }]
-                                        ]
-                                    }
-                                }
-                            );
-
-                            console.log(`⏸️ User ${chatId} paused notifications until ${pausedUntil}`);
-                        }
-                        break;
-
-                    case 'resume_notifications':
-                        if (this.subscribers.has(chatId)) {
-                            this.subscribers.get(chatId).pausedUntil = null;
-
-                            await this.bot.answerCallbackQuery(callbackQuery.id, {
-                                text: '✅ Notifikasi diaktifkan kembali'
-                            });
-
-                            await this.bot.editMessageText(
-                                '✅ *Notifikasi Aktif*\n\nAnda akan menerima notifikasi perangkat offline.',
-                                {
-                                    chat_id: chatId,
-                                    message_id: callbackQuery.message.message_id,
-                                    parse_mode: 'Markdown'
-                                }
-                            );
-
-                            console.log(`✅ User ${chatId} resumed notifications`);
-                        }
-                        break;
-
-                    case 'stop_notifications':
-                        if (this.subscribers.has(chatId)) {
-                            this.subscribers.get(chatId).active = false;
-
-                            await this.bot.answerCallbackQuery(callbackQuery.id, {
-                                text: '🔕 Notifikasi dihentikan'
-                            });
-
-                            await this.bot.editMessageText(
-                                '🔕 *Notifikasi Dihentikan*\n\nAnda tidak akan menerima notifikasi lagi.\nKetik /start untuk mengaktifkan kembali.',
-                                {
-                                    chat_id: chatId,
-                                    message_id: callbackQuery.message.message_id,
-                                    parse_mode: 'Markdown',
-                                    reply_markup: { remove_keyboard: true }
-                                }
-                            );
-
-                            console.log(`🔕 User ${chatId} stopped notifications`);
-                        }
-                        break;
-
-                    case 'show_summary':
-                        await this.bot.answerCallbackQuery(callbackQuery.id);
-
-                        // Panggil langsung method ringkasan
-                        await this.sendSummaryToUser(chatId);
-                        break;
-                }
-            } catch (error) {
-                console.error('Error handling callback query:', error);
-                await this.bot.answerCallbackQuery(callbackQuery.id, {
-                    text: '❌ Terjadi kesalahan, silakan coba lagi'
-                });
-            }
-        });
-
-        this.bot.on('polling_error', (error) => {
-            // Handle error gracefully
-            const errorMessage = error.message || error.response?.body?.description || 'Unknown polling error';
-            const errorCode = error.code || error.response?.statusCode || 'UNKNOWN';
-
-            // Only log important errors, not repetitive ones
-            if (errorCode !== 'ETELEGRAM' || !errorMessage.includes('Conflict')) {
-                console.error('Telegram polling error:', {
-                    code: errorCode,
-                    message: errorMessage,
-                    timestamp: new Date().toISOString()
-                });
-            }
-
-            // If it's a conflict error, use exponential backoff with reduced logging
-            if (errorMessage.includes('Conflict')) {
-                this.conflictCount++;
-
-                // Only log every 5th conflict or once per minute
-                const now = Date.now();
-                const shouldLog = this.conflictCount % 5 === 0 || (now - this.lastConflictLog) > 60000;
-
-                if (shouldLog) {
-                    console.warn(`⚠️ Conflict detected (count: ${this.conflictCount}) - Railway may be restarting`);
-                    this.lastConflictLog = now;
-                }
-
-                // Exponential backoff: 10s, 15s, 20s, max 30s
-                const delay = Math.min(10000 + (this.conflictCount * 5000), 30000);
-
-                setTimeout(() => {
-                    if (!this.isShuttingDown) {
-                        // Reset count on successful restart attempt
-                        if (this.conflictCount > 0) {
-                            console.log(`🔄 Restarting bot polling (attempt ${this.conflictCount})...`);
-                        }
-                        this.bot.startPolling();
-                    }
-                }, delay);
+            if (err.error instanceof GrammyError) {
+                console.error('GrammyError:', err.error.description);
             } else {
-                // Reset conflict count on non-conflict errors
-                this.conflictCount = 0;
+                console.error('Unknown error:', err.error);
             }
-        });
-
-        this.bot.on('error', (error) => {
-            const errorMessage = error.message || error.response?.body?.description || 'Unknown error';
-            const errorCode = error.code || error.response?.statusCode || 'UNKNOWN';
-
-            console.error('Telegram bot error:', {
-                code: errorCode,
-                message: errorMessage,
-                timestamp: new Date().toISOString()
-            });
         });
     }
 
@@ -915,16 +856,14 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             console.log(`\n🛑 ${signal} received: Starting graceful shutdown...`);
 
             try {
-                // Stop bot polling first
-                if (this.bot && this.bot._polling) {
-                    console.log('⏹️ Stopping Telegram bot polling...');
-                    await this.bot.stopPolling();
+                // Stop bot first
+                console.log('⏹️ Stopping Telegram bot...');
+                await this.bot.stop();
 
-                    // Wait for Telegram to register the stop
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                // Wait for Telegram to register the stop
+                await new Promise(resolve => setTimeout(resolve, 2000));
 
-                    console.log('✅ Bot polling stopped');
-                }
+                console.log('✅ Bot stopped');
 
                 // Clear singleton instance after delay to prevent conflicts
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -942,6 +881,17 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
         process.on('SIGINT', () => shutdown('SIGINT'));
         process.on('SIGTERM', () => shutdown('SIGTERM'));
         process.on('SIGUSR2', () => shutdown('SIGUSR2')); // Nodemon restart
+    }
+
+    // Method to start the bot
+    async start() {
+        try {
+            await this.bot.start();
+            console.log('✅ Bot started successfully');
+        } catch (error) {
+            console.error('❌ Failed to start bot:', error);
+            throw error;
+        }
     }
 }
 

@@ -219,6 +219,7 @@ app.use("/api/auth/google/callback", googleCallbackRoute);
 app.use("/api/user/profile", userProfileRoute);
 app.use("/api/user/password", userPasswordRoute);
 app.use("/api/user/avatar", userAvatarRoute);
+app.use('/api/dashboard', require('./api/dashboard/stats'));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -345,10 +346,11 @@ const trackRequestMetrics = (serviceType) => {
 };
 
 // ==================== TELEGRAM BOT INITIALIZATION ====================
-const initializeTelegramBot = () => {
+const initializeTelegramBot = async () => {
   try {
     if (process.env.TELEGRAM_BOT_TOKEN) {
       telegramBot = new IPTVTelegramBot();
+      await telegramBot.start(); // Start the Grammy bot
       console.log('Telegram bot initialized successfully');
     } else {
       console.warn('TELEGRAM_BOT_TOKEN not found in environment variables');

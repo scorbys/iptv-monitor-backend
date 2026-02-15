@@ -28,14 +28,14 @@ const setCorsHeaders = (req, res, next) => {
       // Default to production if unknown
       else {
         console.warn(`[CORS] Unknown origin: ${requestOrigin}, using production origin`);
-        allowedOrigin = 'https://iptv-monitor2.vercel.app';
+        allowedOrigin = 'https://iptv-monitor.vercel.app';
       }
     } catch (e) {
       console.error('[CORS] Invalid origin:', requestOrigin);
-      allowedOrigin = 'https://iptv-monitor2.vercel.app';
+      allowedOrigin = 'https://iptv-monitor.vercel.app';
     }
   } else {
-    allowedOrigin = 'https://iptv-monitor2.vercel.app';
+    allowedOrigin = 'https://iptv-monitor.vercel.app';
   }
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin);

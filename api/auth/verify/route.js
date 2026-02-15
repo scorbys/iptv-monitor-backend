@@ -13,7 +13,7 @@ const setCorsHeaders = (req, res, next) => {
   // List of allowed origins (both production and deployment previews)
   const allowedOrigins = [
     // Production domain
-    'https://iptv-monitor2.vercel.app',
+    'https://iptv-monitor.vercel.app',
     // Allow any Vercel deployment preview (using wildcard pattern)
     // We'll check if it matches *.vercel.app
   ];
@@ -40,11 +40,11 @@ const setCorsHeaders = (req, res, next) => {
       // Default to production if unknown
       else {
         console.warn(`[CORS] Unknown origin: ${requestOrigin}, using production origin`);
-        allowedOrigin = 'https://iptv-monitor2.vercel.app';
+        allowedOrigin = 'https://iptv-monitor.vercel.app';
       }
     } catch (e) {
       console.error('[CORS] Invalid origin:', requestOrigin);
-      allowedOrigin = 'https://iptv-monitor2.vercel.app';
+      allowedOrigin = 'https://iptv-monitor.vercel.app';
     }
   } else {
     // No origin header - this is a same-origin request (likely from localhost)
@@ -56,7 +56,7 @@ const setCorsHeaders = (req, res, next) => {
       console.log(`[CORS] Local development detected (host: ${host}), allowing all origins`);
     } else {
       // Production without origin header
-      allowedOrigin = 'https://iptv-monitor2.vercel.app';
+      allowedOrigin = 'https://iptv-monitor.vercel.app';
     }
   }
 
