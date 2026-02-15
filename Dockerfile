@@ -19,30 +19,25 @@ FROM base AS dependencies
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for build)
-RUN npm ci --include=dev && \
+# Install dependencies WITHOUT NODE_ENV to ensure devDependencies are installed
+# Remove --include=dev flag as it's deprecated in newer npm
+RUN npm ci && \
     npm cache clean --force
-
-# ==================== BUILDER ====================
-FROM base AS builder
-
-# Copy dependencies from dependencies stage
-COPY --from=dependencies /app/node_modules ./node_modules
-
-# Copy source code
-COPY . .
 
 # ==================== PRODUCTION ====================
 FROM base AS production
 
-# Set NODE_ENV to production
+# Set NODE_ENV to production AFTER dependencies are installed
 ENV NODE_ENV=production
 
-# Copy only production dependencies
+# Copy all dependencies from dependencies stage
 COPY --from=dependencies /app/node_modules ./node_modules
 
 # Copy source code
 COPY . .
+
+# Install ONLY production dependencies (remove devDependencies)
+RUN npm prune --production
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
