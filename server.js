@@ -37,6 +37,8 @@ const GEMINI_CONFIG = {
 
 // ==================== IMPORTS ====================
 const verifyRoute = require("./api/auth/verify/route");
+const loginRoute = require("./api/auth/login/route");
+const registerRoute = require("./api/auth/register/route");
 const googleAuthRoute = require("./api/auth/google/route");
 const googleCallbackRoute = require("./api/auth/google/callback/route");
 const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
@@ -213,6 +215,8 @@ app.use(cookieParser());
 app.use(cors(corsOptions));
 
 // Route middleware
+app.use("/api/auth/login", loginRoute);
+app.use("/api/auth/register", registerRoute);
 app.use("/api/auth/verify", verifyRoute);
 app.use("/api/auth/google", googleAuthRoute);
 app.use("/api/auth/google/callback", googleCallbackRoute);
@@ -1523,176 +1527,10 @@ async function checkAllChromecastsStatus() {
 }
 
 // ==================== AUTH ENDPOINTS ====================
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    console.log("=== LOGIN REQUEST START ===");
-    console.log("Headers:", req.headers);
-    console.log("Body:", {
-      identifier: req.body.identifier,
-      passwordLength: req.body.password ? req.body.password.length : 0
-    });
-
-    const { identifier, password } = req.body;
-
-    if (!identifier || !password) {
-      console.log("Missing credentials");
-      return res.status(400).json({
-        success: false,
-        error: "Email/username and password are required",
-      });
-    }
-
-    console.log("Authenticating user...");
-    const result = await authenticateUser(identifier, password);
-    console.log("Authentication result:", {
-      success: result.success,
-      userId: result.user?.id,
-      username: result.user?.username,
-      error: result.error
-    });
-
-    if (result.success && result.user) {
-      const tokenPayload = {
-        userId: result.user.id || result.user.userId,
-        email: result.user.email,
-        username: result.user.username,
-        iat: Math.floor(Date.now() / 1000)
-      };
-
-      console.log("Creating token with payload:", tokenPayload);
-
-      const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "24h" });
-
-      const cookieOptions = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-        maxAge: 24 * 60 * 60 * 1000,
-        path: "/"
-      };
-
-      console.log("Setting cookie with options:", cookieOptions);
-      res.cookie("token", token, cookieOptions);
-
-      const userResponse = {
-        id: result.user.id || result.user.userId,
-        username: result.user.username,
-        email: result.user.email,
-      };
-
-      console.log("Login successful for user:", userResponse.username);
-      console.log("=== LOGIN REQUEST END ===");
-
-      res.json({
-        success: true,
-        user: userResponse,
-        message: "Login successful",
-      });
-    } else {
-      console.log("Login failed:", result.error);
-      res.status(401).json({
-        success: false,
-        error: result.error || "Invalid credentials",
-      });
-    }
-  } catch (error) {
-    console.error("Login API error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Internal server error during login",
-      details: process.env.NODE_ENV === "development" ? error.message : undefined
-    });
-  }
-});
-
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    console.log("Registration attempt:", {
-      username: req.body.username,
-      email: req.body.email,
-    });
-
-    const { username, email, password } = req.body;
-
-    if (!username || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: "Username, email, and password are required",
-      });
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        error: "Please enter a valid email address",
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        error: "Password must be at least 6 characters long",
-      });
-    }
-
-    if (username.length < 3) {
-      return res.status(400).json({
-        success: false,
-        error: "Username must be at least 3 characters long",
-      });
-    }
-
-    const result = await createUser({ username, email, password });
-    console.log("User creation result:", {
-      success: result.success,
-      userId: result.userId,
-    });
-
-    if (result.success && result.userId) {
-      const token = jwt.sign(
-        {
-          userId: result.userId,
-          email: email,
-          username: username,
-        },
-        JWT_SECRET,
-        { expiresIn: "24h" }
-      );
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      });
-
-      console.log("Registration successful for user:", username);
-
-      res.status(201).json({
-        success: true,
-        message: "Account created successfully",
-        user: {
-          id: result.userId,
-          username: username,
-          email: email,
-        },
-      });
-    } else {
-      console.log("Registration failed:", result.error);
-      res.status(400).json({
-        success: false,
-        error: result.error || "Failed to create account",
-      });
-    }
-  } catch (error) {
-    console.error("Register API error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Internal server error during registration",
-    });
-  }
-});
+// NOTE: Login and Register endpoints moved to separate route files
+// Login: /api/auth/login/route.js
+// Register: /api/auth/register/route.js
+// This avoids route conflicts and ensures consistent token handling with dynamic cookie domain
 
 app.post("/api/auth/logout", (req, res) => {
   try {
