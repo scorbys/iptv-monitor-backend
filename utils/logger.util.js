@@ -90,7 +90,8 @@ class Logger {
     if (!isProduction) return;
 
     try {
-      const logsDir = path.join(__dirname, '../../logs');
+      // Use /tmp directory which is writable in Railway/Vercel
+      const logsDir = '/tmp/logs';
       if (!fs.existsSync(logsDir)) {
         fs.mkdirSync(logsDir, { recursive: true });
       }
@@ -98,7 +99,8 @@ class Logger {
       const logFile = path.join(logsDir, `app-${new Date().toISOString().split('T')[0]}.log`);
       fs.appendFileSync(logFile, message + '\n');
     } catch (error) {
-      console.error('Failed to write to log file:', error);
+      // Silently fail - don't crash the app if logging fails
+      // The message is already logged to console
     }
   }
 }
@@ -194,7 +196,7 @@ function performanceLogger(label, fn) {
 
 // Clean old log files (run periodically)
 function cleanOldLogs(daysToKeep = 7) {
-  const logsDir = path.join(__dirname, '../../logs');
+  const logsDir = '/tmp/logs';
 
   try {
     if (!fs.existsSync(logsDir)) return;
@@ -213,7 +215,7 @@ function cleanOldLogs(daysToKeep = 7) {
       }
     });
   } catch (error) {
-    console.error('Failed to clean old logs:', error);
+    // Silently fail - cleaning logs is not critical
   }
 }
 

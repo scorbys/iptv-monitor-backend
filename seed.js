@@ -24,7 +24,7 @@ const channels = {
       channelName: 'BBC World',
       category: 'ETC',
       ipMulticast: '238.5.2.121',
-      logo: 'https://worldvectorlogo.com/logos/bloomberg-television.svg'
+      logo: 'https://upload.wikimedia.org/wikipedia/commons/3/32/BBC_World_News_2019.svg'
     },
     { 
       id: 4,
