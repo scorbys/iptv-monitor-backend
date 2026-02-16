@@ -52,12 +52,60 @@ const setCorsHeaders = (req, res, next) => {
 router.use(setCorsHeaders);
 
 // Cookie options configuration
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  maxAge: 60 * 60 * 1000, // 1 hour in milliseconds
-  path: "/"
+const getCookieDomain = (req) => {
+  const origin = req.headers.origin || req.headers.referer;
+  if (!origin) return undefined;
+
+  try {
+    const originUrl = new URL(origin);
+
+    // Vercel deployment preview (3+ parts like xxx-yyy-zzz.vercel.app)
+    // -> DON'T set domain attribute
+    if (originUrl.hostname.endsWith('.vercel.app')) {
+      const parts = originUrl.hostname.split('.');
+      if (parts.length > 2) return undefined;
+      // Production Vercel domain (2 parts like xxx.vercel.app)
+      // -> Set domain to .vercel.app
+      if (parts.length === 2) return '.vercel.app';
+    }
+
+    // Custom domain with subdomain
+    const parts = originUrl.hostname.split('.');
+    if (parts.length >= 2) {
+      return `.${parts.slice(-2).join('.')}`;
+    }
+
+    return undefined;
+  } catch (e) {
+    return undefined;
+  }
+};
+
+const getCookieOptions = (req) => {
+  const isProduction = process.env.NODE_ENV === "production";
+  const domain = getCookieDomain(req);
+
+  const options = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: 60 * 60 * 1000, // 1 hour in milliseconds
+    path: "/"
+  };
+
+  // Only set domain if explicitly determined
+  if (domain) {
+    options.domain = domain;
+  }
+
+  console.log(`[COOKIE OPTIONS]`, {
+    isProduction,
+    domain: domain || 'none',
+    sameSite: options.sameSite,
+    secure: options.secure
+  });
+
+  return options;
 };
 
 // Input validation middleware
@@ -123,6 +171,9 @@ router.post("/", validateRegisterInput, async (req, res) => {
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "1h" });
 
     console.log("Registration successful for:", username);
+
+    // Get dynamic cookie options based on request origin
+    const cookieOptions = getCookieOptions(req);
 
     // Set cookie
     res.cookie("token", token, cookieOptions);
