@@ -183,7 +183,7 @@ router.post("/", validateRegisterInput, async (req, res) => {
     const responseData = {
       success: true,
       user: {
-        userId: createResult.userId,
+        id: createResult.userId.toString(),
         username: username,
         email: email
       },

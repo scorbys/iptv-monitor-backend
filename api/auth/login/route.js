@@ -158,7 +158,7 @@ router.post("/", validateLoginInput, async (req, res) => {
 
     // Create JWT token
     const tokenPayload = {
-      userId: authResult.user._id.toString(),
+      userId: (authResult.user._id || authResult.user.id || authResult.user.userId).toString(),
       username: authResult.user.username,
       email: authResult.user.email,
       iat: Math.floor(Date.now() / 1000)
@@ -176,9 +176,15 @@ router.post("/", validateLoginInput, async (req, res) => {
 
     // CRITICAL FIX: Include token in response for frontend to save
     // Frontend needs to save token to localStorage for cross-domain compatibility
+    const userResponse = {
+      id: (authResult.user._id || authResult.user.id || authResult.user.userId).toString(),
+      username: authResult.user.username,
+      email: authResult.user.email
+    };
+
     const responseData = {
       success: true,
-      user: authResult.user,
+      user: userResponse,
       token: token,
       message: "Login successful"
     };
