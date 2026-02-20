@@ -182,10 +182,25 @@ async function processNotificationWithML(notification, mlPrediction) {
   try {
     console.log(`Processing notification ${notification.id} with ML...`);
 
-    // 1. Save notification to database
-    await saveNotification(notification);
+    // 1. Enhance notification with staff data if available
+    // This ensures staff tracking fields are saved to database
+    const enhancedNotification = {
+      ...notification,
+      // Ensure staff tracking fields are included (default to null if not provided)
+      reportedByStaffId: notification.reportedByStaffId || notification.staffId || null,
+      assignedStaffId: notification.assignedStaffId || null,
+      handledByStaffId: notification.handledByStaffId || null,
+      handlingStartTime: notification.handlingStartTime || null,
+      handlingEndTime: notification.handlingEndTime || null,
+      notes: notification.notes || [],
+      reportStatus: notification.reportStatus || 'pending',
+      priority: notification.priority || 'medium'
+    };
 
-    // 2. Save ML prediction
+    // 2. Save enhanced notification to database
+    await saveNotification(enhancedNotification);
+
+    // 3. Save ML prediction
     const predictionDoc = await saveMLPrediction({
       notificationId: notification.id,
       inputText: `${notification.title} ${notification.message} ${notification.error || ''}`,
@@ -197,7 +212,7 @@ async function processNotificationWithML(notification, mlPrediction) {
       suggestedSolutions: notification.suggestedSolutions || []
     });
 
-    // 3. Determine if auto-fix is possible
+    // 4. Determine if auto-fix is possible
     const category = mlPrediction.predicted_label;
     const categoryFixes = FIX_ACTIONS[category];
 
@@ -210,7 +225,7 @@ async function processNotificationWithML(notification, mlPrediction) {
       };
     }
 
-    // 4. Check confidence threshold
+    // 5. Check confidence threshold
     const confidence = mlPrediction.probabilities?.[0]?.probability || 0;
     const CONFIDENCE_THRESHOLD = 0.70;
 
@@ -224,7 +239,7 @@ async function processNotificationWithML(notification, mlPrediction) {
       };
     }
 
-    // 5. Create auto-fix logs for available actions
+    // 6. Create auto-fix logs for available actions
     const fixResults = [];
 
     for (const action of categoryFixes.actions) {
