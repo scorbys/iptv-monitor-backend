@@ -299,9 +299,10 @@ router.delete('/:userId', verifyToken, requireAdmin, async (req, res) => {
     }
 
     const { users } = await require('../../db').connectDB();
+    const { ObjectId } = require('mongodb');
 
     const result = await users.updateOne(
-      { _id: require('mongodb').ObjectId(userId) },
+      { _id: new ObjectId(userId) },
       {
         $set: {
           isActive: false,
@@ -357,9 +358,10 @@ router.patch('/:userId/role', verifyToken, requireAdmin, async (req, res) => {
     }
 
     const { users } = await require('../../db').connectDB();
+    const { ObjectId } = require('mongodb');
 
     const result = await users.updateOne(
-      { _id: require('mongodb').ObjectId(userId) },
+      { _id: new ObjectId(userId) },
       {
         $set: {
           role: role,
