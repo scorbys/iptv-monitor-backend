@@ -19,6 +19,9 @@ async function connectDB() {
         hospitality: db.collection('tv_hospitality'),
         users: db.collection('login_page'),
         chromecast: db.collection('chromecast'),
+        autoFixHistory: db.collection('auto_fix_history'),
+        staff: db.collection('staff'),
+        notifications: db.collection('notifications'),
         client: client
       };
     } catch (error) {
@@ -42,6 +45,9 @@ async function connectDB() {
         hospitality: db.collection('tv_hospitality'),
         users: db.collection('login_page'),
         chromecast: db.collection('chromecast'),
+        autoFixHistory: db.collection('auto_fix_history'),
+        staff: db.collection('staff'),
+        notifications: db.collection('notifications'),
         client: client
       };
     }
@@ -80,6 +86,7 @@ async function connectDB() {
       hospitality: db.collection('tv_hospitality'),
       users: db.collection('login_page'),
       chromecast: db.collection('chromecast'),
+      autoFixHistory: db.collection('auto_fix_history'),
       client: client
     };
   } catch (error) {
@@ -710,7 +717,8 @@ async function performAuthentication(identifier, password) {
     user: {
       userId: user._id.toString(),
       username: user.username,
-      email: user.email
+      email: user.email,
+      role: user.role || 'guest'  // Tambahkan role
     }
   };
 }
@@ -1077,6 +1085,269 @@ async function bulkInsertChromecastDevices(devicesData) {
   }
 }
 
+// ==================== AUTO-FIX HISTORY FUNCTIONS ====================
+
+async function saveAutoFixHistory(autoFixData) {
+  try {
+    const { autoFixHistory } = await connectDB();
+
+    const autoFixDoc = {
+      timestamp: autoFixData.timestamp || new Date(),
+      deviceId: autoFixData.deviceId,
+      deviceType: autoFixData.deviceType || 'chromecast',
+      issue: autoFixData.issue,
+      mlCategory: autoFixData.mlCategory,
+      originalError: autoFixData.originalError || null,
+      confidence: autoFixData.confidence || null,
+      probabilities: autoFixData.probabilities || [],
+      action: autoFixData.action,
+      params: autoFixData.params || {},
+      description: autoFixData.description,
+      status: autoFixData.status || 'pending',
+      executedCommand: autoFixData.executedCommand || null,
+      output: autoFixData.output || null,
+      errorMessage: autoFixData.errorMessage || null,
+      triggeredBy: autoFixData.triggeredBy || 'system',
+      triggerSource: autoFixData.triggerSource || 'api',
+      createdAt: new Date()
+    };
+
+    const result = await autoFixHistory.insertOne(autoFixDoc);
+    console.log(`Auto-fix history saved: ${result.insertedId}`);
+    return { ...autoFixDoc, _id: result.insertedId };
+  } catch (error) {
+    console.error('Error saving auto-fix history:', error);
+    throw error;
+  }
+}
+
+async function getAutoFixHistoryByDevice(deviceId, limit = 10) {
+  try {
+    const { autoFixHistory } = await connectDB();
+    const history = await autoFixHistory
+      .find({ deviceId: deviceId })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .toArray();
+    return history;
+  } catch (error) {
+    console.error('Error getting auto-fix history:', error);
+    return [];
+  }
+}
+
+async function getAutoFixHistoryByCategory(category, limit = 50) {
+  try {
+    const { autoFixHistory } = await connectDB();
+    const history = await autoFixHistory
+      .find({ mlCategory: category })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .toArray();
+    return history;
+  } catch (error) {
+    console.error('Error getting auto-fix history by category:', error);
+    return [];
+  }
+}
+
+async function updateAutoFixHistoryStatus(historyId, statusData) {
+  try {
+    const { autoFixHistory } = await connectDB();
+
+    const result = await autoFixHistory.updateOne(
+      { _id: new ObjectId(historyId) },
+      {
+        $set: {
+          ...statusData,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    console.log(`Updated auto-fix history status: ${historyId}`);
+    return result;
+  } catch (error) {
+    console.error('Error updating auto-fix history status:', error);
+    return null;
+  }
+}
+
+// ==================== STAFF FUNCTIONS (Relation with Notifications) ====================
+
+/**
+ * Get staff by user ID (linked from login_page)
+ * This connects login_page users to staff records
+ */
+async function getStaffByUserId(userId) {
+  try {
+    const { staff } = await connectDB();
+
+    const staffMember = await staff.findOne({
+      userId: userId,
+      isActive: { $ne: false }
+    });
+
+    if (!staffMember) {
+      return null;
+    }
+
+    return staffMember;
+  } catch (error) {
+    console.error('Error fetching staff by user ID:', error);
+    return null;
+  }
+}
+
+/**
+ * Get staff by ID with notification statistics
+ * Returns staff profile with count of notifications they handled
+ */
+async function getStaffById(staffId) {
+  try {
+    const { staff, notifications } = await connectDB();
+
+    const staffMember = await staff.findOne({
+      _id: new ObjectId(staffId),
+      isActive: { $ne: false }
+    });
+
+    if (!staffMember) {
+      return null;
+    }
+
+    // Get notification statistics for this staff
+    const reportedCount = await notifications.countDocuments({
+      reportedByStaffId: staffId
+    });
+
+    const assignedCount = await notifications.countDocuments({
+      assignedStaffId: staffId
+    });
+
+    const handledCount = await notifications.countDocuments({
+      handledByStaffId: staffId
+    });
+
+    const resolvedCount = await notifications.countDocuments({
+      handledByStaffId: staffId,
+      reportStatus: 'resolved'
+    });
+
+    return {
+      ...staffMember,
+      statistics: {
+        reported: reportedCount,
+        assigned: assignedCount,
+        handled: handledCount,
+        resolved: resolvedCount,
+        resolutionRate: handledCount > 0
+          ? ((resolvedCount / handledCount) * 100).toFixed(2) + '%'
+          : 'N/A'
+      }
+    };
+  } catch (error) {
+    console.error('Error fetching staff by ID:', error);
+    return null;
+  }
+}
+
+/**
+ * Get all notifications assigned to or handled by a staff member
+ */
+async function getStaffNotifications(staffId, options = {}) {
+  try {
+    const { notifications } = await connectDB();
+
+    const query = {
+      $or: [
+        { reportedByStaffId: staffId },
+        { assignedStaffId: staffId },
+        { handledByStaffId: staffId }
+      ]
+    };
+
+    // Add filters if provided
+    if (options.status) {
+      query.reportStatus = options.status;
+    }
+    if (options.priority) {
+      query.priority = options.priority;
+    }
+
+    const sort = options.sort || { createdAt: -1 };
+    const limit = options.limit || 50;
+
+    const notificationList = await notifications
+      .find(query)
+      .sort(sort)
+      .limit(limit)
+      .toArray();
+
+    return notificationList;
+  } catch (error) {
+    console.error('Error getting staff notifications:', error);
+    return [];
+  }
+}
+
+/**
+ * Get notifications with staff details populated
+ * Joins notifications with staff collection to get staff names
+ */
+async function getNotificationsWithStaff(filters = {}) {
+  try {
+    const { notifications, staff } = await connectDB();
+
+    const query = {};
+    if (filters.status) query.reportStatus = filters.status;
+    if (filters.priority) query.priority = filters.priority;
+
+    const notificationList = await notifications
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(filters.limit || 50)
+      .toArray();
+
+    // Populate staff details
+    const staffIds = new Set();
+    notificationList.forEach(notif => {
+      if (notif.reportedByStaffId) staffIds.add(notif.reportedByStaffId.toString());
+      if (notif.assignedStaffId) staffIds.add(notif.assignedStaffId.toString());
+      if (notif.handledByStaffId) staffIds.add(notif.handledByStaffId.toString());
+    });
+
+    // Fetch all staff members in one query
+    const staffMembers = await staff
+      .find({ _id: { $in: Array.from(staffIds).map(id => new ObjectId(id)) } })
+      .toArray();
+
+    const staffMap = {};
+    staffMembers.forEach(s => {
+      staffMap[s._id.toString()] = {
+        id: s._id.toString(),
+        name: s.name,
+        email: s.email,
+        department: s.department,
+        position: s.position
+      };
+    });
+
+    // Attach staff details to notifications
+    const enrichedNotifications = notificationList.map(notif => ({
+      ...notif,
+      reportedByStaff: notif.reportedByStaffId ? staffMap[notif.reportedByStaffId.toString()] : null,
+      assignedStaff: notif.assignedStaffId ? staffMap[notif.assignedStaffId.toString()] : null,
+      handledByStaff: notif.handledByStaffId ? staffMap[notif.handledByStaffId.toString()] : null
+    }));
+
+    return enrichedNotifications;
+  } catch (error) {
+    console.error('Error getting notifications with staff:', error);
+    return [];
+  }
+}
+
 // ==================== EXPORTS ====================
 
 module.exports = {
@@ -1122,5 +1393,17 @@ module.exports = {
   hashPassword,
   hasValidPassword,
   comparePassword,
-  updateUserWithGoogleInfo
+  updateUserWithGoogleInfo,
+
+  // Auto-fix history functions
+  saveAutoFixHistory,
+  getAutoFixHistoryByDevice,
+  getAutoFixHistoryByCategory,
+  updateAutoFixHistoryStatus,
+
+  // Staff functions (relation with notifications)
+  getStaffByUserId,
+  getStaffById,
+  getStaffNotifications,
+  getNotificationsWithStaff
 };

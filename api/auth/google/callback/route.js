@@ -161,17 +161,19 @@ router.get("/", async (req, res) => {
       username: user.username,
       name: user.name || user.username,
       email: user.email,
+      role: user.role || 'guest',  // ✅ TAMBAHKAN ROLE
       provider: user.provider || 'google',
       googleId: user.googleId || null,
       avatar: user.avatar || null,
       iat: Math.floor(Date.now() / 1000),
     };
-    
+
     console.log("Enhanced token payload:", {
       userId: tokenPayload.userId,
       username: tokenPayload.username,
       name: tokenPayload.name,
       email: tokenPayload.email,
+      role: tokenPayload.role,  // ✅ LOG ROLE
       provider: tokenPayload.provider,
       hasGoogleId: !!tokenPayload.googleId,
       hasAvatar: !!tokenPayload.avatar

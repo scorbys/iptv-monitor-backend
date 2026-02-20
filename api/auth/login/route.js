@@ -161,12 +161,13 @@ router.post("/", validateLoginInput, async (req, res) => {
       userId: (authResult.user._id || authResult.user.id || authResult.user.userId).toString(),
       username: authResult.user.username,
       email: authResult.user.email,
+      role: authResult.user.role || 'guest', // Include role in token
       iat: Math.floor(Date.now() / 1000)
     };
 
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "1h" });
 
-    console.log("Login successful for:", authResult.user.username);
+    console.log("Login successful for:", authResult.user.username, "with role:", tokenPayload.role);
 
     // Get dynamic cookie options based on request origin
     const cookieOptions = getCookieOptions(req);
@@ -179,7 +180,8 @@ router.post("/", validateLoginInput, async (req, res) => {
     const userResponse = {
       id: (authResult.user._id || authResult.user.id || authResult.user.userId).toString(),
       username: authResult.user.username,
-      email: authResult.user.email
+      email: authResult.user.email,
+      role: authResult.user.role || 'guest' // Include role in response
     };
 
     const responseData = {

@@ -117,6 +117,13 @@ router.get("/", async (req, res) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
+    console.log('[VERIFY] Decoded token:', {
+      userId: decoded.userId,
+      username: decoded.username,
+      email: decoded.email,
+      role: decoded.role  // Log role
+    });
+
     // Fetch complete user data from database
     let user = null;
     if (decoded.userId) {
@@ -135,6 +142,7 @@ router.get("/", async (req, res) => {
           userId: decoded.userId,
           username: decoded.username,
           email: decoded.email,
+          role: decoded.role || 'guest',  // ✅ Add role
           name: decoded.name,
           avatar: decoded.avatar,
           provider: decoded.provider,
@@ -150,6 +158,7 @@ router.get("/", async (req, res) => {
         userId: decoded.userId,
         username: decoded.username,
         email: decoded.email,
+        role: decoded.role || 'guest',  // ✅ Add role
         name: decoded.name,
         avatar: decoded.avatar,
         provider: decoded.provider,

@@ -225,6 +225,17 @@ app.use("/api/user/password", userPasswordRoute);
 app.use("/api/user/avatar", userAvatarRoute);
 app.use('/api/dashboard', require('./api/dashboard/stats'));
 
+// User management routes (Admin)
+app.use('/api/users', require('./api/users/route'));
+
+// Staff management routes (Admin)
+app.use('/api/staff', require('./api/staff/route'));
+
+// ML Service routes
+app.use('/api/ml/health', require('./api/ml/health/route'));
+app.use('/api/ml/model', require('./api/ml/model/route'));
+app.use('/api/ml/predict', require('./api/ml/predict/route'));
+
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
@@ -258,7 +269,8 @@ app.use('/api/uploads', express.static(path.join(__dirname, 'api/uploads'), {
 
 // ==================== MIDDLEWARE FUNCTIONS ====================
 const authenticateToken = (req, res, next) => {
-  console.log("=== AUTHENTICATE TOKEN START ===");
+  // Reduce logging noise - only log important auth events
+  // console.log("=== AUTHENTICATE TOKEN START ===");
 
   let token = req.cookies.token;
 
@@ -269,14 +281,15 @@ const authenticateToken = (req, res, next) => {
     }
   }
 
-  console.log("Token source:", {
-    fromCookie: !!req.cookies.token,
-    fromHeader: !!req.headers.authorization,
-    tokenPresent: !!token
-  });
+  // Reduce logging noise - only log on errors or important events
+  // console.log("Token source:", {
+  //   fromCookie: !!req.cookies.token,
+  //   fromHeader: !!req.headers.authorization,
+  //   tokenPresent: !!token
+  // });
 
   if (!token) {
-    console.log("No token provided");
+    // No token - silent fail, no need to log every request
     return res.status(401).json({
       success: false,
       error: "Access denied. No token provided.",
@@ -287,12 +300,14 @@ const authenticateToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
-    console.log("Token verified for user:", decoded.username);
-    console.log("Token expires at:", new Date(decoded.exp * 1000));
-    console.log("=== AUTHENTICATE TOKEN END ===");
+    // Only log on successful auth for debugging, remove in production
+    // console.log("Token verified for user:", decoded.username);
     next();
   } catch (error) {
-    console.error("Token verification error:", error);
+    // Log actual errors, not routine auth failures
+    if (error.name !== 'TokenExpiredError' && error.name !== 'JsonWebTokenError') {
+      console.error("Token verification error:", error);
+    }
 
     let errorMessage = "Invalid token";
     let statusCode = 403;
@@ -1282,7 +1297,7 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
 }
 
 // ==================== STATUS CHECK FUNCTIONS ====================
-async function checkAllChannelsStatus() {
+async function checkAllChannelsStatus(skipNotifications = false) {
   try {
     const allChannels = await getAllChannelsFromDB();
     const offlineNotifications = [];
@@ -1302,7 +1317,11 @@ async function checkAllChannelsStatus() {
           onlineCount++;
         }
 
-        if (previousStatus === "online" && result.status === "offline") {
+        // Only add notification if:
+        // 1. Notifications are not skipped (startup mode)
+        // 2. Previous status was explicitly "online"
+        // 3. Channel is now "offline"
+        if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
           offlineNotifications.push({
             source: 'channel',
             message: `${channel.channelName || 'Unknown Channel'} is now offline`,
@@ -1321,7 +1340,8 @@ async function checkAllChannelsStatus() {
           lastChecked: new Date().toISOString(),
         });
 
-        if (previousStatus === "online") {
+        // Only add notification if not skipped and previous status was "online"
+        if (!skipNotifications && previousStatus === "online") {
           offlineNotifications.push({
             source: 'channel',
             message: `${channel.channelName || 'Unknown Channel'} connection failed`,
@@ -1345,7 +1365,7 @@ async function checkAllChannelsStatus() {
   }
 }
 
-async function checkAllTVsStatus() {
+async function checkAllTVsStatus(skipNotifications = false) {
   try {
     const allTVs = await getHospitalityTVs();
     const offlineNotifications = [];
@@ -1367,7 +1387,11 @@ async function checkAllTVsStatus() {
           onlineCount++;
         }
 
-        if (previousStatus === "online" && result.status === "offline") {
+        // Only add notification if:
+        // 1. Notifications are not skipped (startup mode)
+        // 2. Previous status was explicitly "online"
+        // 3. TV is now "offline"
+        if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
           offlineNotifications.push({
             source: 'tv',
             message: `Room ${tv.roomNo} TV is now offline`,
@@ -1389,7 +1413,8 @@ async function checkAllTVsStatus() {
           ipAddress: tv.ipAddress,
         });
 
-        if (previousStatus === "online") {
+        // Only add notification if not skipped and previous status was "online"
+        if (!skipNotifications && previousStatus === "online") {
           offlineNotifications.push({
             source: 'tv',
             message: `Room ${tv.roomNo} TV connection failed`,
@@ -1432,7 +1457,7 @@ async function checkAllTVsStatus() {
   }
 }
 
-async function checkAllChromecastsStatus() {
+async function checkAllChromecastsStatus(skipNotifications = false) {
   try {
     const allDevices = await getChromecastDevices();
     const offlineNotifications = [];
@@ -1452,7 +1477,11 @@ async function checkAllChromecastsStatus() {
           onlineCount++;
         }
 
-        if (previousStatus === true && !result.isOnline) {
+        // Only add notification if:
+        // 1. Notifications are not skipped (startup mode)
+        // 2. Previous status was explicitly true (was online before)
+        // 3. Device is now offline
+        if (!skipNotifications && previousStatus === true && !result.isOnline) {
           offlineNotifications.push({
             source: 'chromecast',
             message: `${device.deviceName || 'Unknown Device'} went offline`,
@@ -1477,7 +1506,8 @@ async function checkAllChromecastsStatus() {
           lastChecked: new Date().toISOString(),
         });
 
-        if (previousStatus === true) {
+        // Only add notification if not skipped and previous status was explicitly true
+        if (!skipNotifications && previousStatus === true) {
           offlineNotifications.push({
             source: 'chromecast',
             message: `${device.deviceName || 'Unknown Device'} check failed`,
@@ -4452,6 +4482,210 @@ app.post("/api/config/chromecast-status-mode", async (req, res) => {
   }
 });
 
+// ==================== CHROMECAST AUTO-FIX ROUTES ====================
+
+// Load ML service and auto-fix utilities
+const { predict } = require('./utils/mlService.util');
+const {
+  createAutoFixLog,
+  executeAutoFix,
+  completeAutoFix
+} = require('./autofix-db');
+
+/**
+ * POST /api/chromecast/:id/auto-fix
+ * Execute auto-fix for a Chromecast device using ML prediction
+ */
+app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
+  try {
+    const { id: deviceId } = req.params;
+    const { text, issue, category } = req.body;
+
+    console.log(`[AutoFix] Processing auto-fix for Chromecast device: ${deviceId}`);
+
+    // 1. Get device information
+    let device;
+    try {
+      device = await getChromecastDeviceById(deviceId);
+    } catch (error) {
+      // Try by device name if ID fails
+      const allDevices = await getChromecastDevices();
+      device = allDevices.find(d =>
+        d.deviceName === deviceId ||
+        d.deviceName === decodeURIComponent(deviceId) ||
+        d.idCast.toString() === deviceId
+      );
+    }
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        error: `Chromecast device not found: ${deviceId}`
+      });
+    }
+
+    // 2. Prepare text for ML prediction
+    const predictionText = text ||
+      `${issue || ''} ${device.deviceName || ''} ${device.status || ''}`.trim() ||
+      `Chromecast ${device.deviceName} issue`;
+
+    // 3. Get ML prediction with recommended fix
+    const mlResult = await predict(predictionText);
+
+    if (!mlResult.recommended_fix) {
+      return res.status(400).json({
+        success: false,
+        error: 'No recommended fix available for this issue',
+        mlPrediction: mlResult
+      });
+    }
+
+    const recommendedFix = mlResult.recommended_fix;
+
+    // 4. Check if action is executable
+    if (!recommendedFix.command) {
+      return res.status(200).json({
+        success: true,
+        autoFixExecuted: false,
+        reason: 'Manual intervention required',
+        mlPrediction: mlResult,
+        recommendedFix: recommendedFix
+      });
+    }
+
+    // 5. Create auto-fix log
+    const notificationId = `chromecast-${device.idCast || device._id}-${Date.now()}`;
+
+    const fixLog = await createAutoFixLog({
+      notificationId: notificationId,
+      mlPredictionId: null,
+      fixType: 'automatic',
+      category: mlResult.predicted_label,
+      action: recommendedFix.action,
+      description: recommendedFix.description,
+      confidence: mlResult.probabilities?.[0]?.probability || 0,
+      createdBy: 'ml'
+    });
+
+    // 6. Mark as executing
+    await executeAutoFix(fixLog.fixId);
+
+    // 7. Execute the actual fix (simulated for now)
+    let fixResult;
+    try {
+      fixResult = {
+        success: true,
+        message: `Executed ${recommendedFix.action} for ${device.deviceName}`,
+        action: recommendedFix.action,
+        deviceId: device.idCast,
+        timestamp: new Date().toISOString(),
+        note: 'This is a simulated fix - implement actual execution logic'
+      };
+
+      await completeAutoFix(fixLog.fixId, {
+        success: fixResult.success,
+        result: fixResult
+      });
+
+    } catch (fixError) {
+      await completeAutoFix(fixLog.fixId, {
+        success: false,
+        errorMessage: fixError.message
+      });
+
+      throw fixError;
+    }
+
+    // 8. Return result
+    res.status(200).json({
+      success: true,
+      autoFixExecuted: true,
+      data: {
+        device: {
+          id: device.idCast || device._id,
+          name: device.deviceName,
+          ip: device.ipAddr,
+          status: device.status
+        },
+        mlPrediction: {
+          category: mlResult.predicted_label,
+          confidence: mlResult.probabilities?.[0]?.probability,
+          cleanedText: mlResult.cleaned_text
+        },
+        executedFix: {
+          action: recommendedFix.action,
+          command: recommendedFix.command,
+          description: recommendedFix.description
+        },
+        fixResult: fixResult,
+        fixId: fixLog.fixId,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('[AutoFix] Error executing Chromecast auto-fix:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to execute auto-fix'
+    });
+  }
+});
+
+/**
+ * GET /api/chromecast/:id/auto-fix?history=true
+ * Get auto-fix history for a Chromecast device
+ */
+app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
+  try {
+    const { history } = req.query;
+
+    if (history !== 'true') {
+      return res.status(400).json({
+        success: false,
+        error: 'Use ?history=true to get auto-fix history'
+      });
+    }
+
+    // Get device first
+    let device;
+    try {
+      device = await getChromecastDeviceById(req.params.id);
+    } catch (error) {
+      const allDevices = await getChromecastDevices();
+      device = allDevices.find(d =>
+        d.deviceName === req.params.id ||
+        d.deviceName === decodeURIComponent(req.params.id) ||
+        d.idCast.toString() === req.params.id
+      );
+    }
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        error: `Chromecast device not found: ${req.params.id}`
+      });
+    }
+
+    // For now, return an empty array with structure
+    res.status(200).json({
+      success: true,
+      data: {
+        deviceId: device.idCast || device._id,
+        deviceName: device.deviceName,
+        autoFixHistory: []
+      }
+    });
+
+  } catch (error) {
+    console.error('[AutoFix] Error getting auto-fix history:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get auto-fix history'
+    });
+  }
+});
+
 // ==================== HEALTH & DEBUG ENDPOINTS ====================
 app.get("/api/health", authenticateToken, async (req, res) => {
   try {
@@ -4595,13 +4829,13 @@ app.listen(port, async () => {
   // Optional status checks without crashing server
   try {
     if (typeof checkAllChannelsStatus === 'function') {
-      await checkAllChannelsStatus();
+      await checkAllChannelsStatus(true); // Skip notifications on startup
     }
     if (typeof checkAllTVsStatus === 'function') {
-      await checkAllTVsStatus();
+      await checkAllTVsStatus(true); // Skip notifications on startup
     }
     if (typeof checkAllChromecastsStatus === 'function') {
-      await checkAllChromecastsStatus();
+      await checkAllChromecastsStatus(true); // Skip notifications on startup
     }
     console.log("Initial status checks completed");
   } catch (error) {

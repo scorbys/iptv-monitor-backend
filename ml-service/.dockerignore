@@ -1,0 +1,50 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in container)
+README.md
+PYTHON_SETUP_GUIDE.md
+ML_*.md
+
+# Development scripts
+start.bat
+start.sh
+
+# Test files
+test_*.py
+tests/
+
+# Data (training data - optional)
+# Uncomment if you don't want training data in container
+# data/*.xlsx
+# data/*.xls
+
+# Environment files (use Railway env vars instead)
+.env.local
+.env.production

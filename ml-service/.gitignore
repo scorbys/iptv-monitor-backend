@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data files (training data - optional)
+# Uncomment if you don't want to track training data
+# data/*.xlsx
+# data/*.xls
+
+# Environment variables (keep template, ignore actual)
+.env.local
+.env.production
