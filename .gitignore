@@ -70,3 +70,14 @@ desktop.ini
 
 # Claude
 .claude/
+
+# ==================== ML MODELS ====================
+# Model files yang terlalu besar untuk GitHub
+*.pkl
+*.h5
+*.pb
+*.pth
+*.ckpt
+*.safetensors
+ml-service/artifacts/
+ml-service/artifacts_backup_old/
