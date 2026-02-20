@@ -21,10 +21,17 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY app/ ./app/
 COPY utils/ ./utils/
 
-# Copy artifacts (trained models)
-# NOTE: Artifacts harus sudah ada sebelum build
-# Jika belum, train model dulu di local
-COPY artifacts/ ./artifacts/
+# Create artifacts directory
+# NOTE: ML model artifacts are large (263MB+) and not included in git
+# For Railway deployment:
+# Option 1: Set up a Railway persistent volume mounted at /app/artifacts
+# Option 2: Use Railway's deployment variables to download artifacts from S3/R2/URL
+# Option 3: SSH into the container and upload artifacts manually
+# Option 4: Build a separate image with artifacts included
+RUN mkdir -p ./artifacts
+
+# Uncomment the following line if you're including artifacts in the build context
+# COPY artifacts/ ./artifacts/
 
 # Create data directory for uploads
 RUN mkdir -p /app/data
