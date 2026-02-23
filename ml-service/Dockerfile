@@ -45,8 +45,9 @@ RUN mkdir -p /app/data
 # Environment variables (defaults - Railway will override PORT)
 ENV ML_SERVICE_HOST=0.0.0.0
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
 
-# Expose port for Railway (Railway will set PORT dynamically)
+# Expose port for Railway - CRITICAL: This tells Railway which port to use
 EXPOSE 8080
 
 # NOTE: Disabled health check temporarily to diagnose connection issues
@@ -54,6 +55,5 @@ EXPOSE 8080
 #     CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://0.0.0.0:{port}/health', timeout=5)" || exit 1
 
 # Run the application
-# IMPORTANT: Must use $PORT (not ${PORT:-8080}) because Railway sets it dynamically
-# Using exec form for proper signal handling
-CMD ["sh", "-c", "sleep 5 && echo '=== Railway ML Service Starting ===' && echo 'PORT:' $PORT && echo 'Host: 0.0.0.0' && echo '================================' && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level debug --timeout-keep-alive 300"]
+# CRITICAL: Use Python to start uvicorn to ensure proper binding
+CMD ["python", "-c", "import os, subprocess, time, sys; time.sleep(5); port = os.getenv('PORT', '8080'); print(f'=== Starting ML Service on port {port} ==='); sys.stdout.flush(); subprocess.run(['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', port, '--workers', '1', '--log-level', 'debug', '--timeout-keep-alive', '300'])"]
