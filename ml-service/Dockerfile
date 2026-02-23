@@ -47,11 +47,8 @@ EXPOSE 8080
 
 # Health check - use Railway's PORT environment variable
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
-    CMD python -c "import urllib.request, os, sys, time; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
+    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
-# Copy startup script
-COPY start.sh .
-RUN chmod +x start.sh
-
-# Run the application using startup script
-CMD ["./start.sh"]
+# Run the application
+# Use sh -c to handle environment variables and add startup delay
+CMD sh -c 'sleep 2 && echo "=== Railway ML Service Starting ===" && echo "PORT: ${PORT:-8080}" && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level info --timeout-keep-alive 300 --loop uvloop --no-access-log'
