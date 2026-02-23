@@ -53,14 +53,14 @@ const CHANNEL_STATUS_CONFIG = {
   RESPONSE_TIME_RANGE: { min: 8, max: 120 }, // Response time in ms
   SIGNAL_LEVEL_RANGE: { min: 60, max: 95 }, // Signal strength in %
   BITRATE_RANGE: { min: 2500, max: 8000 }, // Bitrate in kbps
-  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
+  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds (changed from 2 minutes)
 };
 
 const TV_STATUS_CONFIG = {
   USE_DUMMY_STATUS: true, // Set to false for real connectivity checks
   ONLINE_PROBABILITY: 0.96, // 96% chance of being online
   RESPONSE_TIME_RANGE: { min: 5, max: 150 }, // Response time in ms
-  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
+  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds (changed from 2 minutes)
 };
 
 const CHROMECAST_STATUS_CONFIG = {
@@ -69,7 +69,7 @@ const CHROMECAST_STATUS_CONFIG = {
   SIGNAL_LEVEL_RANGE: { min: -70, max: -20 }, // Signal strength in dBm
   SPEED_RANGE: { min: 10, max: 100 }, // Speed in Mbps
   RESPONSE_TIME_RANGE: { min: 10, max: 200 }, // Response time in ms
-  UPDATE_INTERVAL: 120000, // 2 minutes in milliseconds
+  UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds (changed from 2 minutes)
 };
 
 // ==================== IN-MEMORY STORAGE ====================

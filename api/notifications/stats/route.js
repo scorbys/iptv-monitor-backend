@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { getNotificationStats, NOTIFICATION_CONFIG } = require('../../utils/notificationUtil');
+const { getNotificationStats, NOTIFICATION_CONFIG } = require('../../../utils/notificationUtil');
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
