@@ -37,17 +37,17 @@ RUN mkdir -p ./artifacts
 RUN mkdir -p /app/data
 
 # Environment variables (defaults - Railway will override PORT)
-ENV ML_SERVICE_PORT=8001
+ENV PORT=8080
 ENV ML_SERVICE_HOST=0.0.0.0
 ENV PYTHONUNBUFFERED=1
 
-# Expose port (Railway will use its own port)
-EXPOSE 8001
+# Expose port for Railway
+EXPOSE 8080
 
 # Health check - use Railway's PORT environment variable
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD python -c "import urllib.request, os; port = os.getenv('PORT', '8001'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
+    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', os.getenv('ML_SERVICE_PORT', '8080')); sys.stdout.write(f'Health check on port {port}...'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
 # Run the application
 # Get PORT from environment or use default, then start uvicorn
-CMD sh -c "PORT=\${PORT:-8001} && echo \"=== Railway ML Service Startup ===\" && echo \"PORT env: \${PORT}\" && echo \"Listening on: 0.0.0.0:\${PORT}\" && echo \"================================\" && uvicorn app.main:app --host 0.0.0.0 --port \${PORT} --workers 1 --log-level info --timeout-keep-alive 300"
+CMD sh -c "PORT=\${PORT:-8080} && echo \"=== Railway ML Service Startup ===\" && echo \"PORT env: \${PORT}\" && echo \"HOST: 0.0.0.0\" && echo \"Full URL: http://0.0.0.0:\${PORT}\" && echo \"================================\" && uvicorn app.main:app --host 0.0.0.0 --port \${PORT} --workers 1 --log-level info --timeout-keep-alive 300"

@@ -67,8 +67,12 @@ class TrainResponse(BaseModel):
 async def startup_event():
     """Load model artifacts on startup"""
     import os
-    port = os.getenv("PORT", "8001")
+    # Use the same port logic as config to ensure consistency
+    port = int(os.getenv("PORT", os.getenv("ML_SERVICE_PORT", "8080")))
     logger.info(f"Starting ML service on port {port}...")
+    logger.info(f"Environment PORT: {os.getenv('PORT', 'not set')}")
+    logger.info(f"Using config port: {config.ML_SERVICE_PORT}")
+    logger.info(f"Host: {config.ML_SERVICE_HOST}")
     logger.info(f"CORS origins: {config.CORS_ORIGINS}")
     logger.info(f"Artifacts directory: {config.ARTIFACTS_DIR}")
     logger.info(f"Data directory: {config.DATA_DIR}")
