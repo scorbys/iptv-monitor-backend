@@ -106,6 +106,9 @@ async function saveNotificationToDB(notificationData) {
       // Device identifier for deduplication
       deviceIdentifier: deviceIdentifier,
 
+      // Flag to identify startup notifications (created during system startup)
+      isStartup: notificationData.isStartup || false,
+
       // Staff tracking (will be populated later)
       reportedByStaffId: null,
       assignedStaffId: null,
@@ -382,31 +385,29 @@ async function autoCloseOldNotifications() {
 
 /**
  * Clean up very old notifications to prevent database bloat
- * Archives notifications older than X days
+ * Deletes notifications older than X days
  */
 async function cleanupOldNotifications() {
   try {
     const db = await connectDB();
     const notifications = db.collection('notifications');
 
-    // Archive notifications older than 90 days
-    const archiveDate = new Date();
-    archiveDate.setDate(archiveDate.getDate() - 90);
+    // Delete notifications older than 7 days (matches frontend cleanup)
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - 7);
 
-    // Move to archived collection (or delete if you prefer)
+    // Find old notifications first (for logging)
     const oldNotifications = await notifications.find({
-      createdAt: { $lt: archiveDate },
-      reportStatus: 'closed'
+      createdAt: { $lt: cutoffDate }
     }).toArray();
 
     if (oldNotifications.length > 0) {
-      // Option 1: Delete
+      // Delete old notifications
       const deleteResult = await notifications.deleteMany({
-        createdAt: { $lt: archiveDate },
-        reportStatus: 'closed'
+        createdAt: { $lt: cutoffDate }
       });
 
-      console.log(`[Notification] Cleaned up ${deleteResult.deletedCount} old notifications`);
+      console.log(`[Notification] Cleaned up ${deleteResult.deletedCount} old notifications (older than 7 days)`);
 
       return {
         success: true,
