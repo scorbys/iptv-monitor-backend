@@ -40,10 +40,6 @@ RUN mkdir -p ./artifacts
 # Create data directory for uploads
 RUN mkdir -p /app/data
 
-# Copy startup script
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-
 # Environment variables (defaults - Railway will override PORT)
 ENV ML_SERVICE_PORT=8001
 ENV ML_SERVICE_HOST=0.0.0.0
