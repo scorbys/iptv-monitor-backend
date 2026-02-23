@@ -21,10 +21,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY ml-service/app/ ./app/
 COPY ml-service/utils/ ./utils/
 
-# Copy startup script
-COPY ml-service/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-
 # Create artifacts directory
 # NOTE: ML model artifacts are large (263MB+) and not included in git
 # For Railway deployment:
@@ -52,6 +48,6 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD python -c "import urllib.request, os; port = os.getenv('PORT', '8001'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
-# Run the application using the startup script
-# Railway automatically provides PORT environment variable
-CMD ["/app/start.sh"]
+# Run the application
+# Get PORT from environment or use default, then start uvicorn
+CMD sh -c "PORT=\${PORT:-8001} && echo \"Starting ML Service on port \${PORT}\" && uvicorn app.main:app --host 0.0.0.0 --port \${PORT} --workers 1 --log-level info --timeout-keep-alive 300"
