@@ -125,17 +125,14 @@ const corsOptions = {
       // Allow any Vercel deployment (both production and preview)
       if (hostname.endsWith('.vercel.app')) {
         allowedOrigin = origin;
-        console.log(`[CORS] Allowing Vercel origin: ${origin}`);
       }
       // Allow localhost for development
       else if (hostname === 'localhost' || hostname === '127.0.0.1') {
         allowedOrigin = origin;
-        console.log(`[CORS] Allowing localhost origin: ${origin}`);
       }
       // Allow IP addresses for local network testing
       else if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
         allowedOrigin = origin;
-        console.log(`[CORS] Allowing local network origin: ${origin}`);
       }
       // Default to production if unknown
       else {

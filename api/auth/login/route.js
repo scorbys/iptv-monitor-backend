@@ -44,8 +44,6 @@ const setCorsHeaders = (req, res, next) => {
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Vary", "Origin");
 
-  console.log(`[CORS LOGIN] Allowing origin: ${allowedOrigin}`);
-
   next();
 };
 

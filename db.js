@@ -104,7 +104,6 @@ async function getInternationalChannels() {
   try {
     const { international } = await connectDB();
     const channels = await international.find({}).toArray();
-    console.log(`Retrieved ${channels.length} international channels`);
     return channels;
   } catch (error) {
     console.error('Error fetching international channels:', error);
@@ -116,7 +115,6 @@ async function getLocalChannels() {
   try {
     const { local } = await connectDB();
     const channels = await local.find({}).toArray();
-    console.log(`Retrieved ${channels.length} local channels`);
     return channels;
   } catch (error) {
     console.error('Error fetching local channels:', error);
@@ -130,7 +128,6 @@ async function getHospitalityTVs() {
   try {
     const { hospitality } = await connectDB();
     const tvs = await hospitality.find({}).toArray();
-    console.log(`Retrieved ${tvs.length} hospitality TVs`);
     return tvs;
   } catch (error) {
     console.error('Error fetching hospitality TVs:', error);
@@ -142,11 +139,6 @@ async function getHospitalityTVByRoomNo(roomNo) {
   try {
     const { hospitality } = await connectDB();
     const tv = await hospitality.findOne({ roomNo: roomNo });
-    if (tv) {
-      console.log(`Retrieved TV for room ${roomNo}`);
-    } else {
-      console.log(`No TV found for room ${roomNo}`);
-    }
     return tv;
   } catch (error) {
     console.error(`Error fetching TV for room ${roomNo}:`, error);
@@ -306,10 +298,8 @@ async function getUserByEmailOrUsername(identifier) {
     const user = await Promise.race([queryPromise, timeoutPromise]);
 
     if (user) {
-      console.log('✅ User found:', { id: user._id, username: user.username, email: user.email });
       return user;
     } else {
-      console.log('❌ User not found with identifier:', identifier);
       return null;
     }
   } catch (error) {
@@ -324,8 +314,6 @@ async function getUserByEmailOrUsername(identifier) {
 // getUserById to also provide password status indication
 async function getUserById(userId) {
   try {
-    console.log('Searching for user with ID:', userId);
-
     const { users } = await connectDB();
 
     // Add timeout for database query
@@ -341,14 +329,12 @@ async function getUserById(userId) {
     const user = await Promise.race([queryPromise, timeoutPromise]);
 
     if (user) {
-      console.log('User found by ID:', { id: user._id, username: user.username });
       // Remove password from returned user object
       const { password, ...userWithoutPassword } = user;
       userWithoutPassword.password = hasValidPassword(password) ? "exists" : null;
 
       return userWithoutPassword;
     } else {
-      console.log('User not found with ID:', userId);
       return null;
     }
   } catch (error) {
@@ -858,7 +844,6 @@ async function getChromecastDevices() {
   try {
     const { chromecast } = await connectDB();
     const devices = await chromecast.find({}).toArray();
-    console.log(`Retrieved ${devices.length} Chromecast devices`);
     return devices;
   } catch (error) {
     console.error('Error fetching Chromecast devices:', error);
@@ -883,11 +868,10 @@ async function getChromecastDeviceById(deviceId) {
     }
 
     if (device) {
-      console.log(`Retrieved Chromecast device: ${device.deviceName}`);
+      return device;
     } else {
-      console.log(`No Chromecast device found with ID: ${deviceId}`);
+      return null;
     }
-    return device;
   } catch (error) {
     console.error(`Error fetching Chromecast device ${deviceId}:`, error);
     return null;
@@ -898,11 +882,6 @@ async function getChromecastDeviceByName(deviceName) {
   try {
     const { chromecast } = await connectDB();
     const device = await chromecast.findOne({ deviceName: deviceName });
-    if (device) {
-      console.log(`Retrieved Chromecast device by name: ${deviceName}`);
-    } else {
-      console.log(`No Chromecast device found with name: ${deviceName}`);
-    }
     return device;
   } catch (error) {
     console.error(`Error fetching Chromecast device by name ${deviceName}:`, error);
