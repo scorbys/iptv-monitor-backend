@@ -4,8 +4,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # Railway provides PORT env var, use it. Otherwise fallback to ML_SERVICE_PORT or 8080
-    ML_SERVICE_PORT = int(os.getenv("PORT", os.getenv("ML_SERVICE_PORT", "8080")))
+    # Railway provides PORT env var - MUST use it
+    # Check if PORT is set, otherwise use ML_SERVICE_PORT or 8080
+    port_env = os.getenv("PORT")
+    if port_env:
+        ML_SERVICE_PORT = int(port_env)
+    else:
+        ML_SERVICE_PORT = int(os.getenv("ML_SERVICE_PORT", "8080"))
+
     ML_SERVICE_HOST = os.getenv("ML_SERVICE_HOST", "0.0.0.0")
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
     ARTIFACTS_DIR = os.getenv("ARTIFACTS_DIR", "./artifacts")

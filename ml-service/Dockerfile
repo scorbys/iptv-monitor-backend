@@ -38,17 +38,16 @@ RUN mkdir -p ./artifacts
 RUN mkdir -p /app/data
 
 # Environment variables (defaults - Railway will override PORT)
-ENV PORT=8080
 ENV ML_SERVICE_HOST=0.0.0.0
 ENV PYTHONUNBUFFERED=1
 
-# Expose port for Railway
+# Expose port for Railway (Railway will set PORT dynamically)
 EXPOSE 8080
 
 # Health check - use Railway's PORT environment variable
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
-    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
+    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://0.0.0.0:{port}/health', timeout=5)" || exit 1
 
 # Run the application
-# Use sh -c to handle environment variables and add startup delay
-CMD sh -c 'sleep 2 && echo "=== Railway ML Service Starting ===" && echo "PORT: ${PORT:-8080}" && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level info --timeout-keep-alive 300 --loop uvloop --no-access-log'
+# IMPORTANT: Must use $PORT (not ${PORT:-8080}) because Railway sets it dynamically
+CMD sh -c 'sleep 3 && echo "=== Railway ML Service Starting ===" && echo "PORT: $PORT" && echo "Host: 0.0.0.0" && echo "================================" && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info --timeout-keep-alive 300'
