@@ -1357,8 +1357,15 @@ async function checkAllChannelsStatus(skipNotifications = false) {
       }
     }
 
-    if (offlineNotifications.length > 0 && telegramBot) {
-      await telegramBot.sendOfflineNotification(offlineNotifications);
+    if (offlineNotifications.length > 0) {
+      // Send to Telegram bot
+      if (telegramBot) {
+        await telegramBot.sendOfflineNotification(offlineNotifications);
+      }
+
+      // Save notifications to database
+      const { saveNotificationsBatch } = require('./utils/notificationUtil');
+      await saveNotificationsBatch(offlineNotifications);
     }
 
     const offlineCount = allChannels.length - onlineCount;
@@ -1431,12 +1438,19 @@ async function checkAllTVsStatus(skipNotifications = false) {
       }
     }
 
-    if (offlineNotifications.length > 0 && telegramBot) {
-      try {
-        await telegramBot.sendOfflineNotification(offlineNotifications);
-      } catch (telegramError) {
-        console.error("Failed to send Telegram notifications:", telegramError.message);
+    if (offlineNotifications.length > 0) {
+      // Send to Telegram bot
+      if (telegramBot) {
+        try {
+          await telegramBot.sendOfflineNotification(offlineNotifications);
+        } catch (telegramError) {
+          console.error("Failed to send Telegram notifications:", telegramError.message);
+        }
       }
+
+      // Save notifications to database
+      const { saveNotificationsBatch } = require('./utils/notificationUtil');
+      await saveNotificationsBatch(offlineNotifications);
     }
 
     const offlineCount = allTVs.length - onlineCount;
@@ -1525,12 +1539,19 @@ async function checkAllChromecastsStatus(skipNotifications = false) {
       }
     }
 
-    if (offlineNotifications.length > 0 && telegramBot) {
-      try {
-        await telegramBot.sendOfflineNotification(offlineNotifications);
-      } catch (telegramError) {
-        console.error("Failed to send Telegram notifications:", telegramError.message);
+    if (offlineNotifications.length > 0) {
+      // Send to Telegram bot
+      if (telegramBot) {
+        try {
+          await telegramBot.sendOfflineNotification(offlineNotifications);
+        } catch (telegramError) {
+          console.error("Failed to send Telegram notifications:", telegramError.message);
+        }
       }
+
+      // Save notifications to database
+      const { saveNotificationsBatch } = require('./utils/notificationUtil');
+      await saveNotificationsBatch(offlineNotifications);
     }
 
     const offlineCount = allDevices.length - onlineCount;
