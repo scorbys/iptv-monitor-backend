@@ -36,6 +36,10 @@ RUN mkdir -p ./artifacts
 # Create data directory for uploads
 RUN mkdir -p /app/data
 
+# Copy startup script
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 # Environment variables (defaults - Railway will override PORT)
 ENV ML_SERVICE_PORT=8001
 ENV ML_SERVICE_HOST=0.0.0.0
@@ -48,7 +52,6 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD python -c "import urllib.request, os; port = os.getenv('PORT', '8001'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
-# Run the application
+# Run the application using the startup script
 # Railway automatically provides PORT environment variable
-# Use shell to get PORT or fallback to 8001
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers 1 --log-level info --timeout-keep-alive 300"]
+CMD ["/app/start.sh"]
