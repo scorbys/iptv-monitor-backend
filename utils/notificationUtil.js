@@ -1,12 +1,86 @@
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../autofix-db');
 
+// Configuration
+const NOTIFICATION_CONFIG = {
+  // Cooldown period before creating new notification for same device (minutes)
+  NOTIFICATION_COOLDOWN: 30,
+
+  // Auto-resolve notifications after device is online for X minutes
+  AUTO_RESOLVE_DELAY: 5,
+
+  // Auto-close old resolved notifications after X days
+  AUTO_CLOSE_AFTER_DAYS: 7,
+
+  // Maximum notifications to keep per device
+  MAX_NOTIFICATIONS_PER_DEVICE: 100
+};
+
 /**
- * Save notification to database
- * This ensures all notifications are stored for ML auto-fix processing
+ * Check if notification already exists for this device recently
+ * Prevents duplicate notifications for the same ongoing issue
+ */
+async function checkExistingNotification(deviceIdentifier) {
+  try {
+    const db = await connectDB();
+    const notifications = db.collection('notifications');
+
+    // Check for pending notification for same device within cooldown period
+    const cooldownDate = new Date();
+    cooldownDate.setMinutes(cooldownDate.getMinutes() - NOTIFICATION_CONFIG.NOTIFICATION_COOLDOWN);
+
+    const existingNotification = await notifications.findOne({
+      $or: [
+        { ipAddr: deviceIdentifier },
+        { deviceName: deviceIdentifier },
+        { roomNo: deviceIdentifier }
+      ],
+      reportStatus: { $in: ['pending', 'investigating'] },
+      createdAt: { $gte: cooldownDate }
+    });
+
+    if (existingNotification) {
+      console.log(`[Notification] Existing notification found: ${existingNotification.notificationId}`);
+      return {
+        exists: true,
+        notificationId: existingNotification.notificationId,
+        message: 'Notification already exists for this device'
+      };
+    }
+
+    return { exists: false };
+  } catch (error) {
+    console.error('[Notification] Error checking existing notification:', error);
+    return { exists: false };
+  }
+}
+
+/**
+ * Save notification to database with deduplication
+ * Only creates notification if one doesn't exist for same device recently
  */
 async function saveNotificationToDB(notificationData) {
   try {
+    // Check for existing notification first
+    const deviceIdentifier = notificationData.ipAddr ||
+                           notificationData.deviceName ||
+                           notificationData.roomNo;
+
+    if (!deviceIdentifier) {
+      console.warn('[Notification] No device identifier provided');
+      return { success: false, error: 'No device identifier' };
+    }
+
+    const existing = await checkExistingNotification(deviceIdentifier);
+    if (existing.exists) {
+      return {
+        success: true,
+        skipped: true,
+        notificationId: existing.notificationId,
+        message: existing.message
+      };
+    }
+
     const db = await connectDB();
     const notifications = db.collection('notifications');
 
@@ -28,6 +102,9 @@ async function saveNotificationToDB(notificationData) {
       currentStatus: notificationData.currentStatus || 'offline',
       reportStatus: 'pending', // pending, investigating, resolved, closed
       priority: 'medium', // low, medium, high, critical (will be updated by ML)
+
+      // Device identifier for deduplication
+      deviceIdentifier: deviceIdentifier,
 
       // Staff tracking (will be populated later)
       reportedByStaffId: null,
@@ -214,9 +291,183 @@ async function createAutoFixFromNotification(notificationId, fixType = 'automati
   }
 }
 
+/**
+ * Auto-resolve notifications when device comes back online
+ * Called when device status changes from offline to online
+ */
+async function autoResolveNotification(deviceIdentifier) {
+  try {
+    const db = await connectDB();
+    const notifications = db.collection('notifications');
+
+    // Find pending notifications for this device
+    const result = await notifications.updateMany(
+      {
+        $or: [
+          { ipAddr: deviceIdentifier },
+          { deviceName: deviceIdentifier },
+          { roomNo: deviceIdentifier }
+        ],
+        reportStatus: { $in: ['pending', 'investigating'] },
+        currentStatus: 'offline'
+      },
+      {
+        $set: {
+          currentStatus: 'online',
+          reportStatus: 'resolved',
+          handlingEndTime: new Date(),
+          updatedAt: new Date(),
+          resolvedReason: 'Device recovered automatically'
+        }
+      }
+    );
+
+    if (result.matchedCount > 0) {
+      console.log(`[Notification] Auto-resolved ${result.matchedCount} notification(s) for device: ${deviceIdentifier}`);
+    }
+
+    return {
+      success: true,
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('[Notification] Error auto-resolving notifications:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Auto-close old resolved notifications
+ * Should be run periodically (e.g., daily)
+ */
+async function autoCloseOldNotifications() {
+  try {
+    const db = await connectDB();
+    const notifications = db.collection('notifications');
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - NOTIFICATION_CONFIG.AUTO_CLOSE_AFTER_DAYS);
+
+    const result = await notifications.updateMany(
+      {
+        reportStatus: 'resolved',
+        updatedAt: { $lt: cutoffDate }
+      },
+      {
+        $set: {
+          reportStatus: 'closed',
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    console.log(`[Notification] Auto-closed ${result.modifiedCount} old notifications`);
+
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount
+    };
+  } catch (error) {
+    console.error('[Notification] Error auto-closing old notifications:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Clean up very old notifications to prevent database bloat
+ * Archives notifications older than X days
+ */
+async function cleanupOldNotifications() {
+  try {
+    const db = await connectDB();
+    const notifications = db.collection('notifications');
+
+    // Archive notifications older than 90 days
+    const archiveDate = new Date();
+    archiveDate.setDate(archiveDate.getDate() - 90);
+
+    // Move to archived collection (or delete if you prefer)
+    const oldNotifications = await notifications.find({
+      createdAt: { $lt: archiveDate },
+      reportStatus: 'closed'
+    }).toArray();
+
+    if (oldNotifications.length > 0) {
+      // Option 1: Delete
+      const deleteResult = await notifications.deleteMany({
+        createdAt: { $lt: archiveDate },
+        reportStatus: 'closed'
+      });
+
+      console.log(`[Notification] Cleaned up ${deleteResult.deletedCount} old notifications`);
+
+      return {
+        success: true,
+        deletedCount: deleteResult.deletedCount
+      };
+    }
+
+    return { success: true, deletedCount: 0 };
+  } catch (error) {
+    console.error('[Notification] Error cleaning up old notifications:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Get notification statistics
+ */
+async function getNotificationStats() {
+  try {
+    const db = await connectDB();
+    const notifications = db.collection('notifications');
+
+    const stats = await notifications.aggregate([
+      {
+        $group: {
+          _id: '$reportStatus',
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    const total = await notifications.countDocuments();
+
+    return {
+      success: true,
+      total,
+      byStatus: stats.reduce((acc, stat) => {
+        acc[stat._id] = stat.count;
+        return acc;
+      }, {})
+    };
+  } catch (error) {
+    console.error('[Notification] Error getting stats:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 module.exports = {
+  NOTIFICATION_CONFIG,
   saveNotificationToDB,
   saveNotificationsBatch,
   triggerMLPrediction,
-  createAutoFixFromNotification
+  createAutoFixFromNotification,
+  autoResolveNotification,
+  autoCloseOldNotifications,
+  cleanupOldNotifications,
+  getNotificationStats
 };

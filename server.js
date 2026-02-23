@@ -235,6 +235,7 @@ app.use('/api/ml/predict', require('./api/ml/predict/route'));
 
 // Notifications routes
 app.use('/api/notifications', require('./api/notifications/route'));
+app.use('/api/notifications/stats', require('./api/notifications/stats/route'));
 
 // Auto Fix routes
 app.use('/api/auto-fix', require('./api/auto-fix/route'));
@@ -1318,6 +1319,12 @@ async function checkAllChannelsStatus(skipNotifications = false) {
 
         if (result.status === "online") {
           onlineCount++;
+
+          // Auto-resolve notifications when device comes back online
+          if (previousStatus === "offline" && !skipNotifications) {
+            const { autoResolveNotification } = require('./utils/notificationUtil');
+            await autoResolveNotification(channel.channelName);
+          }
         }
 
         // Only add notification if:
@@ -4867,6 +4874,30 @@ app.listen(port, async () => {
   }
 
   setTimeout(startPeriodicChecks, 5000);
+
+  // Start periodic notification cleanup tasks
+  console.log("Starting periodic notification cleanup tasks...");
+
+  // Auto-close old resolved notifications - run daily
+  setInterval(async () => {
+    try {
+      const { autoCloseOldNotifications } = require('./utils/notificationUtil');
+      await autoCloseOldNotifications();
+    } catch (error) {
+      console.error("Error in periodic notification cleanup:", error);
+    }
+  }, 24 * 60 * 60 * 1000); // Every 24 hours
+
+  // Clean up very old notifications - run weekly
+  setInterval(async () => {
+    try {
+      const { cleanupOldNotifications } = require('./utils/notificationUtil');
+      await cleanupOldNotifications();
+    } catch (error) {
+      console.error("Error in periodic notification archive:", error);
+    }
+  }, 7 * 24 * 60 * 60 * 1000); // Every 7 days
+
   console.log(`Server is running on port ${port}`);
 });
 
