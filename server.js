@@ -233,6 +233,12 @@ app.use('/api/ml/health', require('./api/ml/health/route'));
 app.use('/api/ml/model', require('./api/ml/model/route'));
 app.use('/api/ml/predict', require('./api/ml/predict/route'));
 
+// Notifications routes
+app.use('/api/notifications', require('./api/notifications/route'));
+
+// Auto Fix routes
+app.use('/api/auto-fix', require('./api/auto-fix/route'));
+
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
