@@ -45,8 +45,8 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Health check - use Railway's PORT environment variable
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
-    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', os.getenv('ML_SERVICE_PORT', '8080')); sys.stdout.write(f'Health check on port {port}...'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
+    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
 # Run the application
 # Get PORT from environment or use default, then start uvicorn
