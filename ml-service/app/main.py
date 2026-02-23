@@ -89,7 +89,8 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "IPTV ML Prediction Service",
-        "model_loaded": ml_service.is_trained
+        "model_loaded": ml_service.is_trained,
+        "ready": True
     }
 
 # Get model info

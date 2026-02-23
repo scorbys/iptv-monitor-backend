@@ -50,4 +50,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
 
 # Run the application
 # Get PORT from environment or use default, then start uvicorn
-CMD sh -c "PORT=\${PORT:-8001} && echo \"Starting ML Service on port \${PORT}\" && uvicorn app.main:app --host 0.0.0.0 --port \${PORT} --workers 1 --log-level info --timeout-keep-alive 300"
+CMD sh -c "PORT=\${PORT:-8001} && echo \"=== Railway ML Service Startup ===\" && echo \"PORT env: \${PORT}\" && echo \"Listening on: 0.0.0.0:\${PORT}\" && echo \"================================\" && uvicorn app.main:app --host 0.0.0.0 --port \${PORT} --workers 1 --log-level info --timeout-keep-alive 300"
