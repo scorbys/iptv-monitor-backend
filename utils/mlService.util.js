@@ -2,7 +2,31 @@ const axios = require('axios');
 
 // ML Service configuration
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8001';
-const ML_SERVICE_TIMEOUT = parseInt(process.env.ML_SERVICE_TIMEOUT || '30000'); // 30 seconds
+const ML_SERVICE_TIMEOUT = parseInt(process.env.ML_SERVICE_TIMEOUT || '60000'); // 60 seconds (increased from 30)
+const ML_SERVICE_MAX_RETRIES = 3; // Number of retries for failed requests
+const ML_SERVICE_RETRY_DELAY = 2000; // Delay between retries in ms
+
+// Helper function to retry failed requests
+async function retryWithBackoff(fn, retries = ML_SERVICE_MAX_RETRIES) {
+  try {
+    return await fn();
+  } catch (error) {
+    if (retries <= 0) {
+      throw error;
+    }
+
+    // Don't retry if it's a 4xx error (client error)
+    if (error.response && error.response.status >= 400 && error.response.status < 500) {
+      throw error;
+    }
+
+    // Retry for network errors or 5xx errors
+    console.log(`[ML Service] Request failed, retrying... (${ML_SERVICE_MAX_RETRIES - retries + 1}/${ML_SERVICE_MAX_RETRIES})`);
+
+    await new Promise(resolve => setTimeout(resolve, ML_SERVICE_RETRY_DELAY));
+    return retryWithBackoff(fn, retries - 1);
+  }
+}
 
 // Create axios instance for ML service
 const mlServiceClient = axios.create({
@@ -30,13 +54,27 @@ async function healthCheck() {
  * Get model information
  */
 async function getModelInfo() {
-  try {
-    const response = await mlServiceClient.get('/api/model/info');
-    return response.data;
-  } catch (error) {
-    console.error('Failed to get model info:', error.message);
-    throw new Error('Failed to get model information');
-  }
+  return retryWithBackoff(async () => {
+    try {
+      console.log(`[ML Service] Fetching model info from ${ML_SERVICE_URL}/api/model/info`);
+      const response = await mlServiceClient.get('/api/model/info');
+      console.log('[ML Service] Model info fetched successfully:', response.data);
+      return response.data;
+    } catch (error) {
+      if (error.code === 'ECONNREFUSED') {
+        console.error('[ML Service] Connection refused - ML service may be down');
+        throw new Error('ML Service is not available');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error('[ML Service] Connection timeout - ML service may be starting up');
+        throw new Error('ML Service is temporarily unavailable (timeout)');
+      } else if (error.response) {
+        console.error('[ML Service] Error response:', error.response.status, error.response.data);
+        throw new Error(error.response.data.detail || 'Failed to get model information');
+      }
+      console.error('[ML Service] Failed to get model info:', error.message);
+      throw new Error('Failed to get model information');
+    }
+  });
 }
 
 /**
