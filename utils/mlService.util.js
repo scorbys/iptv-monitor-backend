@@ -57,22 +57,25 @@ async function getModelInfo() {
   return retryWithBackoff(async () => {
     try {
       console.log(`[ML Service] Fetching model info from ${ML_SERVICE_URL}/api/model/info`);
-      const response = await mlServiceClient.get('/api/model/info');
+      const response = await mlServiceClient.get('/api/model/info', {
+        timeout: 30000 // 30 second timeout for model info
+      });
       console.log('[ML Service] Model info fetched successfully:', response.data);
       return response.data;
     } catch (error) {
       if (error.code === 'ECONNREFUSED') {
         console.error('[ML Service] Connection refused - ML service may be down');
-        throw new Error('ML Service is not available');
-      } else if (error.code === 'ETIMEDOUT') {
+        throw new Error('ML Service is not available. Please check if the ML service is running.');
+      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
         console.error('[ML Service] Connection timeout - ML service may be starting up');
-        throw new Error('ML Service is temporarily unavailable (timeout)');
+        throw new Error('ML Service is temporarily unavailable (timeout). Please try again in a moment.');
       } else if (error.response) {
         console.error('[ML Service] Error response:', error.response.status, error.response.data);
-        throw new Error(error.response.data.detail || 'Failed to get model information');
+        const errorMsg = error.response.data?.detail || error.response.data?.message || 'Failed to get model information';
+        throw new Error(`ML Service error (${error.response.status}): ${errorMsg}`);
       }
       console.error('[ML Service] Failed to get model info:', error.message);
-      throw new Error('Failed to get model information');
+      throw new Error(`Failed to connect to ML Service: ${error.message}`);
     }
   });
 }
@@ -103,6 +106,7 @@ async function predict(text) {
  */
 async function trainModel(fileBuffer, filename, sheetName = 'Sheet1') {
   try {
+    console.log(`[ML Service] Starting training for file: ${filename}, sheet: ${sheetName}`);
     const FormData = require('form-data');
     const form = new FormData();
 
@@ -117,16 +121,23 @@ async function trainModel(fileBuffer, filename, sheetName = 'Sheet1') {
         ...form.getHeaders(),
       },
       timeout: 300000, // 5 minutes for training
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
     });
 
+    console.log('[ML Service] Training completed successfully');
     return response.data;
   } catch (error) {
     if (error.response) {
-      console.error('Training failed:', error.response.data);
-      throw new Error(error.response.data.detail || 'Training failed');
+      console.error('[ML Service] Training failed:', error.response.status, error.response.data);
+      const errorMsg = error.response.data?.detail || error.response.data?.message || 'Training failed';
+      throw new Error(`ML Service error (${error.response.status}): ${errorMsg}`);
+    } else if (error.code === 'ECONNABORTED') {
+      console.error('[ML Service] Training timeout - operation took too long');
+      throw new Error('Training timeout. The operation took too long. Please try with a smaller dataset.');
     }
-    console.error('Training error:', error.message);
-    throw new Error('Failed to train model');
+    console.error('[ML Service] Training error:', error.message);
+    throw new Error(`Failed to train model: ${error.message}`);
   }
 }
 

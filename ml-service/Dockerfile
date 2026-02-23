@@ -45,10 +45,10 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8001
 
 # Health check - use Railway's PORT environment variable
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request, os; port = os.getenv('PORT', '8001'); urllib.request.urlopen(f'http://localhost:{port}/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD python -c "import urllib.request, os; port = os.getenv('PORT', '8001'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
 # Run the application
 # Railway automatically provides PORT environment variable
 # Use shell to get PORT or fallback to 8001
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers 1"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers 1 --log-level info --timeout-keep-alive 300"]

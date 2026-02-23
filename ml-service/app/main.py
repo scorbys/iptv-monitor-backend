@@ -66,11 +66,21 @@ class TrainResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Load model artifacts on startup"""
-    logger.info("Starting ML service...")
-    if ml_service.load_artifacts():
-        logger.info("Model artifacts loaded successfully")
-    else:
-        logger.info("No pre-trained model found. Model needs to be trained.")
+    import os
+    port = os.getenv("PORT", "8001")
+    logger.info(f"Starting ML service on port {port}...")
+    logger.info(f"CORS origins: {config.CORS_ORIGINS}")
+    logger.info(f"Artifacts directory: {config.ARTIFACTS_DIR}")
+    logger.info(f"Data directory: {config.DATA_DIR}")
+
+    try:
+        if ml_service.load_artifacts():
+            logger.info("Model artifacts loaded successfully")
+        else:
+            logger.info("No pre-trained model found. Model needs to be trained.")
+    except Exception as e:
+        logger.error(f"Error loading artifacts: {e}")
+        logger.info("Starting without pre-trained model")
 
 # Health check
 @app.get("/health")
@@ -86,7 +96,14 @@ async def health_check():
 @app.get("/api/model/info", response_model=ModelInfoResponse)
 async def get_model_info():
     """Get model information"""
-    return ml_service.get_model_info()
+    try:
+        logger.info("Received request for model info")
+        result = ml_service.get_model_info()
+        logger.info(f"Model info: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error getting model info: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Predict endpoint
 @app.post("/api/predict", response_model=PredictResponse)
@@ -107,15 +124,18 @@ async def predict(request: PredictRequest):
 async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
     """Train model from uploaded Excel file"""
     try:
+        logger.info(f"Received training request - File: {file.filename}, Sheet: {sheet_name}")
+
         # Save uploaded file
         os.makedirs(config.DATA_DIR, exist_ok=True)
         file_path = os.path.join(config.DATA_DIR, file.filename)
 
+        logger.info(f"Saving file to: {file_path}")
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
         # Train model in thread pool to avoid blocking
-        logger.info(f"Training model with file: {file.filename}")
+        logger.info(f"Starting model training with file: {file.filename}")
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -139,7 +159,7 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
         )
 
     except Exception as e:
-        logger.error(f"Training error: {e}")
+        logger.error(f"Training error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Delete model endpoint
