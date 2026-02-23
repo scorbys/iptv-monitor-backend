@@ -32,9 +32,8 @@ README.md
 PYTHON_SETUP_GUIDE.md
 ML_*.md
 
-# Development scripts
+# Development scripts (Windows only)
 start.bat
-start.sh
 
 # Test files
 test_*.py
