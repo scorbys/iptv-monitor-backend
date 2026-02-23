@@ -11,15 +11,19 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY ml-service/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY app/ ./app/
-COPY utils/ ./utils/
+COPY ml-service/app/ ./app/
+COPY ml-service/utils/ ./utils/
+
+# Copy startup script
+COPY ml-service/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 # Create artifacts directory
 # NOTE: ML model artifacts are large (263MB+) and not included in git
