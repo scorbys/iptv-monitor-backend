@@ -1402,6 +1402,12 @@ async function checkAllTVsStatus(skipNotifications = false) {
 
         if (result.status === "online") {
           onlineCount++;
+
+          // Auto-resolve notifications when TV comes back online
+          if (previousStatus === "offline" && !skipNotifications) {
+            const { autoResolveNotification } = require('./utils/notificationUtil');
+            await autoResolveNotification(tv.roomNo || `Room ${tv.roomNo}`);
+          }
         }
 
         // Only add notification if:
@@ -1499,6 +1505,12 @@ async function checkAllChromecastsStatus(skipNotifications = false) {
 
         if (result.isOnline) {
           onlineCount++;
+
+          // Auto-resolve notifications when Chromecast comes back online
+          if (previousStatus === false && !skipNotifications) {
+            const { autoResolveNotification } = require('./utils/notificationUtil');
+            await autoResolveNotification(device.deviceName || `Chromecast-${device.idCast}`);
+          }
         }
 
         // Only add notification if:
