@@ -3,6 +3,12 @@ const router = express.Router();
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../../autofix-db');
 
+// Get database instance - autofix-db returns object with collections
+async function getDatabase() {
+  const db = await connectDB();
+  return db;
+}
+
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
 const jwt = require('jsonwebtoken');
@@ -49,14 +55,14 @@ router.get('/', async (req, res) => {
   try {
     const { status, priority, source, limit = 50, skip = 0 } = req.query;
 
-    const db = await connectDB();
+    const db = await getDatabase();
     const query = {};
 
     if (status) query.reportStatus = status;
     if (priority) query.priority = priority;
     if (source) query.source = source;
 
-    const notifications = await db.collection('notifications')
+    const notifications = await db.notifications
       .find(query)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
@@ -73,7 +79,7 @@ router.get('/', async (req, res) => {
 
     const staffMap = {};
     if (staffIds.size > 0) {
-      const staffMembers = await db.collection('staff')
+      const staffMembers = await db.staff
         .find({ _id: { $in: Array.from(staffIds).map(id => new ObjectId(id)) } })
         .toArray();
 
@@ -95,7 +101,7 @@ router.get('/', async (req, res) => {
       handledByStaff: notif.handledByStaffId ? staffMap[notif.handledByStaffId.toString()] : null,
     }));
 
-    const total = await db.collection('notifications').countDocuments(query);
+    const total = await db.notifications.countDocuments(query);
 
     res.json({
       success: true,
@@ -121,8 +127,8 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const db = await connectDB();
-    const notification = await db.collection('notifications')
+    const db = await getDatabase();
+    const notification = await db.notifications
       .findOne({ notificationId: id });
 
     if (!notification) {
@@ -141,7 +147,7 @@ router.get('/:id', async (req, res) => {
 
     let staffMap = {};
     if (staffIds.length > 0) {
-      const staffMembers = await db.collection('staff')
+      const staffMembers = await db.staff
         .find({ _id: { $in: staffIds } })
         .toArray();
 
@@ -159,7 +165,7 @@ router.get('/:id', async (req, res) => {
     // Populate notes with staff details
     const notesWithStaff = await Promise.all((notification.notes || []).map(async (note) => {
       if (note.staffId) {
-        const staff = await db.collection('staff').findOne({ _id: new ObjectId(note.staffId) });
+        const staff = await db.staff.findOne({ _id: new ObjectId(note.staffId) });
         return {
           ...note,
           staff: staff ? {
@@ -206,10 +212,10 @@ router.post('/:id/assign', async (req, res) => {
       });
     }
 
-    const db = await connectDB();
+    const db = await getDatabase();
 
     // Verify staff exists
-    const staff = await db.collection('staff').findOne({ _id: new ObjectId(staffId) });
+    const staff = await db.staff.findOne({ _id: new ObjectId(staffId) });
     if (!staff) {
       return res.status(404).json({
         success: false,
@@ -227,7 +233,7 @@ router.post('/:id/assign', async (req, res) => {
       updateData.priority = priority;
     }
 
-    const result = await db.collection('notifications').updateOne(
+    const result = await db.notifications.updateOne(
       { notificationId: id },
       { $set: updateData }
     );
@@ -274,14 +280,14 @@ router.post('/:id/notes', async (req, res) => {
       });
     }
 
-    const db = await connectDB();
+    const db = await getDatabase();
 
     // Get staff profile for current user
     let staffId = null;
     let staffName = null;
 
     if (userId) {
-      const staff = await db.collection('staff').findOne({ userId: new ObjectId(userId) });
+      const staff = await db.staff.findOne({ userId: new ObjectId(userId) });
       if (staff) {
         staffId = staff._id;
         staffName = staff.name;
@@ -295,7 +301,7 @@ router.post('/:id/notes', async (req, res) => {
       timestamp: new Date()
     };
 
-    const result = await db.collection('notifications').updateOne(
+    const result = await db.notifications.updateOne(
       { notificationId: id },
       {
         $push: { notes: newNote },
@@ -330,7 +336,7 @@ router.patch('/:id/status', async (req, res) => {
     const { id } = req.params;
     const { reportStatus, currentStatus, handlingStartTime, handlingEndTime } = req.body;
 
-    const db = await connectDB();
+    const db = await getDatabase();
 
     const updateData = { updatedAt: new Date() };
 
@@ -343,7 +349,7 @@ router.patch('/:id/status', async (req, res) => {
     if (reportStatus === 'resolved' || reportStatus === 'closed') {
       const userId = req.user?.id;
       if (userId) {
-        const staff = await db.collection('staff').findOne({ userId: new ObjectId(userId) });
+        const staff = await db.staff.findOne({ userId: new ObjectId(userId) });
         if (staff) {
           updateData.handledByStaffId = staff._id;
         }
@@ -351,7 +357,7 @@ router.patch('/:id/status', async (req, res) => {
       updateData.handlingEndTime = new Date();
     }
 
-    const result = await db.collection('notifications').updateOne(
+    const result = await db.notifications.updateOne(
       { notificationId: id },
       { $set: updateData }
     );

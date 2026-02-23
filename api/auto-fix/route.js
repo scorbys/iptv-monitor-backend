@@ -3,6 +3,12 @@ const router = express.Router();
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../../autofix-db');
 
+// Get database instance - autofix-db returns object with collections
+async function getDatabase() {
+  const db = await connectDB();
+  return db;
+}
+
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
 const jwt = require('jsonwebtoken');
@@ -57,7 +63,7 @@ router.get('/history', async (req, res) => {
       skip = 0
     } = req.query;
 
-    const db = await connectDB();
+    const db = await getDatabase();
     const query = {};
 
     if (notificationId) query.notificationId = notificationId;
@@ -72,7 +78,7 @@ router.get('/history', async (req, res) => {
       ];
     }
 
-    const autoFixLogs = await db.collection('auto_fix_logs')
+    const autoFixLogs = await db.autoFixLogs
       .find(query)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
@@ -89,7 +95,7 @@ router.get('/history', async (req, res) => {
 
     const staffMap = {};
     if (staffIds.size > 0) {
-      const staffMembers = await db.collection('staff')
+      const staffMembers = await db.staff
         .find({ _id: { $in: Array.from(staffIds).map(id => new ObjectId(id)) } })
         .toArray();
 
@@ -108,7 +114,7 @@ router.get('/history', async (req, res) => {
     const notificationIds = [...new Set(autoFixLogs.map(log => log.notificationId))];
     const notificationMap = {};
     if (notificationIds.length > 0) {
-      const notifications = await db.collection('notifications')
+      const notifications = await db.notifications
         .find({ notificationId: { $in: notificationIds } })
         .toArray();
 
@@ -131,7 +137,7 @@ router.get('/history', async (req, res) => {
       notification: notificationMap[log.notificationId] || null
     }));
 
-    const total = await db.collection('auto_fix_logs').countDocuments(query);
+    const total = await db.autoFixLogs.countDocuments(query);
 
     res.json({
       success: true,
@@ -157,11 +163,11 @@ router.get('/stats', async (req, res) => {
   try {
     const { period = '30' } = req.query; // days
 
-    const db = await connectDB();
+    const db = await getDatabase();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(period));
 
-    const stats = await db.collection('auto_fix_logs').aggregate([
+    const stats = await db.autoFixLogs.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate }
@@ -188,7 +194,7 @@ router.get('/stats', async (req, res) => {
     });
 
     // Category breakdown
-    const categoryStats = await db.collection('auto_fix_logs').aggregate([
+    const categoryStats = await db.autoFixLogs.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate }
@@ -209,7 +215,7 @@ router.get('/stats', async (req, res) => {
     ]).toArray();
 
     // Fix type breakdown
-    const fixTypeStats = await db.collection('auto_fix_logs').aggregate([
+    const fixTypeStats = await db.autoFixLogs.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate }
