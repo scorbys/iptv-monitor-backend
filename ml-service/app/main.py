@@ -67,10 +67,9 @@ class TrainResponse(BaseModel):
 async def startup_event():
     """Load model artifacts on startup"""
     import os
-    import time
 
-    # Use the same port logic as config to ensure consistency
-    port = int(os.getenv("PORT", os.getenv("ML_SERVICE_PORT", "8080")))
+    # Use config port (already handles Railway PORT correctly)
+    port = config.ML_SERVICE_PORT
     logger.info(f"Starting ML service on port {port}...")
     logger.info(f"Environment PORT: {os.getenv('PORT', 'not set')}")
     logger.info(f"Using config port: {config.ML_SERVICE_PORT}")
@@ -90,7 +89,7 @@ async def startup_event():
 
     # Give server time to fully initialize
     logger.info("Server initialization complete, ready to accept connections...")
-    await asyncio.sleep(1)  # Small delay to ensure server is ready
+    await asyncio.sleep(2)  # Increased delay to ensure server is ready
 
 # Health check
 @app.get("/health")
