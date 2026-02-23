@@ -191,8 +191,8 @@ class MLModelService:
                 "n_classes": len(self.label_encoder.classes_),
                 "classes": list(self.label_encoder.classes_),
                 "n_features": X_train.shape[1],
-                "train_samples": len(X_train_res),
-                "test_samples": len(X_test)
+                "train_samples": X_train_res.shape[0],  # Use shape[0] for sparse arrays
+                "test_samples": X_test.shape[0]  # Use shape[0] for consistency
             }
 
         except Exception as e:
