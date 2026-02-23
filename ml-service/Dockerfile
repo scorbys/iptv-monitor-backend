@@ -2,6 +2,11 @@
 # Base image with Python 3.10 (smaller than 3.14, more stable)
 FROM python:3.10-slim
 
+# Set labels for better tracking
+LABEL service="iptv-ml-service"
+LABEL version="2.0"
+LABEL description="IPTV ML Prediction Service - Fixed for Railway"
+
 # Set working directory
 WORKDIR /app
 
@@ -44,10 +49,11 @@ ENV PYTHONUNBUFFERED=1
 # Expose port for Railway (Railway will set PORT dynamically)
 EXPOSE 8080
 
-# Health check - use Railway's PORT environment variable
-HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
-    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://0.0.0.0:{port}/health', timeout=5)" || exit 1
+# NOTE: Disabled health check temporarily to diagnose connection issues
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
+#     CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://0.0.0.0:{port}/health', timeout=5)" || exit 1
 
 # Run the application
 # IMPORTANT: Must use $PORT (not ${PORT:-8080}) because Railway sets it dynamically
-CMD sh -c 'sleep 3 && echo "=== Railway ML Service Starting ===" && echo "PORT: $PORT" && echo "Host: 0.0.0.0" && echo "================================" && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info --timeout-keep-alive 300'
+# Using exec form for proper signal handling
+CMD ["sh", "-c", "sleep 5 && echo '=== Railway ML Service Starting ===' && echo 'PORT:' $PORT && echo 'Host: 0.0.0.0' && echo '================================' && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level debug --timeout-keep-alive 300"]
