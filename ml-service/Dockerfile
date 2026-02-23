@@ -8,6 +8,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -45,9 +46,12 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Health check - use Railway's PORT environment variable
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
-    CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
+    CMD python -c "import urllib.request, os, sys, time; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://localhost:{port}/health', timeout=5)" || exit 1
 
-# Run the application
-# Get PORT from environment or use default, then start uvicorn
-CMD sh -c "PORT=\${PORT:-8080} && echo \"=== Railway ML Service Startup ===\" && echo \"PORT env: \${PORT}\" && echo \"HOST: 0.0.0.0\" && echo \"Full URL: http://0.0.0.0:\${PORT}\" && echo \"================================\" && uvicorn app.main:app --host 0.0.0.0 --port \${PORT} --workers 1 --log-level info --timeout-keep-alive 300"
+# Copy startup script
+COPY start.sh .
+RUN chmod +x start.sh
+
+# Run the application using startup script
+CMD ["./start.sh"]
