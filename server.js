@@ -5004,18 +5004,478 @@ app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
       });
     }
 
-    // For now, return an empty array with structure
+    // Get auto-fix logs from database for this chromecast device
+    const connection = await connectDB();
+    const db = connection.client.db('iptv');
+
+    // Find all auto-fix logs for this chromecast
+    const autoFixLogs = await db.collection('auto_fix_logs')
+      .find({
+        notificationId: { $regex: `^chromecast-${device.idCast || device._id}-` }
+      })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray();
+
     res.status(200).json({
       success: true,
       data: {
         deviceId: device.idCast || device._id,
         deviceName: device.deviceName,
-        autoFixHistory: []
+        autoFixHistory: autoFixLogs.map(log => ({
+          fixId: log.fixId,
+          timestamp: log.createdAt,
+          mlCategory: log.category,
+          issue: log.description,
+          action: log.action,
+          description: log.description,
+          status: log.status,
+          confidence: log.confidence,
+          errorMessage: log.errorMessage,
+          output: log.result
+        }))
       }
     });
 
   } catch (error) {
     console.error('[AutoFix] Error getting auto-fix history:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get auto-fix history'
+    });
+  }
+});
+
+// ==================== CHANNEL AUTO-FIX ENDPOINTS ====================
+
+/**
+ * POST /api/channels/:id/auto-fix
+ * Execute auto-fix for a Channel using ML prediction
+ */
+app.post("/api/channels/:id/auto-fix", async (req, res) => {
+  try {
+    const { id: channelId } = req.params;
+    const { text, issue, category } = req.body;
+
+    console.log(`[AutoFix] Processing auto-fix for Channel: ${channelId}`);
+
+    // 1. Get channel information
+    const allChannels = await getAllChannelsFromDB();
+    let channel = allChannels.find(c =>
+      c.id.toString() === channelId ||
+      c.channelNumber.toString() === channelId ||
+      c.slug === channelId ||
+      c.slug === decodeURIComponent(channelId)
+    );
+
+    if (!channel) {
+      return res.status(404).json({
+        success: false,
+        error: `Channel not found: ${channelId}`
+      });
+    }
+
+    // 2. Prepare text for ML prediction
+    const predictionText = text ||
+      `${issue || ''} ${channel.channelName || ''} ${channel.status || ''}`.trim() ||
+      `Channel ${channel.channelName} issue`;
+
+    // 3. Get ML prediction with recommended fix
+    const mlResult = await predict(predictionText);
+
+    if (!mlResult.recommended_fix) {
+      return res.status(400).json({
+        success: false,
+        error: 'No recommended fix available for this issue',
+        mlPrediction: mlResult
+      });
+    }
+
+    const recommendedFix = mlResult.recommended_fix;
+
+    // 4. Check if action is executable
+    if (!recommendedFix.command) {
+      return res.status(200).json({
+        success: true,
+        autoFixExecuted: false,
+        reason: 'Manual intervention required',
+        mlPrediction: mlResult,
+        recommendedFix: recommendedFix
+      });
+    }
+
+    // 5. Create auto-fix log
+    const notificationId = `channel-${channel.id}-${Date.now()}`;
+
+    const fixLog = await createAutoFixLog({
+      notificationId: notificationId,
+      mlPredictionId: null,
+      fixType: 'automatic',
+      category: mlResult.predicted_label,
+      action: recommendedFix.action,
+      description: recommendedFix.description,
+      confidence: mlResult.probabilities?.[0]?.probability || 0,
+      createdBy: 'ml'
+    });
+
+    // 6. Mark as executing
+    await executeAutoFix(fixLog.fixId);
+
+    // 7. Execute the actual fix (simulated for now)
+    let fixResult;
+    try {
+      fixResult = {
+        success: true,
+        message: `Executed ${recommendedFix.action} for ${channel.channelName}`,
+        action: recommendedFix.action,
+        channelId: channel.id,
+        channelNumber: channel.channelNumber,
+        timestamp: new Date().toISOString(),
+        note: 'This is a simulated fix - implement actual execution logic'
+      };
+
+      await completeAutoFix(fixLog.fixId, {
+        success: fixResult.success,
+        result: fixResult
+      });
+
+    } catch (fixError) {
+      await completeAutoFix(fixLog.fixId, {
+        success: false,
+        errorMessage: fixError.message
+      });
+
+      throw fixError;
+    }
+
+    // 8. Return result
+    res.status(200).json({
+      success: true,
+      autoFixExecuted: true,
+      data: {
+        channel: {
+          id: channel.id,
+          channelNumber: channel.channelNumber,
+          name: channel.channelName,
+          ip: channel.ipMulticast,
+          status: channel.status
+        },
+        mlPrediction: {
+          category: mlResult.predicted_label,
+          confidence: mlResult.probabilities?.[0]?.probability,
+          cleanedText: mlResult.cleaned_text
+        },
+        executedFix: {
+          action: recommendedFix.action,
+          command: recommendedFix.command,
+          description: recommendedFix.description
+        },
+        fixResult: fixResult,
+        fixId: fixLog.fixId,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('[AutoFix] Error executing Channel auto-fix:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to execute auto-fix'
+    });
+  }
+});
+
+/**
+ * GET /api/channels/:id/auto-fix?history=true
+ * Get auto-fix history for a Channel
+ */
+app.get("/api/channels/:id/auto-fix", async (req, res) => {
+  try {
+    const { history } = req.query;
+
+    if (history !== 'true') {
+      return res.status(400).json({
+        success: false,
+        error: 'Use ?history=true to get auto-fix history'
+      });
+    }
+
+    // Get channel first
+    const allChannels = await getAllChannelsFromDB();
+    let channel = allChannels.find(c =>
+      c.id.toString() === req.params.id ||
+      c.channelNumber.toString() === req.params.id ||
+      c.slug === req.params.id ||
+      c.slug === decodeURIComponent(req.params.id)
+    );
+
+    if (!channel) {
+      return res.status(404).json({
+        success: false,
+        error: `Channel not found: ${req.params.id}`
+      });
+    }
+
+    // Get auto-fix logs from database for this channel
+    const connection = await connectDB();
+    const db = connection.client.db('iptv');
+
+    // Find all auto-fix logs for this channel
+    const autoFixLogs = await db.collection('auto_fix_logs')
+      .find({
+        notificationId: { $regex: `^channel-${channel.id}-` }
+      })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        channelId: channel.id,
+        channelNumber: channel.channelNumber,
+        channelName: channel.channelName,
+        autoFixHistory: autoFixLogs.map(log => ({
+          fixId: log.fixId,
+          timestamp: log.createdAt,
+          mlCategory: log.category,
+          issue: log.description,
+          action: log.action,
+          description: log.description,
+          status: log.status,
+          confidence: log.confidence,
+          errorMessage: log.errorMessage,
+          output: log.result
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('[AutoFix] Error getting channel auto-fix history:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get auto-fix history'
+    });
+  }
+});
+
+// ==================== TV AUTO-FIX ENDPOINTS ====================
+
+/**
+ * POST /api/hospitality/tvs/:id/auto-fix
+ * Execute auto-fix for a TV device using ML prediction
+ */
+app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
+  try {
+    const { id: tvId } = req.params;
+    const { text, issue, category } = req.body;
+
+    console.log(`[AutoFix] Processing auto-fix for TV device: ${tvId}`);
+
+    // 1. Get TV device information
+    let tv;
+    try {
+      tv = await getHospitalityTVByRoomNo(tvId);
+    } catch (error) {
+      // Try getting all TVs and find by ID/room
+      const allTVs = await getHospitalityTVs();
+      tv = allTVs.find(t =>
+        t._id.toString() === tvId ||
+        t.roomNo.toString() === tvId ||
+        t.roomNo === decodeURIComponent(tvId)
+      );
+    }
+
+    if (!tv) {
+      return res.status(404).json({
+        success: false,
+        error: `TV device not found: ${tvId}`
+      });
+    }
+
+    // 2. Prepare text for ML prediction
+    const predictionText = text ||
+      `${issue || ''} ${tv.roomNo || ''} ${tv.status || ''}`.trim() ||
+      `TV Room ${tv.roomNo} issue`;
+
+    // 3. Get ML prediction with recommended fix
+    const mlResult = await predict(predictionText);
+
+    if (!mlResult.recommended_fix) {
+      return res.status(400).json({
+        success: false,
+        error: 'No recommended fix available for this issue',
+        mlPrediction: mlResult
+      });
+    }
+
+    const recommendedFix = mlResult.recommended_fix;
+
+    // 4. Check if action is executable
+    if (!recommendedFix.command) {
+      return res.status(200).json({
+        success: true,
+        autoFixExecuted: false,
+        reason: 'Manual intervention required',
+        mlPrediction: mlResult,
+        recommendedFix: recommendedFix
+      });
+    }
+
+    // 5. Create auto-fix log
+    const notificationId = `tv-${tv._id}-${Date.now()}`;
+
+    const fixLog = await createAutoFixLog({
+      notificationId: notificationId,
+      mlPredictionId: null,
+      fixType: 'automatic',
+      category: mlResult.predicted_label,
+      action: recommendedFix.action,
+      description: recommendedFix.description,
+      confidence: mlResult.probabilities?.[0]?.probability || 0,
+      createdBy: 'ml'
+    });
+
+    // 6. Mark as executing
+    await executeAutoFix(fixLog.fixId);
+
+    // 7. Execute the actual fix (simulated for now)
+    let fixResult;
+    try {
+      fixResult = {
+        success: true,
+        message: `Executed ${recommendedFix.action} for TV Room ${tv.roomNo}`,
+        action: recommendedFix.action,
+        tvId: tv._id,
+        roomNo: tv.roomNo,
+        timestamp: new Date().toISOString(),
+        note: 'This is a simulated fix - implement actual execution logic'
+      };
+
+      await completeAutoFix(fixLog.fixId, {
+        success: fixResult.success,
+        result: fixResult
+      });
+
+    } catch (fixError) {
+      await completeAutoFix(fixLog.fixId, {
+        success: false,
+        errorMessage: fixError.message
+      });
+
+      throw fixError;
+    }
+
+    // 8. Return result
+    res.status(200).json({
+      success: true,
+      autoFixExecuted: true,
+      data: {
+        tv: {
+          id: tv._id,
+          roomNo: tv.roomNo,
+          brand: tv.brand,
+          model: tv.model,
+          ip: tv.ipAddr,
+          status: tv.status
+        },
+        mlPrediction: {
+          category: mlResult.predicted_label,
+          confidence: mlResult.probabilities?.[0]?.probability,
+          cleanedText: mlResult.cleaned_text
+        },
+        executedFix: {
+          action: recommendedFix.action,
+          command: recommendedFix.command,
+          description: recommendedFix.description
+        },
+        fixResult: fixResult,
+        fixId: fixLog.fixId,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('[AutoFix] Error executing TV auto-fix:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to execute auto-fix'
+    });
+  }
+});
+
+/**
+ * GET /api/hospitality/tvs/:id/auto-fix?history=true
+ * Get auto-fix history for a TV device
+ */
+app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
+  try {
+    const { history } = req.query;
+
+    if (history !== 'true') {
+      return res.status(400).json({
+        success: false,
+        error: 'Use ?history=true to get auto-fix history'
+      });
+    }
+
+    // Get TV first
+    let tv;
+    try {
+      tv = await getHospitalityTVByRoomNo(req.params.id);
+    } catch (error) {
+      const allTVs = await getHospitalityTVs();
+      tv = allTVs.find(t =>
+        t._id.toString() === req.params.id ||
+        t.roomNo.toString() === req.params.id ||
+        t.roomNo === decodeURIComponent(req.params.id)
+      );
+    }
+
+    if (!tv) {
+      return res.status(404).json({
+        success: false,
+        error: `TV device not found: ${req.params.id}`
+      });
+    }
+
+    // Get auto-fix logs from database for this TV
+    const connection = await connectDB();
+    const db = connection.client.db('iptv');
+
+    // Find all auto-fix logs for this TV
+    const autoFixLogs = await db.collection('auto_fix_logs')
+      .find({
+        notificationId: { $regex: `^tv-${tv._id}-` }
+      })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        tvId: tv._id,
+        roomNo: tv.roomNo,
+        brand: tv.brand,
+        model: tv.model,
+        autoFixHistory: autoFixLogs.map(log => ({
+          fixId: log.fixId,
+          timestamp: log.createdAt,
+          mlCategory: log.category,
+          issue: log.description,
+          action: log.action,
+          description: log.description,
+          status: log.status,
+          confidence: log.confidence,
+          errorMessage: log.errorMessage,
+          output: log.result
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('[AutoFix] Error getting TV auto-fix history:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get auto-fix history'
