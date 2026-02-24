@@ -22,7 +22,9 @@ const NOTIFICATION_CONFIG = {
  */
 async function checkExistingNotification(deviceIdentifier) {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
     // Check for pending notification for same device within cooldown period
@@ -81,7 +83,9 @@ async function saveNotificationToDB(notificationData) {
       };
     }
 
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
     // Generate notification ID
@@ -184,7 +188,9 @@ async function triggerMLPrediction(notificationId) {
     const { predict } = require('./mlService.util');
 
     // Get notification details
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notification = await db.collection('notifications')
       .findOne({ notificationId: notificationId });
 
@@ -231,7 +237,9 @@ async function triggerMLPrediction(notificationId) {
  */
 async function createAutoFixFromNotification(notificationId, fixType = 'automatic') {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notification = await db.collection('notifications')
       .findOne({ notificationId: notificationId });
 
@@ -300,7 +308,9 @@ async function createAutoFixFromNotification(notificationId, fixType = 'automati
  */
 async function autoResolveNotification(deviceIdentifier) {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
     // Find pending notifications for this device
@@ -349,7 +359,9 @@ async function autoResolveNotification(deviceIdentifier) {
  */
 async function autoCloseOldNotifications() {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
     const cutoffDate = new Date();
@@ -389,7 +401,9 @@ async function autoCloseOldNotifications() {
  */
 async function cleanupOldNotifications() {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
     // Delete notifications older than 7 days (matches frontend cleanup)
@@ -430,7 +444,9 @@ async function cleanupOldNotifications() {
  */
 async function getNotificationStats() {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
     const stats = await notifications.aggregate([

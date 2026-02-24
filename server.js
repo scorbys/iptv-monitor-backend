@@ -1905,6 +1905,54 @@ Jawab:`;
 function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
   const lowerMsg = userMessage.toLowerCase();
 
+  // Detect general help/information queries
+  const isGeneralHelp =
+    lowerMsg.includes('apa itu') ||
+    lowerMsg.includes('pengenalan') ||
+    lowerMsg.includes('fitur') ||
+    lowerMsg.includes('cara pakai') ||
+    lowerMsg.includes('cara menggunakan') ||
+    lowerMsg.includes('help') ||
+    lowerMsg.includes('bantuan') ||
+    lowerMsg.includes('panduan') ||
+    (lowerMsg.includes('semua') && lowerMsg.includes('menu')) ||
+    lowerMsg === 'halo' ||
+    lowerMsg === 'hi';
+
+  if (isGeneralHelp) {
+    return `Kamu asisten virtual IPTV Monitoring System yang ramah dan informatif.
+
+User bertanya: "${userMessage}"
+
+Berikan pengenalan sistem dengan struktur:
+
+**🎯 IPTV MONITORING SYSTEM**
+Platform monitoring untuk perangkat IPTV hotel dengan fitur:
+
+**📺 MENU UTAMA:**
+• **Dashboard**: Overview statistik semua perangkat (Channel, TV, Chromecast)
+• **Channel**: Monitoring saluran TV - status, signal, bitrate, network stats
+• **Chromecast**: Monitoring perangkat streaming - status, connection, response time
+• **Hospitality**: Monitoring TV IPTV di kamar - status per kamar
+• **ML Dashboard**: Prediksi AI & Auto-Fix suggestion
+• **Notifications**: Pusat alert dan notifikasi masalah
+• **Help**: Dokumentasi dan panduan lengkap
+
+**👥 MANAGEMENT (Admin Only):**
+• **Users**: Manajemen pengguna sistem (role, authentication)
+• **Staff**: Kelola tim teknisi (assignment, performance)
+
+**🔧 FITUR UTAMA:**
+• Real-time monitoring semua device
+• Auto-notifikasi untuk device offline
+• AI-powered error prediction
+• Auto-Fix suggestion otomatis
+• Export data ke CSV
+• Performance analytics
+
+Jawab 4-6 kalimat yang informatif dan friendly. Akhiri dengan ajakan bertanya spesifik tentang fitur yang diminati.`;
+  }
+
   // Detect TV/Chromecast/Channel analysis query
   const isDeviceAnalysis =
     lowerMsg.includes('analisis kondisi') ||
@@ -1944,20 +1992,261 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     }
   }
 
+  // Detect dashboard/overview queries
+  const isDashboardQuery =
+    lowerMsg.includes('dashboard') ||
+    lowerMsg.includes('beranda') ||
+    lowerMsg.includes('overview') ||
+    lowerMsg.includes('statistik') ||
+    lowerMsg.includes('summary');
+
+  if (isDashboardQuery) {
+    return `Kamu asisten IPTV yang menjelaskan fitur Dashboard.
+
+  ${userMessage}
+
+  Dashboard adalah pusat command untuk monitoring sistem. Jelaskan:
+
+  **📊 CARA PENGGUNAAN:**
+  1. Buka menu Dashboard dari sidebar
+  2. Lihat overview cards di bagian atas:
+     - Total Notifications
+     - Active Issues (perlu perhatian)
+     - Recoveries (device pulih)
+     - 24h Alerts
+     - Avg Response Time
+     - Top Issue Category
+  3. Gunakan filter untuk mempersempit data
+  4. Klik refresh untuk update real-time
+
+  **💡 TIPS:**
+  • Auto-refresh setiap 30 menit
+  • Klik device untuk detail lengkap
+  • Gunakan filter untuk analisis spesifik
+
+  Jawab 4-5 kalimat yang praktis dan mudah diikuti.`;
+  }
+
+  // Detect ML Dashboard queries
+  const isMLQuery =
+    lowerMsg.includes('ml') ||
+    lowerMsg.includes('machine learning') ||
+    lowerMsg.includes('ai') ||
+    lowerMsg.includes('artificial intelligence') ||
+    lowerMsg.includes('prediksi') ||
+    lowerMsg.includes('auto-fix') ||
+    lowerMsg.includes('autofix');
+
+  if (isMLQuery) {
+    return `Kamu asisten IPTV yang menjelaskan fitur AI/ML.
+
+  ${userMessage}
+
+  **🤖 ML DASHBOARD:**
+  Dashboard Machine Learning untuk prediksi dan auto-fix:
+
+  **Fitur:**
+  • Error Prediction: Prediksi kategori error berdasarkan pattern
+  • Auto-Fix Suggestions: Rekomendasi perbaikan otomatis
+  • Confidence Score: Tingkat akurasi prediksi (0-100%)
+  • Model Performance: Statistik keandalan model
+
+  **Cara Penggunaan:**
+  1. Buka menu ML Dashboard
+  2. Lihat history prediksi dan confidence score
+  3. Train ulang model jika accuracy drop
+  4. Gunakan prediction API untuk notifikasi baru
+
+  **Manfaat:**
+  • Proaktif deteksi masalah sebelum escalation
+  • Reduce downtime dengan auto-fix
+  • Data-driven decision making
+
+  Jawab 4-5 kalimat yang jelas dan informatif.`;
+  }
+
+  // Detect notifications queries
+  const isNotificationQuery =
+    lowerMsg.includes('notif') ||
+    lowerMsg.includes('alert') ||
+    lowerMsg.includes('warning') ||
+    lowerMsg.includes('alarm');
+
+  if (isNotificationQuery) {
+    return `Kamu asisten IPTV yang menjelaskan sistem Notifications.
+
+  ${userMessage}
+
+  **🔔 NOTIFICATION CENTER:**
+  Pusat semua notifikasi masalah sistem:
+
+  **Kategori Notifikasi:**
+  • Active Issues: Masalah yang sedang terjadi
+  • Recoveries: Device yang sudah pulih (offline→online)
+  • 24h Alerts: Alert dalam 24 jam terakhir
+
+  **Fitur:**
+  • Filter: Source (Channel/TV/Chromecast), Type, Category
+  • Auto-cleanup: Notifikasi lama dihapus otomatis (7 hari)
+  • Export: Download data ke CSV
+  • Assign: Tugaskan ke staff untuk penanganan
+  • Auto-resolve: Otomatis resolve saat device pulih
+
+  **Cara Penggunaan:**
+  1. Buka menu Notifications
+  2. Gunakan filter untuk mempersempit data
+  3. Klik notifikasi untuk detail lengkap
+  4. Assign ke staff atau gunakan auto-fix
+
+  Jawab 4-5 kalimat yang praktis.`;
+  }
+
+  // Detect staff management queries
+  const isStaffQuery =
+    lowerMsg.includes('staff') ||
+    lowerMsg.includes('karyawan') ||
+    lowerMsg.includes('tim') ||
+    lowerMsg.includes('teknisi') ||
+    lowerMsg.includes('assignment') ||
+    lowerMsg.includes('assign');
+
+  if (isStaffQuery) {
+    return `Kamu asisten IPTV yang menjelaskan Staff Management.
+
+  ${userMessage}
+
+  **👥 STAFF MANAGEMENT:**
+  Kelola tim teknisi untuk penanganan masalah:
+
+  **Fitur:**
+  • Staff List: Daftar semua teknisi aktif
+  • Performance Stats:
+    - Total Assigned: Notifikasi yang ditugaskan
+    - Total Resolved: Notifikasi selesai
+    - Success Rate: Persentase keberhasilan
+    - Avg Resolution Time: Rata-rata waktu penyelesaian
+  • Department: IT Support, Engineering
+  • Status: Active/Inactive
+
+  **Cara Penggunaan:**
+  1. Buka menu Staff (Admin only)
+  2. Lihat performa staff di kolom Performance
+  3. Klik Add Staff untuk tambah teknisi baru
+  4. Isi form: Name, Email, Department, Position
+  5. Activate/Deactivate staff dengan tombol edit
+  6. Assign notifikasi ke staff yang sesuai
+
+  Jawab 4-5 kalimat yang informatif.`;
+  }
+
+  // Detect user management queries
+  const isUserQuery =
+    lowerMsg.includes('user') ||
+    lowerMsg.includes('pengguna') ||
+    lowerMsg.includes('akun') ||
+    lowerMsg.includes('account') ||
+    lowerMsg.includes('login') ||
+    lowerMsg.includes('register') ||
+    lowerMsg.includes('authentication') ||
+    lowerMsg.includes('logout');
+
+  if (isUserQuery) {
+    return `Kamu asisten IPTV yang menjelaskan User Management.
+
+  ${userMessage}
+
+  **🔐 USER MANAGEMENT:**
+  Kelola pengguna akses sistem:
+
+  **Fitur:**
+  • User List: Semua pengguna terdaftar
+  • Roles:
+    - Admin: Akses penuh semua fitur
+    - Guest: Akses terbatas (view only)
+  • Profile: Info pengguna (name, email, avatar)
+  • Authentication: Login dan register
+
+  **Cara Penggunaan:**
+  1. Buka menu Users (Admin only)
+  2. Lihat daftar semua user
+  3. Klik Add User untuk buat user baru
+  4. Set role (Admin/Guest)
+  5. Reset password jika lupa
+
+  **Troubleshooting:**
+  • Login failed? Cek username/password
+  • Forgot password? Hubungi admin reset
+  • Access denied? Verify role sudah benar
+  • Session expired? Login kembali
+
+  Jawab 4-5 kalimat yang jelas.`;
+  }
+
+  // Detect help/FAQ queries
+  const isHelpQuery =
+    lowerMsg.includes('help') ||
+    lowerMsg.includes('bantuan') ||
+    lowerMsg.includes('faq') ||
+    lowerMsg.includes('tutorial') ||
+    lowerMsg.includes('panduan') ||
+    lowerMsg.includes('guide') ||
+    lowerMsg.includes('cara');
+
+  if (isHelpQuery) {
+    return `Kamu asisten IPTV yang memberikan panduan penggunaan.
+
+  ${userMessage}
+
+  **📖 HELP CENTER:**
+  Dokumentasi lengkap sistem IPTV Monitoring:
+
+  **Topik Populer:**
+  • Cara monitoring device (Channel, TV, Chromecast)
+  • Troubleshooting device offline
+  • Menggunakan Auto-Fit feature
+  • Export data laporan
+  • Staff management
+  • ML Dashboard dan AI prediction
+
+  **Cara Menggunakan:**
+  1. Buka menu Help dari sidebar
+  2. Cari topik yang diinginkan
+  3. Baca panduan langkah demi langkah
+  4. Ikuti troubleshooting steps
+  5. Hubungi admin jika masih belum解决
+
+  **Resources:**
+  • Quick Start Guide
+  • Feature Documentation
+  • Troubleshooting Common Issues
+  • FAQ (Frequently Asked Questions)
+
+  Jawab 4-5 kalimat yang membantu.`;
+  }
+
   // Standard troubleshooting query
   let knowledgeContext = '';
   if (relatedFAQs.length > 0) {
     const faq = relatedFAQs[0];
-    knowledgeContext = `\nContext: Issue ${faq.issue} biasanya solved dengan ${faq.solutions[0]}.`;
+    knowledgeContext = `\nContext: Issue ${faq.issue} biasanya solved dengan ${faq.solutions[0]}.\nDevice: ${faq.device}\nPriority: ${faq.priority}`;
+  }
+
+  // Add conversation history context if available
+  let historyContext = '';
+  if (conversationHistory && conversationHistory.length > 0) {
+    const lastMessages = conversationHistory.slice(-3).map(msg =>
+      `${msg.role}: ${msg.content}`
+    ).join('\n');
+    historyContext = `\n\nConversation History:\n${lastMessages}`;
   }
 
   return `Kamu teknisi IPTV yang ngobrol santai tapi informatif.
 
-  ${knowledgeContext}
+${knowledgeContext}${historyContext}
 
-  Pertanyaan: "${userMessage}"
+Pertanyaan: "${userMessage}"
 
-  Jawab natural 3-4 kalimat, langsung kasih solusi praktis tanpa format list atau bold berlebihan.`;
+Jawab natural 3-4 kalimat, langsung kasih solusi praktis tanpa format list atau bold berlebihan. Kalau ada context dari conversation history, gunakan itu untuk berikan jawaban yang lebih personalized.`;
 }
 
 async function callGeminiAPI(prompt) {
