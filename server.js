@@ -38,6 +38,7 @@ const GEMINI_CONFIG = {
 // ==================== IMPORTS ====================
 const verifyRoute = require("./api/auth/verify/route");
 const loginRoute = require("./api/auth/login/route");
+const { saveNotificationToDB, autoResolveNotification } = require('./utils/notificationUtil');
 const registerRoute = require("./api/auth/register/route");
 const googleAuthRoute = require("./api/auth/google/route");
 const googleCallbackRoute = require("./api/auth/google/callback/route");
@@ -76,6 +77,33 @@ const CHROMECAST_STATUS_CONFIG = {
 const channelStatus = new Map();
 const tvStatus = new Map();
 const chromecastStatus = new Map();
+
+// ==================== AUTO-NOTIFICATION SYSTEM CACHE ====================
+// Separate caches for tracking device status changes and creating notifications
+const channelsDeviceStatusCache = new Map();
+const tvsDeviceStatusCache = new Map();
+const chromecastDeviceStatusCache = new Map();
+
+// System startup flags to prevent notification spam during server startup
+let channelsSystemStartupComplete = false;
+let tvsSystemStartupComplete = false;
+let chromecastSystemStartupComplete = false;
+
+// Mark systems as startup-complete after 5 minutes
+setTimeout(() => {
+  console.log('[Channels] System startup period complete, notifications now enabled');
+  channelsSystemStartupComplete = true;
+}, 5 * 60 * 1000);
+
+setTimeout(() => {
+  console.log('[Hospitality TVs] System startup period complete, notifications now enabled');
+  tvsSystemStartupComplete = true;
+}, 5 * 60 * 1000);
+
+setTimeout(() => {
+  console.log('[Chromecast] System startup period complete, notifications now enabled');
+  chromecastSystemStartupComplete = true;
+}, 5 * 60 * 1000);
 
 const networkStats = {
   channels: {
@@ -237,13 +265,8 @@ app.use('/api/ml/predict', require('./api/ml/predict/route'));
 app.use('/api/notifications', require('./api/notifications/route'));
 app.use('/api/notifications/stats', require('./api/notifications/stats/route'));
 
-// Auto Fix routes
+// Auto Fix routes (unified)
 app.use('/api/auto-fix', require('./api/auto-fix/route'));
-
-// Device status routes for notifications
-app.use('/api/chromecast', require('./api/chromecast/route'));
-app.use('/api/channels', require('./api/channels/route'));
-app.use('/api/hospitality/tvs', require('./api/hospitality/tvs/route'));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -2385,6 +2408,52 @@ app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, asy
       };
     });
 
+    // ==================== AUTO-NOTIFICATION SYSTEM FOR CHANNELS ====================
+    // Track device status changes and create/resolve notifications automatically
+
+    for (const channel of channelsWithStatus) {
+      const deviceId = `channel-${channel.id}`;
+      const previousStatus = channelsDeviceStatusCache.get(deviceId);
+      const currentStatus = channel.status || 'offline';
+
+      // Check for status changes
+      if (previousStatus && previousStatus !== currentStatus) {
+        if (currentStatus === 'offline' && previousStatus === 'online') {
+          // Device went offline - create notification
+          if (channelsSystemStartupComplete) {
+            await saveNotificationToDB({
+              source: 'channel',
+              title: 'Channel Offline',
+              message: `${channel.channelName} (Channel ${channel.channelNumber}) is offline - ${channel.error || 'Unknown error'}`,
+              deviceName: channel.channelName,
+              ipAddr: channel.ipMulticast,
+              error: channel.error,
+              currentStatus: 'offline',
+              isStartup: false, // Not a startup notification
+            });
+          }
+        } else if (currentStatus === 'online' && previousStatus === 'offline') {
+          // Device recovered - auto-resolve existing notifications
+          await autoResolveNotification(channel.ipMulticast || channel.channelName);
+        }
+      } else if (!previousStatus && currentStatus === 'offline' && channelsSystemStartupComplete) {
+        // First check and device is offline - create startup notification
+        await saveNotificationToDB({
+          source: 'channel',
+          title: 'Channel Offline',
+          message: `${channel.channelName} (Channel ${channel.channelNumber}) is offline - ${channel.error || 'Unknown error'}`,
+          deviceName: channel.channelName,
+          ipAddr: channel.ipMulticast,
+          error: channel.error,
+          currentStatus: 'offline',
+          isStartup: true, // Mark as startup notification
+        });
+      }
+
+      // Update cache
+      channelsDeviceStatusCache.set(deviceId, currentStatus);
+    }
+
     let filteredChannels = channelsWithStatus;
 
     if (status && status !== "all") {
@@ -2876,6 +2945,53 @@ app.get("/api/hospitality/tvs", trackRequestMetrics('hospitality'), authenticate
           new Date(tvStatusData.lastChecked).toLocaleString() : "Never"
       };
     });
+
+    // ==================== AUTO-NOTIFICATION SYSTEM FOR TVs ====================
+    // Track device status changes and create/resolve notifications automatically
+    for (const tv of tvsWithStatus) {
+      const deviceId = `tv-${tv.id}`;
+      const previousStatus = tvsDeviceStatusCache.get(deviceId);
+      const currentStatus = tv.status || 'offline';
+
+      // Check for status changes
+      if (previousStatus && previousStatus !== currentStatus) {
+        if (currentStatus === 'offline' && previousStatus === 'online') {
+          // Device went offline - create notification
+          if (tvsSystemStartupComplete) {
+            await saveNotificationToDB({
+              source: 'tv',
+              title: 'TV Device Offline',
+              message: `Room ${tv.roomNo || 'Unknown'} TV is offline - TV not responding`,
+              deviceName: `Room ${tv.roomNo}`,
+              roomNo: tv.roomNo,
+              ipAddr: tv.ipAddress,
+              error: 'TV not responding',
+              currentStatus: 'offline',
+              isStartup: false, // Not a startup notification
+            });
+          }
+        } else if (currentStatus === 'online' && previousStatus === 'offline') {
+          // Device recovered - auto-resolve existing notifications
+          await autoResolveNotification(tv.ipAddress || tv.roomNo);
+        }
+      } else if (!previousStatus && currentStatus === 'offline' && tvsSystemStartupComplete) {
+        // First check and device is offline - create startup notification
+        await saveNotificationToDB({
+          source: 'tv',
+          title: 'TV Device Offline',
+          message: `Room ${tv.roomNo || 'Unknown'} TV is offline - TV not responding`,
+          deviceName: `Room ${tv.roomNo}`,
+          roomNo: tv.roomNo,
+          ipAddr: tv.ipAddress,
+          error: 'TV not responding',
+          currentStatus: 'offline',
+          isStartup: true, // Mark as startup notification
+        });
+      }
+
+      // Update cache
+      tvsDeviceStatusCache.set(deviceId, currentStatus);
+    }
 
     let filteredTVs = tvsWithStatus;
     if (status && status !== "all") {
@@ -3635,6 +3751,53 @@ app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken,
         model: device.model || "Google Chromecast",
       };
     });
+
+    // ==================== AUTO-NOTIFICATION SYSTEM FOR CHROMECAST ====================
+    // Track device status changes and create/resolve notifications automatically
+    for (const device of devicesWithStatus) {
+      const deviceId = `chromecast-${device.idCast}`;
+      const previousStatus = chromecastDeviceStatusCache.get(deviceId);
+      const currentStatus = device.isOnline ? 'online' : 'offline';
+
+      // Check for status changes
+      if (previousStatus && previousStatus !== currentStatus) {
+        if (currentStatus === 'offline' && previousStatus === 'online') {
+          // Device went offline - create notification
+          if (chromecastSystemStartupComplete) {
+            await saveNotificationToDB({
+              source: 'chromecast',
+              title: 'Chromecast Device Offline',
+              message: `${device.deviceName || 'Unknown'} is offline - ${device.error || 'Device not responding'}`,
+              deviceName: device.deviceName,
+              roomNo: device.roomNr,
+              ipAddr: device.ipAddr,
+              error: device.error || 'Device offline',
+              currentStatus: 'offline',
+              isStartup: false, // Not a startup notification
+            });
+          }
+        } else if (currentStatus === 'online' && previousStatus === 'offline') {
+          // Device recovered - auto-resolve existing notifications
+          await autoResolveNotification(device.ipAddr || device.deviceName || device.roomNr);
+        }
+      } else if (!previousStatus && currentStatus === 'offline' && chromecastSystemStartupComplete) {
+        // First check and device is offline - create startup notification
+        await saveNotificationToDB({
+          source: 'chromecast',
+          title: 'Chromecast Device Offline',
+          message: `${device.deviceName || 'Unknown'} is offline - ${device.error || 'Device not responding'}`,
+          deviceName: device.deviceName,
+          roomNo: device.roomNr,
+          ipAddr: device.ipAddr,
+          error: device.error || 'Device offline',
+          currentStatus: 'offline',
+          isStartup: true, // Mark as startup notification
+        });
+      }
+
+      // Update cache
+      chromecastDeviceStatusCache.set(deviceId, currentStatus);
+    }
 
     let filteredDevices = devicesWithStatus;
     if (status && status !== "all") {

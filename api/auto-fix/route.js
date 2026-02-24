@@ -2,8 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../../autofix-db');
+const autoFixService = require('../../services/autoFixService');
+const { Logger } = require('../../utils/logger.util');
 
-// Get database instance - autofix-db returns object with collections
+const logger = new Logger('AutoFixAPI');
+
+// Get database instance
 async function getDatabase() {
   const db = await connectDB();
   return db;
@@ -50,7 +54,10 @@ router.use(authenticateToken);
 
 // ==================== AUTO FIX HISTORY API ENDPOINTS ====================
 
-// Get auto fix history with filters
+/**
+ * GET /api/auto-fix/history
+ * Get auto fix history with filters (with pagination, staff & notification details)
+ */
 router.get('/history', async (req, res) => {
   try {
     const {
@@ -158,7 +165,10 @@ router.get('/history', async (req, res) => {
   }
 });
 
-// Get auto fix statistics
+/**
+ * GET /api/auto-fix/stats
+ * Get auto fix statistics (with aggregation and period filtering)
+ */
 router.get('/stats', async (req, res) => {
   try {
     const { period = '30' } = req.query; // days
@@ -248,6 +258,156 @@ router.get('/stats', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// ==================== ML INTEGRATED AUTO FIX ENDPOINTS ====================
+
+/**
+ * GET /api/auto-fix/dashboard
+ * Get ML-integrated auto-fix dashboard statistics
+ */
+router.get('/dashboard', async (req, res) => {
+  try {
+    logger.info('Fetching ML-integrated auto-fix dashboard stats');
+
+    const stats = await autoFixService.getAutoFixDashboardStats();
+
+    res.status(200).json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.error('Error getting auto-fix dashboard stats:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get auto-fix dashboard statistics'
+    });
+  }
+});
+
+/**
+ * GET /api/auto-fix/notification/:notificationId
+ * Get notification with ML predictions and auto-fix history
+ */
+router.get('/notification/:notificationId', async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+
+    logger.info(`Fetching ML-integrated auto-fix history for notification: ${notificationId}`);
+
+    const data = await autoFixService.getNotificationWithFixHistory(notificationId);
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        error: 'Notification not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    logger.error('Error getting notification fix history:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get notification fix history'
+    });
+  }
+});
+
+/**
+ * POST /api/auto-fix/trigger
+ * Manually trigger auto-fix for a notification
+ */
+router.post('/trigger', async (req, res) => {
+  try {
+    const { notificationId, action } = req.body;
+
+    if (!notificationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'notificationId is required'
+      });
+    }
+
+    logger.info(`Manual ML-integrated auto-fix trigger for notification: ${notificationId}, action: ${action || 'all'}`);
+
+    const result = await autoFixService.manualTriggerAutoFix(notificationId, action);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: 'ML-integrated auto-fix triggered successfully'
+    });
+  } catch (error) {
+    logger.error('Error triggering ML-integrated auto-fix:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to trigger auto-fix'
+    });
+  }
+});
+
+/**
+ * POST /api/auto-fix/process-pending
+ * Process all pending auto-fixes (cron endpoint with ML)
+ */
+router.post('/process-pending', async (req, res) => {
+  try {
+    // Verify cron authorization (add your auth check here)
+    const authHeader = req.headers.authorization;
+
+    logger.info('Processing ML-integrated pending auto-fixes (cron job)');
+
+    const result = await autoFixService.processPendingAutoFixes();
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: `Processed ${result.processed} ML-integrated pending fixes out of ${result.total} total`
+    });
+  } catch (error) {
+    logger.error('Error processing ML-integrated pending fixes:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process pending fixes'
+    });
+  }
+});
+
+/**
+ * POST /api/auto-fix/process-notification
+ * Process a notification with ML prediction and auto-fix
+ */
+router.post('/process-notification', async (req, res) => {
+  try {
+    const { notification, mlPrediction } = req.body;
+
+    if (!notification || !mlPrediction) {
+      return res.status(400).json({
+        success: false,
+        error: 'notification and mlPrediction are required'
+      });
+    }
+
+    logger.info(`Processing notification with ML: ${notification.id}`);
+
+    const result = await autoFixService.processNotificationWithML(notification, mlPrediction);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: 'Notification processed with ML successfully'
+    });
+  } catch (error) {
+    logger.error('Error processing notification with ML:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process notification with ML'
     });
   }
 });
