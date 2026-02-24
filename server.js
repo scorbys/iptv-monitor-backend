@@ -240,6 +240,11 @@ app.use('/api/notifications/stats', require('./api/notifications/stats/route'));
 // Auto Fix routes
 app.use('/api/auto-fix', require('./api/auto-fix/route'));
 
+// Device status routes for notifications
+app.use('/api/chromecast', require('./api/chromecast/route'));
+app.use('/api/channels', require('./api/channels/route'));
+app.use('/api/hospitality/tvs', require('./api/hospitality/tvs/route'));
+
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);

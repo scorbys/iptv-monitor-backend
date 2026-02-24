@@ -145,7 +145,68 @@ async function createStaff(staffData) {
 }
 
 /**
- * Get all staff members
+ * Calculate stats for a staff member
+ */
+async function calculateStaffStats(staffId) {
+  try {
+    const { connectDB: connectNotifDB } = require('../autofix-db');
+    const db = await connectNotifDB();
+
+    // Get notification stats for this staff
+    const notifications = await db.collection('notifications');
+
+    const totalAssigned = await notifications.countDocuments({
+      assignedStaffId: new ObjectId(staffId)
+    });
+
+    const totalResolved = await notifications.countDocuments({
+      assignedStaffId: new ObjectId(staffId),
+      reportStatus: { $in: ['resolved', 'closed'] }
+    });
+
+    // Calculate success rate
+    const successRate = totalAssigned > 0
+      ? Math.round((totalResolved / totalAssigned) * 100)
+      : 100; // Default to 100% if no assignments
+
+    // Calculate avg resolution time (in minutes)
+    const resolvedNotifications = await notifications.find({
+      assignedStaffId: new ObjectId(staffId),
+      reportStatus: { $in: ['resolved', 'closed'] },
+      handlingStartTime: { $exists: true },
+      handlingEndTime: { $exists: true }
+    }).toArray();
+
+    let avgResolutionTime = 0;
+    if (resolvedNotifications.length > 0) {
+      const totalTime = resolvedNotifications.reduce((sum, notif) => {
+        const start = new Date(notif.handlingStartTime);
+        const end = new Date(notif.handlingEndTime);
+        return sum + (end - start);
+      }, 0);
+      avgResolutionTime = Math.round(totalTime / resolvedNotifications.length / 60000); // Convert to minutes
+    }
+
+    return {
+      totalAssigned,
+      totalResolved,
+      avgResolutionTime,
+      successRate
+    };
+  } catch (error) {
+    console.error('Error calculating staff stats:', error);
+    // Return default stats on error
+    return {
+      totalAssigned: 0,
+      totalResolved: 0,
+      avgResolutionTime: 0,
+      successRate: 100
+    };
+  }
+}
+
+/**
+ * Get all staff members with stats
  */
 async function getAllStaff(filters = {}) {
   try {
@@ -160,10 +221,21 @@ async function getAllStaff(filters = {}) {
 
     const staffList = await staff.find(query).sort({ createdAt: -1 }).toArray();
 
+    // Add stats to each staff member
+    const staffWithStats = await Promise.all(
+      staffList.map(async (member) => {
+        const stats = await calculateStaffStats(member._id.toString());
+        return {
+          ...member,
+          stats
+        };
+      })
+    );
+
     return {
       success: true,
-      staff: staffList,
-      count: staffList.length
+      staff: staffWithStats,
+      count: staffWithStats.length
     };
   } catch (error) {
     console.error('Error fetching staff:', error);
@@ -404,5 +476,6 @@ module.exports = {
   updateStaff,
   deleteStaff,
   getStaffStats,
+  calculateStaffStats,
   closeConnection
 };
