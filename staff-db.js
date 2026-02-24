@@ -149,11 +149,11 @@ async function createStaff(staffData) {
  */
 async function calculateStaffStats(staffId) {
   try {
-    const { connectDB: connectNotifDB } = require('../autofix-db');
-    const db = await connectNotifDB();
+    const { connectDB } = require('./autofix-db');
+    const db = await connectDB();
 
-    // Get notification stats for this staff
-    const notifications = await db.collection('notifications');
+    // Get notification stats for this staff (db.notifications is already a collection)
+    const notifications = db.notifications;
 
     const totalAssigned = await notifications.countDocuments({
       assignedStaffId: new ObjectId(staffId)
@@ -221,12 +221,24 @@ async function getAllStaff(filters = {}) {
 
     const staffList = await staff.find(query).sort({ createdAt: -1 }).toArray();
 
-    // Add stats to each staff member
+    // Add stats to each staff member and project necessary fields
     const staffWithStats = await Promise.all(
       staffList.map(async (member) => {
         const stats = await calculateStaffStats(member._id.toString());
         return {
-          ...member,
+          _id: member._id.toString(),
+          userId: member.userId ? member.userId.toString() : null,
+          name: member.name,
+          email: member.email,
+          phone: member.phone,
+          department: member.department,
+          position: member.position,
+          isActive: member.isActive,
+          avatar: member.avatar || null,
+          employeeId: member.employeeId || null,
+          joinedDate: member.joinedDate,
+          createdAt: member.createdAt,
+          updatedAt: member.updatedAt,
           stats
         };
       })
@@ -461,6 +473,110 @@ async function closeConnection() {
   }
 }
 
+/**
+ * Get all active staff available for assignment
+ */
+async function getActiveStaffForAssignment() {
+  try {
+    const { staff } = await connectDB();
+
+    const activeStaff = await staff
+      .find({ isActive: true })
+      .toArray();
+
+    // Get current stats for each staff member
+    const staffWithStats = [];
+    for (const staffMember of activeStaff) {
+      const stats = await calculateStaffStats(staffMember._id.toString());
+      staffWithStats.push({
+        ...staffMember,
+        stats: stats
+      });
+    }
+
+    return staffWithStats;
+  } catch (error) {
+    console.error('Error getting active staff for assignment:', error);
+    return [];
+  }
+}
+
+/**
+ * Update staff statistics based on action
+ * @param {string} staffId - Staff ID
+ * @param {string} action - Action type: 'assigned', 'resolved', 'failed'
+ */
+async function updateStaffStats(staffId, action) {
+  try {
+    const { staff } = await connectDB();
+    const { ObjectId } = require('mongodb');
+
+    const updateFields = {
+      updatedAt: new Date()
+    };
+
+    switch (action) {
+      case 'assigned':
+        // Increment total assigned counter
+        await staff.updateOne(
+          { _id: new ObjectId(staffId) },
+          {
+            $inc: {
+              'stats.totalAssigned': 1
+            },
+            $set: updateFields
+          }
+        );
+        console.log(`Staff ${staffId} assigned - totalAssigned incremented`);
+        break;
+
+      case 'resolved':
+        // Increment total resolved and update success rate
+        const staffMember = await staff.findOne({ _id: new ObjectId(staffId) });
+
+        if (staffMember && staffMember.stats) {
+          const totalAssigned = staffMember.stats.totalAssigned || 0;
+          const totalResolved = (staffMember.stats.totalResolved || 0) + 1;
+          const newSuccessRate = totalAssigned > 0
+            ? Math.round((totalResolved / totalAssigned) * 100)
+            : 100;
+
+          await staff.updateOne(
+            { _id: new ObjectId(staffId) },
+            {
+              $set: {
+                'stats.totalResolved': totalResolved,
+                'stats.successRate': newSuccessRate,
+                ...updateFields
+              }
+            }
+          );
+          console.log(`Staff ${staffId} resolved - totalResolved: ${totalResolved}, successRate: ${newSuccessRate}%`);
+        }
+        break;
+
+      case 'failed':
+        // Just update timestamp, don't decrement anything
+        await staff.updateOne(
+          { _id: new ObjectId(staffId) },
+          {
+            $set: updateFields
+          }
+        );
+        console.log(`Staff ${staffId} fix failed - timestamp updated`);
+        break;
+
+      default:
+        console.log(`Unknown action: ${action}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating staff stats:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 process.on('SIGINT', closeConnection);
 process.on('SIGTERM', closeConnection);
 process.on('beforeExit', closeConnection);
@@ -477,5 +593,7 @@ module.exports = {
   deleteStaff,
   getStaffStats,
   calculateStaffStats,
+  getActiveStaffForAssignment,
+  updateStaffStats,
   closeConnection
 };

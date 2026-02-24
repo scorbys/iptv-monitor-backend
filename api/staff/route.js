@@ -213,6 +213,54 @@ router.put('/:staffId', verifyToken, requireAdmin, async (req, res) => {
 });
 
 /**
+ * PATCH /api/staff/:staffId
+ * Partial update staff (Admin only)
+ */
+router.patch('/:staffId', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const { staffId } = req.params;
+    const {
+      name,
+      email,
+      phone,
+      department,
+      position,
+      userId,
+      isActive
+    } = req.body;
+
+    // Prepare update data (partial update)
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (email !== undefined) updateData.email = email;
+    if (phone !== undefined) updateData.phone = phone;
+    if (department !== undefined) updateData.department = department;
+    if (position !== undefined) updateData.position = position;
+    if (userId !== undefined) updateData.userId = userId;
+    if (isActive !== undefined) updateData.isActive = isActive;
+    updateData.updatedBy = req.user.userId;
+
+    const result = await updateStaff(staffId, updateData);
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    res.json({
+      success: true,
+      message: 'Staff updated successfully',
+      staff: result.staff
+    });
+  } catch (error) {
+    console.error('Error updating staff:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update staff'
+    });
+  }
+});
+
+/**
  * DELETE /api/staff/:staffId
  * Delete staff (Admin only)
  */

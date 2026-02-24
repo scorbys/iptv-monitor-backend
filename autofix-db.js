@@ -725,6 +725,38 @@ process.on('SIGINT', closeConnection);
 process.on('SIGTERM', closeConnection);
 process.on('beforeExit', closeConnection);
 
+/**
+ * Update notification with handled by staff info
+ */
+async function updateNotificationStaffHandled(notificationId, staffInfo) {
+  try {
+    const db = await connectDB();
+
+    const updateData = {
+      handledByStaff: {
+        id: staffInfo.id,
+        name: staffInfo.name,
+        email: staffInfo.email,
+        department: staffInfo.department
+      },
+      handledAt: new Date(),
+      reportStatus: 'resolved'
+    };
+
+    const result = await db.collection('notifications').updateOne(
+      { notificationId: notificationId },
+      { $set: updateData }
+    );
+
+    console.log(`Notification ${notificationId} marked as handled by ${staffInfo.name}`);
+    return { success: true, result };
+
+  } catch (error) {
+    console.error('Error updating notification staff handled:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 // ==================== EXPORTS ====================
 
 module.exports = {
@@ -740,6 +772,7 @@ module.exports = {
   assignNotificationToStaff,
   updateNotificationHandlingByStaff,
   addNoteToNotification,
+  updateNotificationStaffHandled,
 
   // ML Prediction functions
   saveMLPrediction,

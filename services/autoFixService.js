@@ -13,6 +13,11 @@ const {
   getAutoFixStats
 } = require('../autofix-db');
 
+const {
+  getActiveStaffForAssignment,
+  updateStaffStats
+} = require('../staff-db');
+
 /**
  * Auto-Fix Service for ML-based notification remediation
  * Integrates with ML model to predict and automatically fix issues
@@ -197,10 +202,26 @@ async function processNotificationWithML(notification, mlPrediction) {
       priority: notification.priority || 'medium'
     };
 
-    // 2. Save enhanced notification to database
+    // 2. Assign random active staff to notification
+    const assignedStaff = await assignRandomStaff();
+
+    if (assignedStaff) {
+      enhancedNotification.assignedStaffId = assignedStaff._id;
+      enhancedNotification.assignedStaff = {
+        id: assignedStaff._id.toString(),
+        name: assignedStaff.name,
+        email: assignedStaff.email,
+        department: assignedStaff.department
+      };
+      enhancedNotification.assignedAt = new Date();
+
+      console.log(`Notification ${notification.id} assigned to staff: ${assignedStaff.name}`);
+    }
+
+    // 3. Save enhanced notification to database
     await saveNotification(enhancedNotification);
 
-    // 3. Save ML prediction
+    // 4. Save ML prediction
     const predictionDoc = await saveMLPrediction({
       notificationId: notification.id,
       inputText: `${notification.title} ${notification.message} ${notification.error || ''}`,
@@ -239,7 +260,13 @@ async function processNotificationWithML(notification, mlPrediction) {
       };
     }
 
-    // 6. Create auto-fix logs for available actions
+    // 6. Calculate success rate for staff (if assigned)
+    let staffSuccessRate = null;
+    if (assignedStaff) {
+      staffSuccessRate = await calculateStaffSuccessRate(assignedStaff._id.toString());
+    }
+
+    // 7. Create auto-fix logs for available actions
     const fixResults = [];
 
     for (const action of categoryFixes.actions) {
@@ -251,19 +278,24 @@ async function processNotificationWithML(notification, mlPrediction) {
         action: action.command,
         description: action.description,
         confidence: action.confidence * confidence, // Combined confidence
-        createdBy: 'ml'
+        createdBy: 'ml',
+        triggeredBy: assignedStaff ? assignedStaff._id.toString() : null,
+        staffName: assignedStaff ? assignedStaff.name : null,
+        successRate: staffSuccessRate
       });
 
       fixResults.push({
         action: action.command,
         description: action.description,
         isAutomatic: action.isAutomatic,
-        fixId: fixLog.fixId
+        fixId: fixLog.fixId,
+        staffName: assignedStaff ? assignedStaff.name : null,
+        successRate: staffSuccessRate
       });
 
       // If automatic, execute immediately
       if (action.isAutomatic) {
-        await executeAutomaticFix(fixLog.fixId, notification, action);
+        await executeAutomaticFix(fixLog.fixId, notification, action, assignedStaff);
       }
     }
 
@@ -285,7 +317,7 @@ async function processNotificationWithML(notification, mlPrediction) {
 /**
  * Execute automatic fix action
  */
-async function executeAutomaticFix(fixId, notification, action) {
+async function executeAutomaticFix(fixId, notification, action, assignedStaff = null) {
   try {
     console.log(`Executing automatic fix: ${fixId} - ${action.command}`);
 
@@ -295,10 +327,23 @@ async function executeAutomaticFix(fixId, notification, action) {
     // Simulate fix execution (replace with actual commands)
     const result = await performFixAction(notification, action);
 
-    // Mark as complete
+    // Update staff stats if fix is successful
+    if (result.success && notification.assignedStaffId) {
+      await updateStaffStats(notification.assignedStaffId, 'resolved');
+      console.log(`Updated stats for staff ${notification.assignedStaffId} - issue resolved`);
+    }
+
+    // Update notification with handledByStaff
+    if (result.success && notification.assignedStaff) {
+      const { updateNotificationStaffHandled } = require('../autofix-db');
+      await updateNotificationStaffHandled(notification.id, notification.assignedStaff);
+    }
+
+    // Mark as complete with staff info
     await completeAutoFix(fixId, {
       success: result.success,
-      result: result.data
+      result: result.data,
+      executedBy: assignedStaff ? assignedStaff._id.toString() : 'system'
     });
 
     return result;
@@ -306,10 +351,16 @@ async function executeAutomaticFix(fixId, notification, action) {
   } catch (error) {
     console.error('Error executing automatic fix:', error);
 
+    // Update staff stats if fix failed
+    if (notification.assignedStaffId) {
+      await updateStaffStats(notification.assignedStaffId, 'failed');
+    }
+
     // Mark as failed
     await completeAutoFix(fixId, {
       success: false,
-      errorMessage: error.message
+      errorMessage: error.message,
+      executedBy: assignedStaff ? assignedStaff._id.toString() : 'system'
     });
 
     throw error;
@@ -542,6 +593,14 @@ async function manualTriggerAutoFix(notificationId, actionOverride = null) {
         throw new Error(`Action not found: ${actionOverride}`);
       }
 
+      // Calculate success rate for assigned staff (if any)
+      let staffSuccessRate = null;
+      let staffName = null;
+      if (notification.assignedStaffId) {
+        staffSuccessRate = await calculateStaffSuccessRate(notification.assignedStaffId);
+        staffName = notification.assignedStaff?.name || null;
+      }
+
       const fixLog = await createAutoFixLog({
         notificationId: notificationId,
         mlPredictionId: mlPrediction.predictionId,
@@ -550,7 +609,9 @@ async function manualTriggerAutoFix(notificationId, actionOverride = null) {
         action: action.command,
         description: action.description,
         confidence: action.confidence,
-        createdBy: 'user'
+        createdBy: 'user',
+        staffName: staffName,
+        successRate: staffSuccessRate
       });
 
       const result = await executeAutomaticFix(fixLog.fixId, notification, action);
@@ -559,7 +620,9 @@ async function manualTriggerAutoFix(notificationId, actionOverride = null) {
         success: true,
         fixId: fixLog.fixId,
         action: action.command,
-        result
+        result,
+        staffName,
+        successRate: staffSuccessRate
       };
     }
 
@@ -572,6 +635,95 @@ async function manualTriggerAutoFix(notificationId, actionOverride = null) {
   }
 }
 
+/**
+ * Assign random active staff to notification
+ * Implements round-robin assignment based on workload
+ */
+async function assignRandomStaff() {
+  try {
+    const activeStaff = await getActiveStaffForAssignment();
+
+    if (!activeStaff || activeStaff.length === 0) {
+      console.log('No active staff available for assignment');
+      return null;
+    }
+
+    // Select staff with least workload (round-robin style)
+    // Sort by totalAssigned (ascending) to distribute load evenly
+    const sortedStaff = activeStaff.sort((a, b) => {
+      const aAssigned = a.stats?.totalAssigned || 0;
+      const bAssigned = b.stats?.totalAssigned || 0;
+      return aAssigned - bAssigned;
+    });
+
+    // Pick the staff with least assignments
+    const selectedStaff = sortedStaff[0];
+
+    // Increment totalAssigned for this staff
+    await updateStaffStats(selectedStaff._id.toString(), 'assigned');
+
+    console.log(`Assigned notification to staff: ${selectedStaff.name} (current workload: ${selectedStaff.stats?.totalAssigned || 0})`);
+
+    return selectedStaff;
+
+  } catch (error) {
+    console.error('Error assigning random staff:', error);
+    return null;
+  }
+}
+
+/**
+ * Calculate staff success rate based on historical performance
+ * Returns percentage (0-100)
+ */
+async function calculateStaffSuccessRate(staffId) {
+  try {
+    const { getAutoFixLogsByNotification } = require('../autofix-db');
+    const { getNotificationsByStaffId } = require('../notification-db');
+
+    // Get all notifications handled by this staff
+    const staffNotifications = await getNotificationsByStaffId(staffId);
+
+    if (!staffNotifications || staffNotifications.length === 0) {
+      // No history yet, return null or default
+      return null;
+    }
+
+    // Get auto-fix logs for all notifications handled by this staff
+    let totalFixes = 0;
+    let successfulFixes = 0;
+
+    for (const notification of staffNotifications) {
+      const fixLogs = await getAutoFixLogsByNotification(notification.id);
+
+      for (const log of fixLogs) {
+        // Only count completed fixes (not pending or executing)
+        if (log.status === 'success' || log.status === 'failed') {
+          totalFixes++;
+          if (log.status === 'success') {
+            successfulFixes++;
+          }
+        }
+      }
+    }
+
+    if (totalFixes === 0) {
+      return null;
+    }
+
+    // Calculate success rate as percentage
+    const successRate = (successfulFixes / totalFixes) * 100;
+
+    console.log(`Staff ${staffId} success rate: ${successRate.toFixed(1)}% (${successfulFixes}/${totalFixes} fixes)`);
+
+    return successRate;
+
+  } catch (error) {
+    console.error('Error calculating staff success rate:', error);
+    return null;
+  }
+}
+
 module.exports = {
   processNotificationWithML,
   executeAutomaticFix,
@@ -579,5 +731,7 @@ module.exports = {
   processPendingAutoFixes,
   getAutoFixDashboardStats,
   manualTriggerAutoFix,
+  assignRandomStaff,
+  calculateStaffSuccessRate,
   FIX_ACTIONS
 };
