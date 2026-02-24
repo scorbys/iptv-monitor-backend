@@ -55,7 +55,10 @@ setTimeout(() => {
 // Get all chromecast devices with status
 router.get('/', async (req, res) => {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    // Get the MongoDB client directly
+    const client = connection.client;
+    const db = client.db('iptv');
 
     const chromecasts = await db.collection('chromecast')
       .find({})

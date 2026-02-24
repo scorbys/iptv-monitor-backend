@@ -55,7 +55,10 @@ setTimeout(() => {
 // Get all channels with status
 router.get('/', async (req, res) => {
   try {
-    const db = await connectDB();
+    const connection = await connectDB();
+    // Get the MongoDB client directly (for future use when fetching from DB)
+    const client = connection.client;
+    const db = client.db('iptv');
 
     // For demo, return mock channel data
     // In real implementation, this would fetch from a channels collection
