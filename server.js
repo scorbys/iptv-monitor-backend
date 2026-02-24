@@ -16,6 +16,7 @@ const {
   getChromecastDeviceById,
   createUser,
   authenticateUser,
+  connectDB,
 } = require("./db");
 
 // ==================== APP CONFIGURATION ====================
@@ -5168,8 +5169,8 @@ app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
     }
 
     // Get auto-fix logs from database for this chromecast device
-    const connection = await connectDB();
-    const db = connection.client.db('iptv');
+    const { client } = await connectDB();
+    const db = client.db('iptv');
 
     // Find all auto-fix logs for this chromecast
     const autoFixLogs = await db.collection('auto_fix_logs')
@@ -5380,8 +5381,8 @@ app.get("/api/channels/:id/auto-fix", async (req, res) => {
     }
 
     // Get auto-fix logs from database for this channel
-    const connection = await connectDB();
-    const db = connection.client.db('iptv');
+    const { client } = await connectDB();
+    const db = client.db('iptv');
 
     // Find all auto-fix logs for this channel
     const autoFixLogs = await db.collection('auto_fix_logs')
@@ -5603,8 +5604,8 @@ app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
     }
 
     // Get auto-fix logs from database for this TV
-    const connection = await connectDB();
-    const db = connection.client.db('iptv');
+    const { client } = await connectDB();
+    const db = client.db('iptv');
 
     // Find all auto-fix logs for this TV
     const autoFixLogs = await db.collection('auto_fix_logs')
