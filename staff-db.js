@@ -146,6 +146,9 @@ async function createStaff(staffData) {
 
 /**
  * Calculate stats for a staff member
+ * NOTE: This function is kept for backward compatibility but should NOT be used
+ * Stats are now stored in the database and updated in real-time by notificationUtil.js
+ * Use getAllStaff() which returns the stored stats directly
  */
 async function calculateStaffStats(staffId) {
   try {
@@ -169,28 +172,10 @@ async function calculateStaffStats(staffId) {
       ? Math.round((totalResolved / totalAssigned) * 100)
       : 100; // Default to 100% if no assignments
 
-    // Calculate avg resolution time (in minutes)
-    const resolvedNotifications = await notifications.find({
-      assignedStaffId: new ObjectId(staffId),
-      reportStatus: { $in: ['resolved', 'closed'] },
-      handlingStartTime: { $exists: true },
-      handlingEndTime: { $exists: true }
-    }).toArray();
-
-    let avgResolutionTime = 0;
-    if (resolvedNotifications.length > 0) {
-      const totalTime = resolvedNotifications.reduce((sum, notif) => {
-        const start = new Date(notif.handlingStartTime);
-        const end = new Date(notif.handlingEndTime);
-        return sum + (end - start);
-      }, 0);
-      avgResolutionTime = Math.round(totalTime / resolvedNotifications.length / 60000); // Convert to minutes
-    }
-
+    // NOTE: avgResolutionTime removed - not needed anymore
     return {
       totalAssigned,
       totalResolved,
-      avgResolutionTime,
       successRate
     };
   } catch (error) {
@@ -199,7 +184,6 @@ async function calculateStaffStats(staffId) {
     return {
       totalAssigned: 0,
       totalResolved: 0,
-      avgResolutionTime: 0,
       successRate: 100
     };
   }
@@ -221,28 +205,32 @@ async function getAllStaff(filters = {}) {
 
     const staffList = await staff.find(query).sort({ createdAt: -1 }).toArray();
 
-    // Add stats to each staff member and project necessary fields
-    const staffWithStats = await Promise.all(
-      staffList.map(async (member) => {
-        const stats = await calculateStaffStats(member._id.toString());
-        return {
-          _id: member._id.toString(),
-          userId: member.userId ? member.userId.toString() : null,
-          name: member.name,
-          email: member.email,
-          phone: member.phone,
-          department: member.department,
-          position: member.position,
-          isActive: member.isActive,
-          avatar: member.avatar || null,
-          employeeId: member.employeeId || null,
-          joinedDate: member.joinedDate,
-          createdAt: member.createdAt,
-          updatedAt: member.updatedAt,
-          stats
-        };
-      })
-    );
+    // Add stats to each staff member - use stored stats if available, otherwise use defaults
+    const staffWithStats = staffList.map((member) => {
+      // Use stored stats if available, otherwise use defaults
+      const stats = member.stats || {
+        totalAssigned: 0,
+        totalResolved: 0,
+        successRate: 0
+      };
+
+      return {
+        _id: member._id.toString(),
+        userId: member.userId ? member.userId.toString() : null,
+        name: member.name,
+        email: member.email,
+        phone: member.phone,
+        department: member.department,
+        position: member.position,
+        isActive: member.isActive,
+        avatar: member.avatar || null,
+        employeeId: member.employeeId || null,
+        joinedDate: member.joinedDate,
+        createdAt: member.createdAt,
+        updatedAt: member.updatedAt,
+        stats
+      };
+    });
 
     return {
       success: true,
@@ -475,6 +463,8 @@ async function closeConnection() {
 
 /**
  * Get all active staff available for assignment
+ * NOTE: This function uses stored stats from database, not calculated stats
+ * The workload is determined by current active assignments, not historical stats
  */
 async function getActiveStaffForAssignment() {
   try {
@@ -484,15 +474,16 @@ async function getActiveStaffForAssignment() {
       .find({ isActive: true })
       .toArray();
 
-    // Get current stats for each staff member
-    const staffWithStats = [];
-    for (const staffMember of activeStaff) {
-      const stats = await calculateStaffStats(staffMember._id.toString());
-      staffWithStats.push({
-        ...staffMember,
-        stats: stats
-      });
-    }
+    // Return staff with their stored stats
+    // Stats are updated in real-time by notificationUtil.js
+    const staffWithStats = activeStaff.map(staffMember => ({
+      ...staffMember,
+      stats: staffMember.stats || {
+        totalAssigned: 0,
+        totalResolved: 0,
+        successRate: 100
+      }
+    }));
 
     return staffWithStats;
   } catch (error) {
@@ -503,6 +494,8 @@ async function getActiveStaffForAssignment() {
 
 /**
  * Update staff statistics based on action
+ * NOTE: This function is kept for backward compatibility but is NOT actively used
+ * The actual staff stats updates are handled by updateStaffStatsOnResolution() in notificationUtil.js
  * @param {string} staffId - Staff ID
  * @param {string} action - Action type: 'assigned', 'resolved', 'failed'
  */

@@ -3,6 +3,87 @@ const router = express.Router();
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../../autofix-db');
 
+/**
+ * Get suggested solutions based on error category
+ * Maps categories to predefined solutions
+ */
+function getSuggestedSolutionsForCategory(category, notification) {
+  const solutionsMap = {
+    'Kategori-1': [
+      'Deactive White list profile',
+      'Restart Chromecast & WIFI',
+      'Radisson Guest Must Be Login',
+      'Forget WIFI Radisson Guest',
+      'Logout WIFI (log-out.me)'
+    ],
+    'Kategori-2': [
+      'Periksa koneksi LAN pada TV',
+      'Pastikan sumber HDMI diatur ke HDMI-1',
+      'Restart perangkat IPTV',
+      'Periksa indikator LED pada box IPTV'
+    ],
+    'Kategori-3': [
+      'Periksa koneksi LAN (pastikan terpasang di LAN IN)',
+      'Posisikan kabel LAN dengan benar',
+      'Pastikan tidak terpasang di LAN OUT',
+      'Test koneksi dengan kabel LAN lain'
+    ],
+    'Kategori-4': [
+      'Install Google Home app',
+      'Pastikan perangkat dalam satu jaringan WiFi',
+      'Allow local network access pada iPhone',
+      'Follow setup wizard di aplikasi'
+    ],
+    'Kategori-5': [
+      'Channel issue dari Biznet (Testing VIA VLC)'
+    ],
+    'Kategori-6': [
+      'Hbrowser & Widget Solution incorrect',
+      'Channel issue Biznet (Testing VLC)'
+    ],
+    'Kategori-7': [
+      'Reinstall Widget Solution',
+      'Reload IGCMP',
+      'Confirmed IP conflict, changed IP, issue resolved'
+    ],
+    'Kategori-8': [
+      'Restart Chromecast',
+      'Reset Chromecast dibawa ke ruang server pencet tombol power 10 Detik'
+    ],
+    'Kategori-9': [
+      'Pastikan Allow local Network pada Setingan Iphone',
+      'Check VPN and Cast settings'
+    ],
+    'Kategori-10': [
+      'Chromecast Power Adaptor Rusak',
+      'Check Adaptor Chromecast'
+    ],
+    'Kategori-11': [
+      'LAN Out Terpasang bukan LAN In'
+    ],
+    'Kategori-12': [
+      'Check WiFi connection strength',
+      'Restart Chromecast device',
+      'Verify router settings',
+      'Check for IP conflicts'
+    ],
+    'Kategori-13': [
+      'Restart IPTV set-top box',
+      'Check system firmware version',
+      'Reinitialize system settings',
+      'Contact technical support if persists'
+    ],
+    'Kategori-14': [
+      'Verify user authentication status',
+      'Check device registration',
+      'Re-login to Google account',
+      'Clear cast cache and retry'
+    ]
+  };
+
+  return solutionsMap[category] || [];
+}
+
 // Get database instance - autofix-db returns object with collections
 async function getDatabase() {
   const db = await connectDB();
@@ -94,12 +175,23 @@ router.get('/', async (req, res) => {
       });
     }
 
-    const populatedNotifications = notifications.map(notif => ({
-      ...notif,
-      reportedByStaff: notif.reportedByStaffId ? staffMap[notif.reportedByStaffId.toString()] : null,
-      assignedStaff: notif.assignedStaffId ? staffMap[notif.assignedStaffId.toString()] : null,
-      handledByStaff: notif.handledByStaffId ? staffMap[notif.handledByStaffId.toString()] : null,
-    }));
+    const populatedNotifications = notifications.map(notif => {
+      // Calculate suggestedSolutions if not present but errorCategory exists
+      let suggestedSolutions = notif.suggestedSolutions || [];
+
+      // If no suggestedSolutions but we have errorCategory, try to match with FAQ
+      if (!suggestedSolutions.length && notif.errorCategory) {
+        suggestedSolutions = getSuggestedSolutionsForCategory(notif.errorCategory, notif);
+      }
+
+      return {
+        ...notif,
+        suggestedSolutions,
+        reportedByStaff: notif.reportedByStaffId ? staffMap[notif.reportedByStaffId.toString()] : null,
+        assignedStaff: notif.assignedStaffId ? staffMap[notif.assignedStaffId.toString()] : null,
+        handledByStaff: notif.handledByStaffId ? staffMap[notif.handledByStaffId.toString()] : null,
+      };
+    });
 
     const total = await db.notifications.countDocuments(query);
 

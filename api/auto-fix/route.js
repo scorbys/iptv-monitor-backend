@@ -171,7 +171,7 @@ router.get('/history', async (req, res) => {
  */
 router.get('/stats', async (req, res) => {
   try {
-    const { period = '30' } = req.query; // days
+    const { period = '30', timeseries = 'false' } = req.query; // days
 
     const db = await getDatabase();
     const startDate = new Date();
@@ -242,7 +242,7 @@ router.get('/stats', async (req, res) => {
     const total = Object.values(statusStats).reduce((a, b) => a + b, 0);
     const successRate = total > 0 ? ((statusStats.success / total) * 100).toFixed(2) : '0.00';
 
-    res.json({
+    const response = {
       success: true,
       data: {
         total,
@@ -252,7 +252,62 @@ router.get('/stats', async (req, res) => {
         byFixType: fixTypeStats,
         period: `${period} days`
       }
-    });
+    };
+
+    // Add timeseries data if requested
+    if (timeseries === 'true') {
+      const days = parseInt(period);
+      const timeSeriesData = [];
+
+      for (let i = days - 1; i >= 0; i--) {
+        const dayStart = new Date();
+        dayStart.setDate(dayStart.getDate() - i);
+        dayStart.setHours(0, 0, 0, 0);
+
+        const dayEnd = new Date(dayStart);
+        dayEnd.setHours(23, 59, 59, 999);
+
+        const dayStats = await db.autoFixLogs.aggregate([
+          {
+            $match: {
+              createdAt: { $gte: dayStart, $lte: dayEnd }
+            }
+          },
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 }
+            }
+          }
+        ]).toArray();
+
+        const dayStatusStats = {
+          success: 0,
+          failed: 0
+        };
+
+        dayStats.forEach(stat => {
+          if (stat._id === 'success') dayStatusStats.success = stat.count;
+          if (stat._id === 'failed') dayStatusStats.failed = stat.count;
+        });
+
+        const dayTotal = dayStatusStats.success + dayStatusStats.failed;
+        const daySuccessRate = dayTotal > 0 ? (dayStatusStats.success / dayTotal * 100) : 0;
+
+        timeSeriesData.push({
+          date: dayStart.toISOString().split('T')[0], // YYYY-MM-DD
+          displayDate: dayStart.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }),
+          success: dayStatusStats.success,
+          failed: dayStatusStats.failed,
+          total: dayTotal,
+          successRate: daySuccessRate
+        });
+      }
+
+      response.data.timeseries = timeSeriesData;
+    }
+
+    res.json(response);
   } catch (error) {
     console.error("Error fetching auto fix stats:", error);
     res.status(500).json({

@@ -1,6 +1,31 @@
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../autofix-db');
 
+/**
+ * Get priority level from ML category
+ * Maps categories to priority levels based on severity
+ */
+function getPriorityFromCategory(category) {
+  const priorityMap = {
+    'Kategori-1': 'high',      // No device found - critical
+    'Kategori-2': 'high',      // Weak signal - affects service
+    'Kategori-3': 'high',      // Unplug LAN - critical
+    'Kategori-4': 'medium',    // Setup issue - can wait
+    'Kategori-5': 'medium',    // Error playing - moderate
+    'Kategori-6': 'high',      // Player error - critical
+    'Kategori-7': 'high',      // Connection failure - critical
+    'Kategori-8': 'low',       // Reset config - low priority
+    'Kategori-9': 'high',      // No device logged - critical
+    'Kategori-10': 'high',     // Black screen - critical
+    'Kategori-11': 'medium',   // Channel not found - moderate
+    'Kategori-12': 'high',     // Network failed - critical
+    'Kategori-13': 'high',     // System error - critical
+    'Kategori-14': 'medium',   // Logined issue - moderate
+  };
+
+  return priorityMap[category] || 'medium';
+}
+
 // Configuration
 const NOTIFICATION_CONFIG = {
   // Cooldown period before creating new notification for same device (minutes)
@@ -132,6 +157,40 @@ async function saveNotificationToDB(notificationData) {
     const result = await notifications.insertOne(notification);
 
     console.log(`[Notification] Saved to DB: ${notificationId} - ${notification.message}`);
+
+    // Trigger ML prediction, auto-fix, and staff assignment asynchronously (don't wait)
+    setImmediate(async () => {
+      try {
+        console.log(`[Notification] Starting async processing for: ${notificationId}`);
+
+        // 1. Get ML prediction for this notification
+        console.log(`[Notification] Step 1: Triggering ML prediction for ${notificationId}...`);
+        const mlResult = await triggerMLPrediction(notificationId);
+        console.log(`[Notification] ML prediction result:`, mlResult.success ? 'SUCCESS' : 'FAILED');
+
+        // 2. Create auto-fix log based on ML prediction
+        if (mlResult.success) {
+          console.log(`[Notification] Step 2: Creating auto-fix for ${notificationId}...`);
+          await createAutoFixFromNotification(notificationId, 'automatic');
+          console.log(`[Notification] ML prediction and auto-fix created for: ${notificationId}`);
+        } else {
+          console.log(`[Notification] Skipping auto-fix creation due to ML prediction failure`);
+        }
+
+        // 3. Assign staff automatically (based on workload balancing)
+        console.log(`[Notification] Step 3: Assigning staff to ${notificationId}...`);
+        const staffResult = await assignStaffToNotification(notificationId);
+        if (staffResult.success) {
+          console.log(`[Notification] Staff assigned: ${staffResult.assignedStaffName} (workload: ${staffResult.workload})`);
+        } else {
+          console.error(`[Notification] Staff assignment FAILED:`, staffResult.error);
+        }
+
+        console.log(`[Notification] ✅ Async processing completed for: ${notificationId}`);
+      } catch (error) {
+        console.error(`[Notification] ❌ Error in ML/AutoFix/Staff processing for ${notificationId}:`, error);
+      }
+    });
 
     return {
       success: true,
@@ -285,6 +344,22 @@ async function createAutoFixFromNotification(notificationId, fixType = 'automati
 
     const result = await db.collection('auto_fix_logs').insertOne(autoFixLog);
 
+    // Update notification with suggested solutions from ML
+    if (mlPrediction?.suggestedSolutions && mlPrediction.suggestedSolutions.length > 0) {
+      await db.collection('notifications').updateOne(
+        { notificationId: notificationId },
+        {
+          $set: {
+            suggestedSolutions: mlPrediction.suggestedSolutions,
+            errorCategory: mlPrediction.predicted_label,
+            priority: getPriorityFromCategory(mlPrediction.predicted_label),
+            updatedAt: new Date()
+          }
+        }
+      );
+      console.log(`[Notification] Updated ${notificationId} with ${mlPrediction.suggestedSolutions.length} suggested solutions`);
+    }
+
     console.log(`[AutoFix] Created auto-fix log: ${autoFixLog.fixId} for notification: ${notificationId}`);
 
     return {
@@ -303,6 +378,80 @@ async function createAutoFixFromNotification(notificationId, fixType = 'automati
 }
 
 /**
+ * Update staff statistics when notification is resolved
+ * Increases totalResolved and recalculates success rate
+ */
+async function updateStaffStatsOnResolution(notification) {
+  try {
+    if (!notification.assignedStaffId) {
+      return { success: true, noStaff: true };
+    }
+
+    const connection = await connectDB();
+    const db = connection.client.db('iptv');
+
+    // Get current staff stats
+    const staff = await db.collection('staff').findOne({
+      _id: new ObjectId(notification.assignedStaffId)
+    });
+
+    if (!staff) {
+      console.warn(`[StaffStats] Staff not found: ${notification.assignedStaffId}`);
+      return { success: false, error: 'Staff not found' };
+    }
+
+    // Calculate resolution time if available
+    let resolutionTime = 0;
+    if (notification.handlingStartTime) {
+      const endTime = notification.handlingEndTime || new Date();
+      resolutionTime = new Date(endTime).getTime() - new Date(notification.handlingStartTime).getTime();
+      resolutionTime = Math.floor(resolutionTime / 1000 / 60); // Convert to minutes
+    }
+
+    // Update staff stats
+    const newTotalResolved = (staff.stats?.totalResolved || 0) + 1;
+    const newTotalAssigned = staff.stats?.totalAssigned || 0;
+
+    // Calculate new success rate (resolved / assigned * 100)
+    const newSuccessRate = newTotalAssigned > 0 ? (newTotalResolved / newTotalAssigned) * 100 : 0;
+
+    // Calculate new average resolution time
+    let newAvgResolutionTime = staff.stats?.avgResolutionTime || 0;
+    if (resolutionTime > 0) {
+      const currentTotal = newAvgResolutionTime * (newTotalResolved - 1);
+      newAvgResolutionTime = Math.floor((currentTotal + resolutionTime) / newTotalResolved);
+    }
+
+    await db.collection('staff').updateOne(
+      { _id: new ObjectId(notification.assignedStaffId) },
+      {
+        $set: {
+          'stats.totalResolved': newTotalResolved,
+          'stats.successRate': newSuccessRate,
+          'stats.avgResolutionTime': newAvgResolutionTime,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    console.log(`[StaffStats] Updated stats for ${staff.name}: resolved=${newTotalResolved}, successRate=${newSuccessRate.toFixed(1)}%`);
+
+    return {
+      success: true,
+      staffId: notification.assignedStaffId,
+      newTotalResolved,
+      newSuccessRate
+    };
+  } catch (error) {
+    console.error('[StaffStats] Error updating staff stats:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Auto-resolve notifications when device comes back online
  * Called when device status changes from offline to online
  */
@@ -313,7 +462,22 @@ async function autoResolveNotification(deviceIdentifier) {
     const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
-    // Find pending notifications for this device
+    // Find pending notifications for this device BEFORE updating
+    const pendingNotifications = await notifications.find({
+      $or: [
+        { ipAddr: deviceIdentifier },
+        { deviceName: deviceIdentifier },
+        { roomNo: deviceIdentifier }
+      ],
+      reportStatus: { $in: ['pending', 'investigating'] },
+      currentStatus: 'offline'
+    }).toArray();
+
+    if (pendingNotifications.length === 0) {
+      return { success: true, matchedCount: 0, modifiedCount: 0 };
+    }
+
+    // Update notifications to resolved
     const result = await notifications.updateMany(
       {
         $or: [
@@ -337,6 +501,11 @@ async function autoResolveNotification(deviceIdentifier) {
 
     if (result.matchedCount > 0) {
       console.log(`[Notification] Auto-resolved ${result.matchedCount} notification(s) for device: ${deviceIdentifier}`);
+
+      // Update staff stats for each resolved notification
+      for (const notification of pendingNotifications) {
+        await updateStaffStatsOnResolution(notification);
+      }
     }
 
     return {
@@ -440,6 +609,115 @@ async function cleanupOldNotifications() {
 }
 
 /**
+ * Assign staff to notification automatically
+ * Selects staff based on priority, workload, and availability
+ */
+async function assignStaffToNotification(notificationId) {
+  try {
+    const connection = await connectDB();
+    const client = connection.client;
+    const db = client.db('iptv');
+
+    // Get notification details
+    const notification = await db.collection('notifications')
+      .findOne({ notificationId: notificationId });
+
+    if (!notification) {
+      throw new Error('Notification not found');
+    }
+
+    // Don't reassign if already assigned
+    if (notification.assignedStaffId) {
+      return {
+        success: true,
+        alreadyAssigned: true,
+        assignedStaffId: notification.assignedStaffId
+      };
+    }
+
+    // Get available staff (not deleted, active)
+    const availableStaff = await db.collection('staff').find({
+      deletedAt: { $exists: false },
+      isActive: { $ne: false }
+    }).toArray();
+
+    if (availableStaff.length === 0) {
+      console.log('[StaffAssignment] No available staff found');
+      return { success: false, error: 'No available staff' };
+    }
+
+    // Get current workload for each staff member
+    const staffWithWorkload = await Promise.all(
+      availableStaff.map(async (staff) => {
+        const activeAssignments = await db.collection('notifications').countDocuments({
+          assignedStaffId: staff._id.toString(),
+          reportStatus: { $in: ['pending', 'investigating'] }
+        });
+
+        return {
+          ...staff,
+          currentWorkload: activeAssignments
+        };
+      })
+    );
+
+    // Sort by workload (ascending) - assign to staff with least workload
+    staffWithWorkload.sort((a, b) => a.currentWorkload - b.currentWorkload);
+
+    // Get staff with minimum workload
+    const minWorkload = staffWithWorkload[0].currentWorkload;
+    const availableStaffWithMinWorkload = staffWithWorkload.filter(
+      staff => staff.currentWorkload === minWorkload
+    );
+
+    // Randomly select from staff with minimum workload
+    const selectedStaff = availableStaffWithMinWorkload[
+      Math.floor(Math.random() * availableStaffWithMinWorkload.length)
+    ];
+
+    // Assign staff to notification
+    await db.collection('notifications').updateOne(
+      { notificationId: notificationId },
+      {
+        $set: {
+          assignedStaffId: selectedStaff._id.toString(),
+          handlingStartTime: new Date(), // Start tracking resolution time
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    // Update staff stats
+    await db.collection('staff').updateOne(
+      { _id: selectedStaff._id },
+      {
+        $inc: {
+          'stats.totalAssigned': 1
+        },
+        $set: {
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    console.log(`[StaffAssignment] Assigned ${selectedStaff.name} to notification ${notificationId}`);
+
+    return {
+      success: true,
+      assignedStaffId: selectedStaff._id.toString(),
+      assignedStaffName: selectedStaff.name,
+      workload: selectedStaff.currentWorkload
+    };
+  } catch (error) {
+    console.error('[StaffAssignment] Error assigning staff:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Get notification statistics
  */
 async function getNotificationStats() {
@@ -483,6 +761,8 @@ module.exports = {
   saveNotificationsBatch,
   triggerMLPrediction,
   createAutoFixFromNotification,
+  assignStaffToNotification,
+  updateStaffStatsOnResolution,
   autoResolveNotification,
   autoCloseOldNotifications,
   cleanupOldNotifications,

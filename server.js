@@ -1361,11 +1361,20 @@ async function checkAllChannelsStatus(skipNotifications = false) {
         // 2. Previous status was explicitly "online"
         // 3. Channel is now "offline"
         if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
+          // Determine specific error type for channel
+          let errorDetail = 'Channel not found';
+          if (result.responseTime === null) {
+            errorDetail = 'Connection failure - Multicast stream unavailable';
+          } else {
+            errorDetail = 'Error playing - Stream issue detected';
+          }
+
           offlineNotifications.push({
             source: 'channel',
-            message: `${channel.channelName || 'Unknown Channel'} is now offline`,
+            message: `${channel.channelName || 'Unknown Channel'} is now offline - ${errorDetail}`,
             ipAddr: channel.ipMulticast,
             deviceName: channel.channelName,
+            error: errorDetail,
             timestamp: new Date().toISOString()
           });
         }
@@ -1381,12 +1390,19 @@ async function checkAllChannelsStatus(skipNotifications = false) {
 
         // Only add notification if not skipped and previous status was "online"
         if (!skipNotifications && previousStatus === "online") {
+          let errorDetail = error.message || 'Connection failed';
+          if (error.message?.includes('ECONNREFUSED')) {
+            errorDetail = 'Connection refused - Stream unavailable';
+          } else if (error.message?.includes('timeout')) {
+            errorDetail = 'Stream timeout - Network issue detected';
+          }
+
           offlineNotifications.push({
             source: 'channel',
-            message: `${channel.channelName || 'Unknown Channel'} connection failed`,
+            message: `${channel.channelName || 'Unknown Channel'} connection failed - ${errorDetail}`,
             ipAddr: channel.ipMulticast,
             deviceName: channel.channelName,
-            error: error.message,
+            error: errorDetail,
             timestamp: new Date().toISOString()
           });
         }
@@ -1444,12 +1460,23 @@ async function checkAllTVsStatus(skipNotifications = false) {
         // 2. Previous status was explicitly "online"
         // 3. TV is now "offline"
         if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
+          // Determine specific error type based on response time and status
+          let errorDetail = 'No signal detected';
+          if (result.responseTime && result.responseTime > 5000) {
+            errorDetail = 'Connection timeout - Weak or no signal';
+          } else if (result.responseTime === null) {
+            errorDetail = 'Device not responding - Possible LAN cable disconnected';
+          } else if (result.responseTime > 0) {
+            errorDetail = 'Device offline - Weak signal';
+          }
+
           offlineNotifications.push({
             source: 'tv',
-            message: `Room ${tv.roomNo} TV is now offline`,
+            message: `Room ${tv.roomNo} TV is now offline - ${errorDetail}`,
             ipAddr: tv.ipAddress,
             deviceName: `Room ${tv.roomNo}`,
             roomNo: tv.roomNo,
+            error: errorDetail,
             timestamp: new Date().toISOString()
           });
         }
@@ -1467,13 +1494,20 @@ async function checkAllTVsStatus(skipNotifications = false) {
 
         // Only add notification if not skipped and previous status was "online"
         if (!skipNotifications && previousStatus === "online") {
+          let errorDetail = error.message || 'Connection failed';
+          if (error.message?.includes('ECONNREFUSED')) {
+            errorDetail = 'Device not responding - Possible power issue or LAN cable disconnected';
+          } else if (error.message?.includes('timeout')) {
+            errorDetail = 'Connection timeout - Weak or no signal';
+          }
+
           offlineNotifications.push({
             source: 'tv',
-            message: `Room ${tv.roomNo} TV connection failed`,
+            message: `Room ${tv.roomNo} TV connection failed - ${errorDetail}`,
             ipAddr: tv.ipAddress,
             deviceName: `Room ${tv.roomNo}`,
             roomNo: tv.roomNo,
-            error: error.message,
+            error: errorDetail,
             timestamp: new Date().toISOString()
           });
         }
@@ -3765,14 +3799,36 @@ app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken,
         if (currentStatus === 'offline' && previousStatus === 'online') {
           // Device went offline - create notification
           if (chromecastSystemStartupComplete) {
+            // Determine specific error type for chromecast
+            let errorDetail = device.error || 'Device offline';
+            let detailedMessage = 'Device not responding';
+
+            if (!device.isOnline && device.error) {
+              if (device.error.toLowerCase().includes('timeout') || device.error.toLowerCase().includes('timed out')) {
+                errorDetail = 'Connection timeout - Device not responding';
+                detailedMessage = 'Network timeout - Chromecast unreachable';
+              } else if (device.error.toLowerCase().includes('not found') || device.error.toLowerCase().includes('unreachable')) {
+                errorDetail = 'No device found - Chromecast offline';
+                detailedMessage = 'Device not detected on network';
+              } else if (device.error.toLowerCase().includes('refused')) {
+                errorDetail = 'Connection refused - Possible WiFi issue';
+                detailedMessage = 'Network connection refused';
+              } else {
+                detailedMessage = `Device offline: ${device.error}`;
+              }
+            } else if (!device.isOnline) {
+              errorDetail = 'No device found - Chromecast not responding';
+              detailedMessage = 'Device offline - Check WiFi and power connection';
+            }
+
             await saveNotificationToDB({
               source: 'chromecast',
               title: 'Chromecast Device Offline',
-              message: `${device.deviceName || 'Unknown'} is offline - ${device.error || 'Device not responding'}`,
+              message: `${device.deviceName || 'Unknown'} is offline - ${detailedMessage}`,
               deviceName: device.deviceName,
               roomNo: device.roomNr,
               ipAddr: device.ipAddr,
-              error: device.error || 'Device offline',
+              error: errorDetail,
               currentStatus: 'offline',
               isStartup: false, // Not a startup notification
             });
@@ -3783,14 +3839,24 @@ app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken,
         }
       } else if (!previousStatus && currentStatus === 'offline' && chromecastSystemStartupComplete) {
         // First check and device is offline - create startup notification
+        let errorDetail = device.error || 'Device offline';
+        let detailedMessage = 'Device not responding';
+
+        if (device.error && device.error.toLowerCase().includes('not found')) {
+          errorDetail = 'No device found - Chromecast offline';
+          detailedMessage = 'Device not detected on network';
+        } else {
+          detailedMessage = 'Device offline - Check WiFi and power connection';
+        }
+
         await saveNotificationToDB({
           source: 'chromecast',
           title: 'Chromecast Device Offline',
-          message: `${device.deviceName || 'Unknown'} is offline - ${device.error || 'Device not responding'}`,
+          message: `${device.deviceName || 'Unknown'} is offline - ${detailedMessage}`,
           deviceName: device.deviceName,
           roomNo: device.roomNr,
           ipAddr: device.ipAddr,
-          error: device.error || 'Device offline',
+          error: errorDetail,
           currentStatus: 'offline',
           isStartup: true, // Mark as startup notification
         });
@@ -5827,6 +5893,17 @@ app.listen(port, async () => {
       console.error("Error in periodic notification archive:", error);
     }
   }, 7 * 24 * 60 * 60 * 1000); // Every 7 days
+
+  // Start auto-resolve scheduler - run every 5 seconds
+  console.log("Starting auto-resolve scheduler (every 5 seconds, resolves after 10-15s)...");
+  setInterval(async () => {
+    try {
+      const { checkAndAutoResolve } = require('./services/autoResolveScheduler');
+      await checkAndAutoResolve();
+    } catch (error) {
+      console.error("Error in auto-resolve scheduler:", error);
+    }
+  }, 5 * 1000); // Every 5 seconds
 
   console.log(`Server is running on port ${port}`);
 });
