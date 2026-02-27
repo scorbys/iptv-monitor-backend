@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const { getNotificationStats, NOTIFICATION_CONFIG } = require('../../../utils/notificationUtil');
+const { connectDB } = require('../../../autofix-db');
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -45,6 +46,90 @@ router.use(authenticateToken);
 // Get notification statistics
 router.get('/', async (req, res) => {
   try {
+    // Check if this is an analytics request
+    if (req.query.analytics === 'true') {
+      const { period = '30' } = req.query; // days
+
+      const db = await connectDB();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(period));
+
+      // Get top devices with issues
+      const topDevices = await db.notifications.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+            deviceName: { $ne: null, $exists: true }
+          }
+        },
+        {
+          $group: {
+            _id: '$deviceName',
+            count: { $sum: 1 },
+            roomNr: { $first: '$roomNo' }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        },
+        {
+          $limit: 10
+        },
+        {
+          $project: {
+            device: '$_id',
+            count: 1,
+            roomNr: 1
+          }
+        }
+      ]).toArray();
+
+      // Get top rooms with issues (exclude null/N/A/undefined)
+      const topRooms = await db.notifications.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+            roomNo: {
+              $ne: null,
+              $ne: 'N/A',
+              $ne: 'null',
+              $ne: '',
+              $exists: true,
+              $type: 'string'
+            }
+          }
+        },
+        {
+          $group: {
+            _id: '$roomNo',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        },
+        {
+          $limit: 10
+        },
+        {
+          $project: {
+            room: '$_id',
+            count: 1
+          }
+        }
+      ]).toArray();
+
+      return res.json({
+        success: true,
+        data: {
+          topDevices,
+          topRooms,
+          period: `${period} days`
+        }
+      });
+    }
+
+    // Regular stats request
     const stats = await getNotificationStats();
 
     res.json({

@@ -263,8 +263,8 @@ app.use('/api/ml/model', require('./api/ml/model/route'));
 app.use('/api/ml/predict', require('./api/ml/predict/route'));
 
 // Notifications routes
-app.use('/api/notifications', require('./api/notifications/route'));
 app.use('/api/notifications/stats', require('./api/notifications/stats/route'));
+app.use('/api/notifications', require('./api/notifications/route'));
 
 // Auto Fix routes (unified)
 app.use('/api/auto-fix', require('./api/auto-fix/route'));

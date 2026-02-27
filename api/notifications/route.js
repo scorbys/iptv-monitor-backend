@@ -152,10 +152,16 @@ router.get('/', async (req, res) => {
 
     // Populate staff details
     const staffIds = new Set();
+    const chromecastDeviceNames = new Set();
     notifications.forEach(notif => {
       if (notif.reportedByStaffId) staffIds.add(notif.reportedByStaffId.toString());
       if (notif.assignedStaffId) staffIds.add(notif.assignedStaffId.toString());
       if (notif.handledByStaffId) staffIds.add(notif.handledByStaffId.toString());
+
+      // Collect chromecast device names that need roomNr enrichment
+      if (notif.source === 'chromecast' && (!notif.roomNo || notif.roomNo === 'N/A')) {
+        chromecastDeviceNames.add(notif.deviceName);
+      }
     });
 
     const staffMap = {};
@@ -175,6 +181,20 @@ router.get('/', async (req, res) => {
       });
     }
 
+    // Fetch chromecast room numbers for devices with missing roomNo
+    const chromecastRoomMap = {};
+    if (chromecastDeviceNames.size > 0) {
+      const chromecasts = await db.chromecast
+        .find({ deviceName: { $in: Array.from(chromecastDeviceNames) } })
+        .toArray();
+
+      chromecasts.forEach(cc => {
+        if (cc.roomNr) {
+          chromecastRoomMap[cc.deviceName] = cc.roomNr;
+        }
+      });
+    }
+
     const populatedNotifications = notifications.map(notif => {
       // Calculate suggestedSolutions if not present but errorCategory exists
       let suggestedSolutions = notif.suggestedSolutions || [];
@@ -184,8 +204,15 @@ router.get('/', async (req, res) => {
         suggestedSolutions = getSuggestedSolutionsForCategory(notif.errorCategory, notif);
       }
 
+      // Enrich roomNo from chromecast collection for chromecast devices with N/A
+      let enrichedRoomNo = notif.roomNo;
+      if (notif.source === 'chromecast' && (!notif.roomNo || notif.roomNo === 'N/A') && chromecastRoomMap[notif.deviceName]) {
+        enrichedRoomNo = chromecastRoomMap[notif.deviceName];
+      }
+
       return {
         ...notif,
+        roomNo: enrichedRoomNo, // Use enriched roomNo
         suggestedSolutions,
         reportedByStaff: notif.reportedByStaffId ? staffMap[notif.reportedByStaffId.toString()] : null,
         assignedStaff: notif.assignedStaffId ? staffMap[notif.assignedStaffId.toString()] : null,
@@ -254,6 +281,15 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    // Enrich roomNo from chromecast collection for chromecast devices with N/A
+    let enrichedRoomNo = notification.roomNo;
+    if (notification.source === 'chromecast' && (!notification.roomNo || notification.roomNo === 'N/A')) {
+      const chromecast = await db.chromecast.findOne({ deviceName: notification.deviceName });
+      if (chromecast && chromecast.roomNr) {
+        enrichedRoomNo = chromecast.roomNr;
+      }
+    }
+
     // Populate notes with staff details
     const notesWithStaff = await Promise.all((notification.notes || []).map(async (note) => {
       if (note.staffId) {
@@ -272,6 +308,7 @@ router.get('/:id', async (req, res) => {
 
     const populatedNotification = {
       ...notification,
+      roomNo: enrichedRoomNo, // Use enriched roomNo
       reportedByStaff: notification.reportedByStaffId ? staffMap[notification.reportedByStaffId.toString()] : null,
       assignedStaff: notification.assignedStaffId ? staffMap[notification.assignedStaffId.toString()] : null,
       handledByStaff: notification.handledByStaffId ? staffMap[notification.handledByStaffId.toString()] : null,

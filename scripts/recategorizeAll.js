@@ -1,4 +1,4 @@
-// Fix dotenv path first
+// Script to re-categorize ALL notifications (not just 50)
 require('dotenv').config({ path: '../.env' });
 
 const { connectDB } = require('../autofix-db');
@@ -80,65 +80,80 @@ function getSpecificFAQCategory(notification) {
   return bestMatch ? bestMatch.category : null;
 }
 
-async function recategorizeNewNotifications() {
-  console.log('=== Re-categorizing New Notifications ===\n');
+async function recategorizeAllNotifications() {
+  console.log('=== Re-categorizing ALL Notifications ===\n');
 
   try {
     const connection = await connectDB();
     const client = connection.client;
     const db = client.db('iptv');
 
-    // Get notifications without proper category (External or null)
-    const notifications = await db.collection('notifications').find({
+    // Get ALL notifications with External or null category
+    const totalExternal = await db.collection('notifications').countDocuments({
       $or: [
         { errorCategory: { $in: [null, '', 'External'] } },
         { errorCategory: { $exists: false } }
       ]
-    }).limit(50).toArray();
+    });
 
-    console.log(`Found ${notifications.length} notifications to re-categorize\n`);
+    console.log(`Found ${totalExternal} notifications to re-categorize\n`);
 
-    if (notifications.length === 0) {
+    if (totalExternal === 0) {
       console.log('✅ All notifications already categorized!');
+      await connection.client.close();
       return;
     }
 
+    let processed = 0;
+    let categorized = 0;
     const categoryCount = {};
-    let successCount = 0;
 
-    for (let i = 0; i < notifications.length; i++) {
-      const notification = notifications[i];
-      const progress = ((i + 1) / notifications.length * 100).toFixed(1);
+    // Process in batches of 50
+    const limit = 50;
+    let skip = 0;
+    let hasMore = true;
 
-      process.stdout.write(`\rProcessing: ${progress}% (${i + 1}/${notifications.length})`);
+    while (hasMore) {
+      const notifications = await db.collection('notifications').find({
+        $or: [
+          { errorCategory: { $in: [null, '', 'External'] } },
+          { errorCategory: { $exists: false } }
+        ]
+      }).limit(limit).skip(skip).toArray();
 
-      try {
-        // Get category
-        const category = getSpecificFAQCategory(notification);
+      if (notifications.length === 0) {
+        hasMore = false;
+        break;
+      }
 
-        if (category) {
+      for (const notification of notifications) {
+        const newCategory = getSpecificFAQCategory(notification);
+
+        if (newCategory) {
           await db.collection('notifications').updateOne(
             { _id: notification._id },
-            {
-              $set: {
-                errorCategory: category,
-                updatedAt: new Date()
-              }
-            }
+            { $set: { errorCategory: newCategory, updatedAt: new Date() } }
           );
 
-          categoryCount[category] = (categoryCount[category] || 0) + 1;
-          successCount++;
+          categorized++;
+          categoryCount[newCategory] = (categoryCount[newCategory] || 0) + 1;
         }
 
-      } catch (error) {
-        console.error(`\nError processing ${notification.notificationId}:`, error.message);
+        processed++;
+
+        // Show progress every 10 notifications
+        if (processed % 10 === 0) {
+          process.stdout.write(`\rProgress: ${((processed / totalExternal) * 100).toFixed(1)}% (${processed}/${totalExternal})`);
+        }
       }
+
+      skip += limit;
+      hasMore = notifications.length === limit;
     }
 
     console.log('\n\n=== Re-categorization Complete ===');
-    console.log(`Total processed: ${notifications.length}`);
-    console.log(`Successfully categorized: ${successCount}`);
+    console.log(`Total processed: ${processed}`);
+    console.log(`Successfully categorized: ${categorized}`);
     console.log('\nCategory Distribution:');
     Object.entries(categoryCount)
       .sort(([, a], [, b]) => b - a)
@@ -146,19 +161,12 @@ async function recategorizeNewNotifications() {
         console.log(`  ${cat}: ${count}`);
       });
 
+    console.log('\n=== Script Complete ===');
+    await connection.client.close();
   } catch (error) {
-    console.error('\n❌ Error:', error);
+    console.error('❌ Error:', error.message);
     process.exit(1);
   }
 }
 
-// Run the script
-recategorizeNewNotifications()
-  .then(() => {
-    console.log('\n=== Script Complete ===');
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error('\nScript failed:', error);
-    process.exit(1);
-  });
+recategorizeAllNotifications();

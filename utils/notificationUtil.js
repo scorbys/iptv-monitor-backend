@@ -412,8 +412,10 @@ async function updateStaffStatsOnResolution(notification) {
     const newTotalResolved = (staff.stats?.totalResolved || 0) + 1;
     const newTotalAssigned = staff.stats?.totalAssigned || 0;
 
-    // Calculate new success rate (resolved / assigned * 100)
-    const newSuccessRate = newTotalAssigned > 0 ? (newTotalResolved / newTotalAssigned) * 100 : 0;
+    // Calculate new success rate (resolved / assigned * 100), capped at 100%
+    const newSuccessRate = newTotalAssigned > 0
+      ? Math.min((newTotalResolved / newTotalAssigned) * 100, 100)
+      : 0;
 
     // Calculate new average resolution time
     let newAvgResolutionTime = staff.stats?.avgResolutionTime || 0;

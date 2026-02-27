@@ -167,9 +167,9 @@ async function calculateStaffStats(staffId) {
       reportStatus: { $in: ['resolved', 'closed'] }
     });
 
-    // Calculate success rate
+    // Calculate success rate (capped at 100%)
     const successRate = totalAssigned > 0
-      ? Math.round((totalResolved / totalAssigned) * 100)
+      ? Math.min(Math.round((totalResolved / totalAssigned) * 100), 100)
       : 100; // Default to 100% if no assignments
 
     // NOTE: avgResolutionTime removed - not needed anymore
@@ -531,7 +531,7 @@ async function updateStaffStats(staffId, action) {
           const totalAssigned = staffMember.stats.totalAssigned || 0;
           const totalResolved = (staffMember.stats.totalResolved || 0) + 1;
           const newSuccessRate = totalAssigned > 0
-            ? Math.round((totalResolved / totalAssigned) * 100)
+            ? Math.min(Math.round((totalResolved / totalAssigned) * 100), 100)
             : 100;
 
           await staff.updateOne(

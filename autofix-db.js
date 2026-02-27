@@ -16,6 +16,10 @@ async function connectDB() {
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
         staff: db.collection('staff'),
+        chromecast: db.collection('chromecast'),
+        internationalChannels: db.collection('international_channels'),
+        localChannels: db.collection('local_channels'),
+        tvHospitality: db.collection('tv_hospitality'),
         client: client
       };
     } catch (error) {
@@ -37,6 +41,10 @@ async function connectDB() {
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
         staff: db.collection('staff'),
+        chromecast: db.collection('chromecast'),
+        internationalChannels: db.collection('international_channels'),
+        localChannels: db.collection('local_channels'),
+        tvHospitality: db.collection('tv_hospitality'),
         client: client
       };
     }
@@ -78,6 +86,10 @@ async function connectDB() {
       autoFixLogs: db.collection('auto_fix_logs'),
       mlPredictions: db.collection('ml_predictions'),
       staff: db.collection('staff'),
+      chromecast: db.collection('chromecast'),
+      internationalChannels: db.collection('international_channels'),
+      localChannels: db.collection('local_channels'),
+      tvHospitality: db.collection('tv_hospitality'),
       client: client
     };
   } catch (error) {

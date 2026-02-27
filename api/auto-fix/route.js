@@ -203,24 +203,34 @@ router.get('/stats', async (req, res) => {
       statusStats[stat._id] = stat.count;
     });
 
-    // Category breakdown
-    const categoryStats = await db.autoFixLogs.aggregate([
+    // Category breakdown - using notifications collection for accurate categories
+    const categoryStats = await db.notifications.aggregate([
       {
         $match: {
-          createdAt: { $gte: startDate }
+          createdAt: { $gte: startDate },
+          errorCategory: { $ne: null, $exists: true }
         }
       },
       {
         $group: {
-          _id: '$category',
+          _id: '$errorCategory',
           count: { $sum: 1 },
           success: {
-            $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
+            $sum: {
+              $cond: [
+                { $in: ['$reportStatus', ['resolved', 'closed']] },
+                1,
+                0
+              ]
+            }
           }
         }
       },
       {
         $sort: { count: -1 }
+      },
+      {
+        $limit: 14 // Limit to top 14 categories
       }
     ]).toArray();
 
