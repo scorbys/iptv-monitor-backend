@@ -47,6 +47,11 @@ const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
 const userProfileRoute = require("./api/user/profile/route");
 const userPasswordRoute = require("./api/user/password/route");
 const userAvatarRoute = require("./api/user/avatar/route");
+const {
+  generateLabeledMetrics,
+  getErrorCategory,
+  getErrorCategoryWithDescription
+} = require('./utils/metricCalculator');
 
 // ==================== CONFIGURATION ====================
 const CHANNEL_STATUS_CONFIG = {
@@ -268,6 +273,9 @@ app.use('/api/notifications', require('./api/notifications/route'));
 
 // Auto Fix routes (unified)
 app.use('/api/auto-fix', require('./api/auto-fix/route'));
+
+// Channel-specific Auto Fix route
+app.use('/api/channels', require('./api/channels/route'));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -980,13 +988,25 @@ function generateDummyChannelStatus() {
   const isOnline = Math.random() < CHANNEL_STATUS_CONFIG.ONLINE_PROBABILITY;
 
   if (!isOnline) {
+    // Generate labeled metrics for offline device (all labels = 1)
+    const offlineMetrics = {
+      packetLoss: 0,
+      latency: 0,
+      jitter: 0,
+      error: 0,
+      recoveryTime: 0
+    };
+    const labeledMetrics = generateLabeledMetrics(offlineMetrics, true); // isOffline = true
+
     return {
       status: "offline",
       responseTime: null,
       error: ["Stream source unavailable", "Multicast timeout", "Encoder offline"][Math.floor(Math.random() * 3)],
       signalLevel: null,
       bitrate: null,
-      networkStats: null
+      networkStats: null,
+      labeledMetrics: labeledMetrics,
+      errorCategory: "Kategori-7" // Connection Failure for offline devices
     };
   }
 
@@ -1002,24 +1022,43 @@ function generateDummyChannelStatus() {
     (CHANNEL_STATUS_CONFIG.BITRATE_RANGE.max - CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min + 1))
     + CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min;
 
+  const networkStats = {
+    sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
+    received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
+    latency: Math.floor(Math.random() * 30) + 10, // 10-40ms
+    jitter: Math.floor(Math.random() * 12) + 2, // 2-14ms
+    ttl: Math.floor(Math.random() * 10) + 58, // 58-67
+    packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)), // 0-0.8%
+    bandwidth: Math.floor(Math.random() * 80) + 40, // 40-120 Mbps
+    hops: Math.floor(Math.random() * 18) + 8, // 8-25 hops
+    signalStrength: signalLevel,
+    bitrate: bitrate,
+    error: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
+    recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1)) // 1-7s
+  };
+
+  // Generate labeled metrics using metricCalculator
+  const metrics = {
+    packetLoss: networkStats.packetLoss,
+    latency: networkStats.latency,
+    jitter: networkStats.jitter,
+    error: networkStats.error,
+    recoveryTime: networkStats.recoveryTime
+  };
+
+  // Device is online, so generate labeled metrics normally
+  const labeledMetrics = generateLabeledMetrics(metrics, false);
+  const errorCategory = getErrorCategory(metrics);
+
   return {
     status: "online",
     responseTime: responseTime,
     error: null,
     signalLevel: signalLevel,
     bitrate: bitrate,
-    networkStats: {
-      sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
-      received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB  
-      latency: Math.floor(Math.random() * 30) + 10, // 10-40ms
-      jitter: Math.floor(Math.random() * 12) + 2, // 2-14ms
-      ttl: Math.floor(Math.random() * 10) + 58, // 58-67
-      packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)), // 0-0.8%
-      bandwidth: Math.floor(Math.random() * 80) + 40, // 40-120 Mbps
-      hops: Math.floor(Math.random() * 18) + 8, // 8-25 hops
-      signalStrength: signalLevel,
-      bitrate: bitrate
-    }
+    networkStats: networkStats,
+    labeledMetrics: labeledMetrics,
+    errorCategory: errorCategory
   };
 }
 
@@ -1037,6 +1076,50 @@ function generateDummyTVStatus() {
   const signalLevel = isOnline ? Math.floor(Math.random() * 30) + 70 : null; // 70-100%
   const model = ["Samsung Hospitality"][Math.floor(Math.random() * 3)];
 
+  let networkStats = null;
+  let labeledMetrics = null;
+  let errorCategory = null;
+
+  if (isOnline) {
+    networkStats = {
+      sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
+      received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB
+      latency: Math.floor(Math.random() * 40) + 8, // 8-48ms
+      jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
+      ttl: Math.floor(Math.random() * 8) + 60, // 60-67
+      packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
+      bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
+      hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
+      signalStrength: Math.floor(Math.random() * 30) + 70, // 70-100%
+      bitrate: Math.floor(Math.random() * 5000) + 3000, // 3000-8000 kbps
+      error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3%
+      recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s
+    };
+
+    // Generate labeled metrics using metricCalculator
+    const metrics = {
+      packetLoss: networkStats.packetLoss,
+      latency: networkStats.latency,
+      jitter: networkStats.jitter,
+      error: networkStats.error,
+      recoveryTime: networkStats.recoveryTime
+    };
+
+    labeledMetrics = generateLabeledMetrics(metrics, false); // isOffline = false
+    errorCategory = getErrorCategory(metrics);
+  } else {
+    // Generate labeled metrics for offline TV (all labels = 1)
+    const offlineMetrics = {
+      packetLoss: 0,
+      latency: 0,
+      jitter: 0,
+      error: 0,
+      recoveryTime: 0
+    };
+    labeledMetrics = generateLabeledMetrics(offlineMetrics, true); // isOffline = true
+    errorCategory = "Kategori-3"; // Unplug LAN TV for offline TVs
+  }
+
   return {
     status: isOnline ? "online" : "offline",
     responseTime,
@@ -1044,17 +1127,9 @@ function generateDummyTVStatus() {
     signalLevel,
     model,
     lastChecked: new Date().toISOString(),
-
-    networkStats: isOnline ? {
-      sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
-      received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB  
-      latency: Math.floor(Math.random() * 40) + 8, // 8-48ms
-      jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
-      ttl: Math.floor(Math.random() * 8) + 60, // 60-67
-      packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
-      bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
-      hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
-    } : null
+    networkStats: networkStats,
+    labeledMetrics: labeledMetrics,
+    errorCategory: errorCategory
   };
 }
 
@@ -1178,24 +1253,43 @@ async function checkMulticastConnectivity(ipAddress, timeout = 5000) {
         clearTimeout(timer);
         const responseTime = Date.now() - startTime;
         socket.destroy();
+
+        const networkStats = {
+          sent: (Math.random() * 12 + 5).toFixed(2),
+          received: (Math.random() * 10 + 3).toFixed(2),
+          latency: responseTime,
+          jitter: Math.floor(Math.random() * 8) + 1,
+          ttl: Math.floor(Math.random() * 10) + 55,
+          packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)),
+          bandwidth: Math.floor(Math.random() * 100) + 50,
+          hops: Math.floor(Math.random() * 12) + 8,
+          signalStrength: Math.floor(Math.random() * 30) + 70,
+          bitrate: Math.floor(Math.random() * 5000) + 3000,
+          error: parseFloat((Math.random() * 2).toFixed(2)),
+          recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1))
+        };
+
+        // Generate labeled metrics using metricCalculator
+        const metrics = {
+          packetLoss: networkStats.packetLoss,
+          latency: networkStats.latency,
+          jitter: networkStats.jitter,
+          error: networkStats.error,
+          recoveryTime: networkStats.recoveryTime
+        };
+
+        const labeledMetrics = generateLabeledMetrics(metrics);
+        const errorCategory = getErrorCategory(metrics);
+
         resolve({
           status: "online",
           responseTime: responseTime,
           error: null,
           signalLevel: Math.floor(Math.random() * 30) + 70, // 70-100%
           bitrate: Math.floor(Math.random() * 5000) + 3000, // 3000-8000 kbps
-          networkStats: {
-            sent: (Math.random() * 12 + 5).toFixed(2),
-            received: (Math.random() * 10 + 3).toFixed(2),
-            latency: responseTime,
-            jitter: Math.floor(Math.random() * 8) + 1,
-            ttl: Math.floor(Math.random() * 10) + 55,
-            packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)),
-            bandwidth: Math.floor(Math.random() * 100) + 50,
-            hops: Math.floor(Math.random() * 12) + 8,
-            signalStrength: Math.floor(Math.random() * 30) + 70,
-            bitrate: Math.floor(Math.random() * 5000) + 3000
-          }
+          networkStats: networkStats,
+          labeledMetrics: labeledMetrics,
+          errorCategory: errorCategory
         });
       }
     });
@@ -2431,6 +2525,15 @@ app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, asy
         channelType = "unknown";
       }
 
+      // Extract metrics from statusData for easier frontend access
+      const metrics = statusData.networkStats ? {
+        packetLoss: statusData.networkStats.packetLoss || 0,
+        latency: statusData.networkStats.latency || 0,
+        jitter: statusData.networkStats.jitter || 0,
+        error: statusData.networkStats.error || 0,
+        recoveryTime: statusData.networkStats.recoveryTime || 0
+      } : null;
+
       return {
         ...channel,
         ...statusData,
@@ -2439,7 +2542,11 @@ app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, asy
         isPingable: statusData.status === "online",
         statusText: statusData.status === "online" ? "Online" : "Offline",
         slug: generateSlug(channel.channelName),
-        urlSlug: generateSlug(channel.channelName) || channel.id.toString()
+        urlSlug: generateSlug(channel.channelName) || channel.id.toString(),
+        // Include metrics for CSV export
+        metrics: metrics,
+        labeledMetrics: statusData.labeledMetrics || null,
+        errorCategory: statusData.errorCategory || null
       };
     });
 
@@ -2790,7 +2897,9 @@ app.get("/api/channels/:id/metrics", authenticateToken, async (req, res) => {
         bandwidth: 0,
         hops: 0,
         signalStrength: 0,
-        bitrate: 0
+        bitrate: 0,
+        error: 0,
+        recoveryTime: 0
       };
 
       return res.json({
@@ -3442,7 +3551,9 @@ app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) 
           ttl: 0,
           packetLoss: 100,
           bandwidth: 0,
-          hops: 0
+          hops: 0,
+          error: 0,
+          recoveryTime: 0
         };
       }
 
@@ -3459,7 +3570,9 @@ app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) 
         ttl: Math.floor(Math.random() * 8) + 60, // 60-67 (realistic TTL)
         packetLoss: basePacketLoss,
         bandwidth: baseBandwidth,
-        hops: Math.floor(Math.random() * 12) + 10 // 10-21 hops
+        hops: Math.floor(Math.random() * 12) + 10, // 10-21 hops
+        error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3% error rate
+        recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s recovery time
       };
     };
 
@@ -4307,7 +4420,9 @@ app.get("/api/chromecast/:id/metrics", authenticateToken, async (req, res) => {
         bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
         hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
         signalStrength: result.signalLevel || Math.floor(Math.random() * 50) - 70, // -70 to -20 dBm
-        speed: result.speed || Math.max(1, (result.signalLevel || -50) + Math.floor(Math.random() * 20) - 10)
+        speed: result.speed || Math.max(1, (result.signalLevel || -50) + Math.floor(Math.random() * 20) - 10),
+        error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3% error rate
+        recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s recovery time
       };
     }
 

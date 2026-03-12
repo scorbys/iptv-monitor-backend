@@ -381,6 +381,60 @@ async function createAutoFixFromNotification(notificationId, fixType = 'automati
  * Update staff statistics when notification is resolved
  * Increases totalResolved and recalculates success rate
  */
+/**
+ * Calculate credit weight based on staff position and department
+ * Returns a value between 0 and 1 indicating how much credit to give for a fix
+ *
+ * Full credit (1.0):
+ *   - Finance department (Admin, IT Staff)
+ *   - Vendor department (Admin, IT Staff, Vendor Staff)
+ *
+ * Moderate credit (0.5):
+ *   - Engineering department (Technician)
+ *
+ * Minimal credit (0.2):
+ *   - Other department (Staff)
+ *   - Front Office department (Staff)
+ */
+function calculateStaffCreditWeight(staff) {
+  const position = staff.position?.toLowerCase() || '';
+  const department = staff.department?.toLowerCase() || '';
+
+  // Full credit for Finance department with Admin or IT Staff position
+  if (department === 'finance' && (position === 'admin' || position === 'it staff')) {
+    console.log(`[StaffStats] Full credit (1.0) for ${staff.name}: Finance department with ${staff.position} position`);
+    return 1.0;
+  }
+
+  // Full credit for Vendor department with Admin, IT Staff, or Vendor Staff position
+  if (department === 'vendor' && (position === 'admin' || position === 'it staff' || position === 'vendor staff')) {
+    console.log(`[StaffStats] Full credit (1.0) for ${staff.name}: Vendor department with ${staff.position} position`);
+    return 1.0;
+  }
+
+  // Moderate credit for Engineering department with Technician position
+  if (department === 'engineering' && position === 'technician') {
+    console.log(`[StaffStats] Moderate credit (0.5) for ${staff.name}: Engineering department with Technician position`);
+    return 0.5;
+  }
+
+  // Minimal credit for Other department with Staff position
+  if (department === 'other' && position === 'staff') {
+    console.log(`[StaffStats] Minimal credit (0.2) for ${staff.name}: Other department with Staff position`);
+    return 0.2;
+  }
+
+  // Minimal credit for Front Office department with Staff position
+  if (department === 'front office' && position === 'staff') {
+    console.log(`[StaffStats] Minimal credit (0.2) for ${staff.name}: Front Office department with Staff position`);
+    return 0.2;
+  }
+
+  // Default to moderate credit for other combinations
+  console.log(`[StaffStats] Moderate credit (0.5) for ${staff.name}: department="${staff.department}", position="${staff.position}"`);
+  return 0.5;
+}
+
 async function updateStaffStatsOnResolution(notification) {
   try {
     if (!notification.assignedStaffId) {
@@ -400,6 +454,9 @@ async function updateStaffStatsOnResolution(notification) {
       return { success: false, error: 'Staff not found' };
     }
 
+    // Calculate credit weight based on position and department
+    const creditWeight = calculateStaffCreditWeight(staff);
+
     // Calculate resolution time if available
     let resolutionTime = 0;
     if (notification.handlingStartTime) {
@@ -408,8 +465,9 @@ async function updateStaffStatsOnResolution(notification) {
       resolutionTime = Math.floor(resolutionTime / 1000 / 60); // Convert to minutes
     }
 
-    // Update staff stats
-    const newTotalResolved = (staff.stats?.totalResolved || 0) + 1;
+    // Update staff stats with weighted credit
+    const currentTotalResolved = staff.stats?.totalResolved || 0;
+    const newTotalResolved = currentTotalResolved + creditWeight;
     const newTotalAssigned = staff.stats?.totalAssigned || 0;
 
     // Calculate new success rate (resolved / assigned * 100), capped at 100%
@@ -420,29 +478,30 @@ async function updateStaffStatsOnResolution(notification) {
     // Calculate new average resolution time
     let newAvgResolutionTime = staff.stats?.avgResolutionTime || 0;
     if (resolutionTime > 0) {
-      const currentTotal = newAvgResolutionTime * (newTotalResolved - 1);
-      newAvgResolutionTime = Math.floor((currentTotal + resolutionTime) / newTotalResolved);
+      const currentTotal = newAvgResolutionTime * currentTotalResolved;
+      newAvgResolutionTime = Math.floor((currentTotal + resolutionTime) / (currentTotalResolved + 1));
     }
 
     await db.collection('staff').updateOne(
       { _id: new ObjectId(notification.assignedStaffId) },
       {
         $set: {
-          'stats.totalResolved': newTotalResolved,
-          'stats.successRate': newSuccessRate,
+          'stats.totalResolved': parseFloat(newTotalResolved.toFixed(2)),
+          'stats.successRate': parseFloat(newSuccessRate.toFixed(2)),
           'stats.avgResolutionTime': newAvgResolutionTime,
           updatedAt: new Date()
         }
       }
     );
 
-    console.log(`[StaffStats] Updated stats for ${staff.name}: resolved=${newTotalResolved}, successRate=${newSuccessRate.toFixed(1)}%`);
+    console.log(`[StaffStats] Updated stats for ${staff.name}: resolved=${newTotalResolved.toFixed(2)} (weight=${creditWeight}), successRate=${newSuccessRate.toFixed(1)}%`);
 
     return {
       success: true,
       staffId: notification.assignedStaffId,
       newTotalResolved,
-      newSuccessRate
+      newSuccessRate,
+      creditWeight
     };
   } catch (error) {
     console.error('[StaffStats] Error updating staff stats:', error);
