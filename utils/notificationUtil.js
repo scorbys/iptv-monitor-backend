@@ -827,5 +827,6 @@ module.exports = {
   autoResolveNotification,
   autoCloseOldNotifications,
   cleanupOldNotifications,
-  getNotificationStats
+  getNotificationStats,
+  calculateStaffCreditWeight
 };

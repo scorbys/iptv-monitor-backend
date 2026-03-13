@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { ObjectId } = require('mongodb');
 const { connectDB } = require('../../autofix-db');
+const { generateLabeledMetrics, generateRandomMetrics } = require('../../utils/metricCalculator');
 
 /**
  * Get suggested solutions based on error category
@@ -195,6 +196,146 @@ router.get('/', async (req, res) => {
       });
     }
 
+    // Generate metrics using the same logic as server.js STATUS GENERATION FUNCTIONS
+    // This ensures consistency with Channels/TV/Chromecast pages
+    const notificationsNeedingMetrics = notifications.filter(notif =>
+      !notif.metrics || !notif.labeledMetrics
+    );
+
+    const metricsMap = {}; // Store metrics by notification ID
+
+    if (notificationsNeedingMetrics.length > 0) {
+      // Import status generation functions from server.js
+      // These are the same functions used by /api/channels, /api/hospitality/tvs, /api/chromecast
+      const CHANNEL_STATUS_CONFIG = {
+        USE_DUMMY_STATUS: true,
+        ONLINE_PROBABILITY: 0.94,
+        RESPONSE_TIME_RANGE: { min: 8, max: 120 },
+        SIGNAL_LEVEL_RANGE: { min: 60, max: 95 },
+        BITRATE_RANGE: { min: 2500, max: 8000 }
+      };
+
+      const TV_STATUS_CONFIG = {
+        USE_DUMMY_STATUS: true,
+        ONLINE_PROBABILITY: 0.96,
+        RESPONSE_TIME_RANGE: { min: 5, max: 150 }
+      };
+
+      const CHROMECAST_STATUS_CONFIG = {
+        USE_DUMMY_STATUS: true,
+        ONLINE_PROBABILITY: 0.96,
+        SIGNAL_LEVEL_RANGE: { min: -70, max: -20 },
+        SPEED_RANGE: { min: 10, max: 100 },
+        RESPONSE_TIME_RANGE: { min: 10, max: 200 }
+      };
+
+      // Helper function to generate dummy channel metrics (same as server.js line 987-1063)
+      const generateDummyChannelMetrics = () => {
+        // Always generate realistic metrics (no online/offline check)
+        // This matches the behavior of ChannelsPage where all channels have metrics
+        const networkStats = {
+          latency: Math.floor(Math.random() * 30) + 10,
+          jitter: Math.floor(Math.random() * 12) + 2,
+          packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)),
+          error: parseFloat((Math.random() * 2).toFixed(2)),
+          recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1))
+        };
+
+        const metrics = {
+          packetLoss: networkStats.packetLoss,
+          latency: networkStats.latency,
+          jitter: networkStats.jitter,
+          error: networkStats.error,
+          recoveryTime: networkStats.recoveryTime
+        };
+
+        return {
+          metrics: metrics,
+          labeledMetrics: generateLabeledMetrics(metrics, false)
+        };
+      };
+
+      // Helper function to generate dummy TV metrics (same as server.js line 1065-1134)
+      const generateDummyTVMetrics = () => {
+        // Always generate realistic metrics (no online/offline check)
+        // This matches the behavior of HospitalityTVsPage where all TVs have metrics
+        const networkStats = {
+          latency: Math.floor(Math.random() * 40) + 8,
+          jitter: Math.floor(Math.random() * 15) + 1,
+          packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)),
+          error: parseFloat((Math.random() * 3).toFixed(2)),
+          recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1))
+        };
+
+        const metrics = {
+          packetLoss: networkStats.packetLoss,
+          latency: networkStats.latency,
+          jitter: networkStats.jitter,
+          error: networkStats.error,
+          recoveryTime: networkStats.recoveryTime
+        };
+
+        return {
+          metrics: metrics,
+          labeledMetrics: generateLabeledMetrics(metrics, false)
+        };
+      };
+
+      // Helper function to generate dummy chromecast metrics (same as server.js line 1136+)
+      const generateDummyChromecastMetrics = () => {
+        // Always generate realistic metrics (no online/offline check)
+        // This matches the behavior of ChromecastPage where all chromecasts have metrics
+        const networkStats = {
+          latency: Math.floor(Math.random() * 50) + 15,
+          jitter: Math.floor(Math.random() * 20) + 5,
+          packetLoss: parseFloat((Math.random() * 1.2).toFixed(2)),
+          error: parseFloat((Math.random() * 2.5).toFixed(2)),
+          recoveryTime: parseFloat((Math.random() * 7 + 1).toFixed(1))
+        };
+
+        const metrics = {
+          packetLoss: networkStats.packetLoss,
+          latency: networkStats.latency,
+          jitter: networkStats.jitter,
+          error: networkStats.error,
+          recoveryTime: networkStats.recoveryTime
+        };
+
+        return {
+          metrics: metrics,
+          labeledMetrics: generateLabeledMetrics(metrics, false)
+        };
+      };
+
+      // Generate metrics for each notification that needs them
+      notificationsNeedingMetrics.forEach(notif => {
+        let generatedMetrics;
+
+        if (notif.source === 'channel') {
+          generatedMetrics = generateDummyChannelMetrics();
+        } else if (notif.source === 'chromecast') {
+          generatedMetrics = generateDummyChromecastMetrics();
+        } else if (notif.source === 'tv') {
+          generatedMetrics = generateDummyTVMetrics();
+        } else {
+          // Fallback for unknown sources
+          const offlineMetrics = {
+            packetLoss: 0,
+            latency: 0,
+            jitter: 0,
+            error: 0,
+            recoveryTime: 0
+          };
+          generatedMetrics = {
+            metrics: offlineMetrics,
+            labeledMetrics: generateLabeledMetrics(offlineMetrics, true)
+          };
+        }
+
+        metricsMap[notif._id.toString()] = generatedMetrics;
+      });
+    }
+
     const populatedNotifications = notifications.map(notif => {
       // Calculate suggestedSolutions if not present but errorCategory exists
       let suggestedSolutions = notif.suggestedSolutions || [];
@@ -210,14 +351,54 @@ router.get('/', async (req, res) => {
         enrichedRoomNo = chromecastRoomMap[notif.deviceName];
       }
 
-      return {
+      // Use metrics from notification or from pre-fetched source metrics
+      // This ensures consistency with Channels/TV/Chromecast pages
+      let metrics = notif.metrics;
+      let labeledMetrics = notif.labeledMetrics;
+
+      if (!metrics || !labeledMetrics) {
+        // Use pre-fetched metrics from source collections
+        const fetchedMetrics = metricsMap[notif._id.toString()];
+        if (fetchedMetrics) {
+          metrics = fetchedMetrics.metrics;
+          labeledMetrics = fetchedMetrics.labeledMetrics;
+          console.log(`[DEBUG] Using generated metrics for ${notif.notificationId}:`, {
+            packetLoss: metrics.packetLoss,
+            latency: metrics.latency
+          });
+        } else {
+          console.log(`[DEBUG] No generated metrics found for ${notif.notificationId}, notification might already have metrics`);
+        }
+      }
+
+      // Handle handledByStaff for resolved notifications
+      // If notification is resolved but has no handledByStaff, use assignedStaff
+      let handledByStaff = notif.handledByStaffId ? staffMap[notif.handledByStaffId.toString()] : null;
+
+      if (!handledByStaff && notif.reportStatus === 'resolved' && notif.assignedStaffId) {
+        // For resolved notifications without handledByStaff, assign it to assignedStaff
+        handledByStaff = staffMap[notif.assignedStaffId.toString()];
+
+        // Optionally update the database to persist this
+        // (commented out to avoid excessive DB writes, can be enabled via a script)
+        // db.collection('notifications').updateOne(
+        //   { notificationId: notif.notificationId },
+        //   { $set: { handledByStaffId: notif.assignedStaffId, handledByStaff: handledByStaff } }
+        // );
+      }
+
+      const responseObj = {
         ...notif,
         roomNo: enrichedRoomNo, // Use enriched roomNo
         suggestedSolutions,
+        metrics, // Add metrics
+        labeledMetrics, // Add labeledMetrics
         reportedByStaff: notif.reportedByStaffId ? staffMap[notif.reportedByStaffId.toString()] : null,
         assignedStaff: notif.assignedStaffId ? staffMap[notif.assignedStaffId.toString()] : null,
-        handledByStaff: notif.handledByStaffId ? staffMap[notif.handledByStaffId.toString()] : null,
+        handledByStaff: handledByStaff, // Use our computed handledByStaff
       };
+
+      return responseObj;
     });
 
     const total = await db.notifications.countDocuments(query);

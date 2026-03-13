@@ -6,6 +6,7 @@
 
 const { connectDB } = require('../autofix-db');
 const { updateStaffStatsOnResolution } = require('../utils/notificationUtil');
+const { evaluateAndPerformHandoff } = require('../utils/staffHandoffUtil');
 
 // Configuration: How long to wait before auto-resolving (in seconds)
 const AUTO_RESOLVE_TIME = {
@@ -51,17 +52,75 @@ async function checkAndAutoResolve() {
         console.log(`   Assigned: ${handlingStartTime.toLocaleTimeString()}`);
         console.log(`   Elapsed: ${elapsedSeconds}s (target: ${resolveTimeSeconds}s)`);
 
+        // ===== DYNAMIC HANDOFF SYSTEM =====
+        // Evaluate if we should handoff to a different staff member
+        let handoffResult = null;
+        if (notification.assignedStaffId) {
+          handoffResult = await evaluateAndPerformHandoff(
+            notification.notificationId,
+            notification.assignedStaffId
+          );
+        }
+
+        // Get assigned staff details for population
+        let handledByStaff = null;
+        let handledByStaffId = null;
+
+        if (notification.assignedStaffId) {
+          try {
+            // If handoff occurred, use the new handling staff
+            if (handoffResult && handoffResult.handoffOccurred) {
+              handledByStaff = handoffResult.handledByStaff;
+              handledByStaffId = handledByStaff.id;
+              console.log(`   🔄 STAFF HANDOFF: Using ${handledByStaff.name} as handledByStaff`);
+            } else {
+              // No handoff, use assigned staff as handler
+              const assignedStaffDoc = await db.collection('staff').findOne({
+                _id: typeof notification.assignedStaffId === 'string'
+                  ? new ObjectId(notification.assignedStaffId)
+                  : notification.assignedStaffId
+              });
+
+              if (assignedStaffDoc) {
+                handledByStaff = {
+                  id: assignedStaffDoc._id.toString(),
+                  name: assignedStaffDoc.name,
+                  email: assignedStaffDoc.email,
+                  department: assignedStaffDoc.department,
+                  position: assignedStaffDoc.position
+                };
+                handledByStaffId = notification.assignedStaffId;
+                console.log(`   ✅ NO HANDOFF: ${handledByStaff.name} handles resolution`);
+              }
+            }
+          } catch (error) {
+            console.warn(`   ⚠ Could not find staff for assignedStaffId: ${notification.assignedStaffId}`);
+          }
+        }
+
         // Update notification to resolved
+        const updateData = {
+          reportStatus: 'resolved',
+          currentStatus: 'online', // Device recovered
+          handlingEndTime: now,
+          resolvedReason: `Auto-resolved after ${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`,
+          updatedAt: now
+        };
+
+        // Set handledByStaffId and handledByStaff based on handoff decision
+        if (handledByStaffId) {
+          updateData.handledByStaffId = handledByStaffId;
+        }
+
+        // Populate handledByStaff object
+        if (handledByStaff) {
+          updateData.handledByStaff = handledByStaff;
+        }
+
         await db.collection('notifications').updateOne(
           { notificationId: notification.notificationId },
           {
-            $set: {
-              reportStatus: 'resolved',
-              currentStatus: 'online', // Device recovered
-              handlingEndTime: now,
-              resolvedReason: `Auto-resolved after ${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`,
-              updatedAt: now
-            },
+            $set: updateData,
             $push: {
               notes: {
                 note: `Issue automatically resolved - Device is now online`,
@@ -118,7 +177,20 @@ async function checkAndAutoResolve() {
         }
 
         // Update staff statistics
-        await updateStaffStatsOnResolution(notification);
+        // If handoff occurred, update stats for handledByStaff, otherwise assignedStaff
+        if (handoffResult && handoffResult.handoffOccurred) {
+          // Update stats for the staff who actually handled the resolution
+          const notificationForStats = {
+            ...notification,
+            assignedStaffId: handledByStaffId // Temporarily override for stats update
+          };
+          await updateStaffStatsOnResolution(notificationForStats);
+          console.log(`   📊 Stats updated for ${handledByStaff.name} (handled resolution)`);
+        } else {
+          // No handoff, update stats for assigned staff
+          await updateStaffStatsOnResolution(notification);
+          console.log(`   📊 Stats updated for assigned staff`);
+        }
 
         resolvedCount++;
 
