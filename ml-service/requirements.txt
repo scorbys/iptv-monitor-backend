@@ -1,5 +1,6 @@
 # Requirements for Python 3.14+
 # Using latest versions that support Python 3.14
+# Note: xlrd is not needed as we use pandas for Excel handling
 
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0

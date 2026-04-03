@@ -2,7 +2,6 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
-import xlrd
 from imblearn.ensemble import BalancedRandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
@@ -88,8 +87,10 @@ class MLModelService:
             raise ValueError("Excel file is empty")
         except pd.errors.ParserError:
             raise ValueError("Invalid Excel file format")
-        except xlrd.biffh.XLRDError:
-            raise ValueError(f"Sheet '{sheet_name}' not found in Excel file")
+        except ValueError as e:
+            if "Worksheet" in str(e) or "sheet" in str(e).lower():
+                raise ValueError(f"Sheet '{sheet_name}' not found in Excel file")
+            raise
         except Exception as e:
             raise Exception(f"Error reading Excel file: {e}")
 
