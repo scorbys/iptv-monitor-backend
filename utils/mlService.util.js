@@ -86,12 +86,29 @@ async function getModelInfo() {
  */
 async function predict(text) {
   try {
-    const response = await mlServiceClient.post('/api/predict', { text });
+    // Input validation
+    if (!text || typeof text !== 'string') {
+      throw new Error('Text must be a non-empty string');
+    }
+
+    const trimmedText = text.trim();
+    if (trimmedText.length === 0) {
+      throw new Error('Text cannot be empty');
+    }
+
+    if (trimmedText.length > 10000) {
+      throw new Error('Text too long (max 10000 characters)');
+    }
+
+    const response = await mlServiceClient.post('/api/predict', { text: trimmedText });
     return response.data;
   } catch (error) {
     if (error.response) {
       console.error('Prediction failed:', error.response.data);
       throw new Error(error.response.data.detail || 'Prediction failed');
+    } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      console.error('ML Service unavailable');
+      throw new Error('ML Service is currently unavailable. Please try again later.');
     }
     console.error('Prediction error:', error.message);
     throw new Error('Failed to make prediction');
@@ -106,6 +123,24 @@ async function predict(text) {
  */
 async function trainModel(fileBuffer, filename, sheetName = 'Sheet1') {
   try {
+    // Input validation
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new Error('File buffer is empty');
+    }
+
+    if (!filename || typeof filename !== 'string') {
+      throw new Error('Invalid filename');
+    }
+
+    if (!sheetName || typeof sheetName !== 'string' || sheetName.trim().length === 0) {
+      throw new Error('Invalid sheet name');
+    }
+
+    // Check file size (max 50MB)
+    if (fileBuffer.length > 50 * 1024 * 1024) {
+      throw new Error('File size exceeds 50MB limit');
+    }
+
     console.log(`[ML Service] Starting training for file: ${filename}, sheet: ${sheetName}`);
     const FormData = require('form-data');
     const form = new FormData();
@@ -135,6 +170,9 @@ async function trainModel(fileBuffer, filename, sheetName = 'Sheet1') {
     } else if (error.code === 'ECONNABORTED') {
       console.error('[ML Service] Training timeout - operation took too long');
       throw new Error('Training timeout. The operation took too long. Please try with a smaller dataset.');
+    } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      console.error('[ML Service] Service unavailable');
+      throw new Error('ML Service is currently unavailable. Please try again later.');
     }
     console.error('[ML Service] Training error:', error.message);
     throw new Error(`Failed to train model: ${error.message}`);

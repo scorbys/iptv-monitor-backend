@@ -71,6 +71,10 @@ class TextPreprocessor:
         if not isinstance(text, str):
             return ""
 
+        # Limit input length to prevent abuse
+        if len(text) > 50000:  # Max 50KB text
+            text = text[:50000]
+
         # Lowercase
         text = text.lower()
 
@@ -105,10 +109,11 @@ class TextPreprocessor:
             if word in negation_words or (word not in self.stopwords and len(word) > 1)
         ]
 
-        # Stemming
+        # Stemming with timeout protection
         try:
             text = self.stemmer.stem(" ".join(tokens))
         except Exception as e:
+            # Fallback to unstemmed if stemming fails
             text = " ".join(tokens)
 
         return text

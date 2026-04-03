@@ -2,6 +2,7 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
+import xlrd
 from imblearn.ensemble import BalancedRandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
@@ -70,9 +71,25 @@ class MLModelService:
     def train_from_excel(self, file_path: str, sheet_name: str = "Sheet1") -> Dict[str, Any]:
         """Train model from Excel file"""
         try:
-            # Read Excel file
+            # Validate file exists and is readable
+            if not os.path.exists(file_path):
+                raise ValueError(f"File not found: {file_path}")
+
+            if not os.access(file_path, os.R_OK):
+                raise ValueError(f"File not readable: {file_path}")
+
+            # Validate sheet_name
+            if not isinstance(sheet_name, str) or len(sheet_name.strip()) == 0:
+                raise ValueError("Invalid sheet name")
+
             df = pd.read_excel(file_path, sheet_name=sheet_name)
             return self.train_from_dataframe(df)
+        except pd.errors.EmptyDataError:
+            raise ValueError("Excel file is empty")
+        except pd.errors.ParserError:
+            raise ValueError("Invalid Excel file format")
+        except xlrd.biffh.XLRDError:
+            raise ValueError(f"Sheet '{sheet_name}' not found in Excel file")
         except Exception as e:
             raise Exception(f"Error reading Excel file: {e}")
 
@@ -100,8 +117,17 @@ class MLModelService:
             self.label_encoder = LabelEncoder()
             y = self.label_encoder.fit_transform(df["label_group"])
 
+            print(f"Classes after encoding: {list(self.label_encoder.classes_)}")
+            print(f"Class distribution: {np.bincount(y)}")
+
             # Preprocess text
             df["comment_clean"] = df[comment_col].apply(self.preprocessor.preprocess)
+
+            # Debug logging
+            print(f"Data shape after cleaning: {df.shape}")
+            print(f"Comment column: {comment_col}, Label column: {label_col}")
+            print(f"Sample comment_clean: {df['comment_clean'].head(3).tolist()}")
+            print(f"Unique labels: {df[label_col].unique()[:5]}")  # First 5 unique labels
 
             # Extract numeric features
             df["text_len"] = df[comment_col].apply(len)
@@ -133,6 +159,9 @@ class MLModelService:
             X_train_tfidf = self.tfidf.fit_transform(X_train_text)
             X_test_tfidf = self.tfidf.transform(X_test_text)
 
+            print(f"TF-IDF vocabulary size: {len(self.tfidf.vocabulary_)}")
+            print(f"Sample TF-IDF features: {list(self.tfidf.get_feature_names_out()[:10])}")
+
             # Numeric features
             X_train_num = sparse.csr_matrix(df.loc[train_idx, ["text_len", "word_count"]].values)
             X_test_num = sparse.csr_matrix(df.loc[test_idx, ["text_len", "word_count"]].values)
@@ -141,9 +170,14 @@ class MLModelService:
             X_train = sparse.hstack([X_train_tfidf, X_train_num])
             X_test = sparse.hstack([X_test_tfidf, X_test_num])
 
-            # Apply SMOTE
-            smote = SMOTE(random_state=config.RANDOM_STATE)
-            X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
+            # Apply SMOTE conditionally based on config
+            if config.SMOTE_ENABLED:
+                smote = SMOTE(random_state=config.RANDOM_STATE)
+                X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
+                print("SMOTE applied to training data.")
+            else:
+                X_train_res, y_train_res = X_train, y_train
+                print("SMOTE not applied (matching Colab behavior).")
 
             # Train model
             self.model = BalancedRandomForestClassifier(
@@ -165,6 +199,12 @@ class MLModelService:
             # Evaluate - BalancedRandomForest can handle sparse arrays directly
             y_pred = self.model.predict(X_test)
             accuracy = accuracy_score(y_test, y_pred)
+
+            # Debug logging
+            print(f"Training completed. Accuracy: {accuracy:.4f}")
+            print(f"Number of features: {X_train.shape[1]}")
+            print(f"Training samples: {X_train_res.shape[0]}, Test samples: {X_test.shape[0]}")
+            print(f"SMOTE enabled: {config.SMOTE_ENABLED}")
 
             # Classification report
             unique_labels = np.unique(y_test)

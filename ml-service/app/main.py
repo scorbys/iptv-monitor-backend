@@ -6,6 +6,7 @@ import os
 import shutil
 import logging
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from app.config import config
@@ -122,30 +123,52 @@ async def predict(request: PredictRequest):
     if not ml_service.is_trained:
         raise HTTPException(status_code=400, detail="Model is not trained yet")
 
+    # Input validation
+    if not request.text or len(request.text.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    if len(request.text) > 10000:  # Max 10KB text
+        raise HTTPException(status_code=400, detail="Text too long (max 10000 characters)")
+
     try:
         result = ml_service.predict(request.text)
         return result
     except Exception as e:
         logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Prediction failed")
 
 # Train model endpoint
 @app.post("/api/model/train", response_model=TrainResponse)
 async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
     """Train model from uploaded Excel file"""
     try:
+        # Input validation
+        if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
+
+        if len(sheet_name.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Sheet name cannot be empty")
+
         logger.info(f"Received training request - File: {file.filename}, Sheet: {sheet_name}")
 
-        # Save uploaded file
+        # Check file size (max 50MB)
+        file_content = await file.read()
+        if len(file_content) > 50 * 1024 * 1024:  # 50MB
+            raise HTTPException(status_code=400, detail="File size exceeds 50MB limit")
+
+        # Save uploaded file with secure filename
         os.makedirs(config.DATA_DIR, exist_ok=True)
-        file_path = os.path.join(config.DATA_DIR, file.filename)
+        secure_filename = "".join(c for c in file.filename if c.isalnum() or c in "._-").strip()
+        if not secure_filename:
+            secure_filename = f"upload_{int(time.time())}.xlsx"
+        file_path = os.path.join(config.DATA_DIR, secure_filename)
 
         logger.info(f"Saving file to: {file_path}")
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(file_content)
 
         # Train model in thread pool to avoid blocking
-        logger.info(f"Starting model training with file: {file.filename}")
+        logger.info(f"Starting model training with file: {secure_filename}")
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -155,7 +178,7 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
             sheet_name
         )
 
-        logger.info(f"Model trained successfully. Accuracy: {result.get('accuracy', 0):.2%}")
+        logger.info(f"Model trained successfully. Accuracy: {result.get('accuracy', 0):.4f}, OOB: {result.get('oob_score', 0):.4f}, Features: {result.get('n_features', 0)}")
 
         return TrainResponse(
             success=True,
@@ -168,9 +191,11 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
             n_features=result.get("n_features")
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Training error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
 # Delete model endpoint
 @app.delete("/api/model")
