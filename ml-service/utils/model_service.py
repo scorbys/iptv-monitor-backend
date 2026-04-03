@@ -163,6 +163,12 @@ class MLModelService:
             print(f"TF-IDF vocabulary size: {len(self.tfidf.vocabulary_)}")
             print(f"Sample TF-IDF features: {list(self.tfidf.get_feature_names_out()[:10])}")
 
+            # Debug exports
+            df.loc[train_idx].to_csv(os.path.join(config.ARTIFACTS_DIR, "debug_train_data.csv"), index=False)
+            df.loc[test_idx].to_csv(os.path.join(config.ARTIFACTS_DIR, "debug_test_data.csv"), index=False)
+            with open(os.path.join(config.ARTIFACTS_DIR, "debug_tfidf_features.txt"), "w", encoding="utf-8") as f:
+                f.write("\n".join(self.tfidf.get_feature_names_out()))
+
             # Numeric features
             X_train_num = sparse.csr_matrix(df.loc[train_idx, ["text_len", "word_count"]].values)
             X_test_num = sparse.csr_matrix(df.loc[test_idx, ["text_len", "word_count"]].values)
@@ -233,7 +239,14 @@ class MLModelService:
                 "classes": list(self.label_encoder.classes_),
                 "n_features": X_train.shape[1],
                 "train_samples": X_train_res.shape[0],  # Use shape[0] for sparse arrays
-                "test_samples": X_test.shape[0]  # Use shape[0] for consistency
+                "test_samples": X_test.shape[0],  # Use shape[0] for consistency
+                "debug_info": {
+                    "vocab_size": len(self.tfidf.vocabulary_),
+                    "sample_features": list(self.tfidf.get_feature_names_out()[:20]),
+                    "sample_train_comments": df.loc[train_idx, "comment_clean"].head(5).tolist(),
+                    "data_shape": df.shape,
+                    "train_test_split": len(train_idx) / len(df)
+                }
             }
 
         except Exception as e:

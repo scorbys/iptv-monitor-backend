@@ -75,25 +75,10 @@ class TextPreprocessor:
         if len(text) > 50000:  # Max 50KB text
             text = text[:50000]
 
-        # Lowercase
-        text = text.lower()
+        # Lowercase + remove URLs
+        text = re.sub(r"http\S+", " ", text.lower())
 
-        # Remove URLs
-        text = re.sub(r"http\S+|www\.\S+", " ", text)
-
-        # Remove symbols (keep hyphens for technical terms)
-        text = re.sub(r"[^a-z0-9\s\-]", " ", text)
-
-        # Clean up spacing
-        text = re.sub(r"\s+", " ", text).strip()
-
-        # Expand slang
-        text = self.expand_slang(text)
-
-        # Normalize technical terms
-        text = self.normalize_tech_words(text)
-
-        # Remove symbols again after technical normalization
+        # Remove symbols (keep letters, numbers, spaces)
         text = re.sub(r"[^a-z0-9\s]", " ", text)
 
         # Remove numbers
@@ -101,6 +86,9 @@ class TextPreprocessor:
 
         # Clean up spacing
         text = re.sub(r"\s+", " ", text).strip()
+
+        # Expand slang
+        text = self.expand_slang(text)
 
         # Remove stopwords (but keep negation words)
         negation_words = {"tidak", "bukan", "jangan"}
