@@ -362,10 +362,10 @@ router.get('/', async (req, res) => {
         if (fetchedMetrics) {
           metrics = fetchedMetrics.metrics;
           labeledMetrics = fetchedMetrics.labeledMetrics;
-          console.log(`[DEBUG] Using generated metrics for ${notif.notificationId}:`, {
+          /* console.log(`[DEBUG] Using generated metrics for ${notif.notificationId}:`, {
             packetLoss: metrics.packetLoss,
             latency: metrics.latency
-          });
+          }); */
         } else {
           console.log(`[DEBUG] No generated metrics found for ${notif.notificationId}, notification might already have metrics`);
         }
