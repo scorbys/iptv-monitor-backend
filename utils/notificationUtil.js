@@ -171,7 +171,7 @@ async function saveNotificationToDB(notificationData) {
         // 2. Create auto-fix log based on ML prediction
         if (mlResult.success) {
           console.log(`[Notification] Step 2: Creating auto-fix for ${notificationId}...`);
-          await createAutoFixFromNotification(notificationId, 'automatic');
+          await createAutoFixFromNotification(notificationId, 'automatic', mlResult.prediction); // ← teruskan prediction
           console.log(`[Notification] ML prediction and auto-fix created for: ${notificationId}`);
         } else {
           console.log(`[Notification] Skipping auto-fix creation due to ML prediction failure`);
@@ -294,7 +294,7 @@ async function triggerMLPrediction(notificationId) {
 /**
  * Create auto-fix log from notification
  */
-async function createAutoFixFromNotification(notificationId, fixType = 'automatic') {
+async function createAutoFixFromNotification(notificationId, fixType = 'automatic', existingPrediction = null) {
   try {
     const connection = await connectDB();
     const client = connection.client;
@@ -306,15 +306,18 @@ async function createAutoFixFromNotification(notificationId, fixType = 'automati
       throw new Error('Notification not found');
     }
 
+    const predictionText = `${notification.message} ${notification.error || ''} ${notification.deviceName || ''}`;
     // Check if ML service is available and trained
     const mlService = require('./mlService.util');
-    let mlPrediction = null;
+    let mlPrediction = existingPrediction;
 
-    try {
-      const predictionText = `${notification.message} ${notification.error || ''} ${notification.deviceName || ''}`;
-      mlPrediction = await mlService.predict(predictionText);
-    } catch (mlError) {
-      console.log('[AutoFix] ML service not available, using category from notification');
+    if (!mlPrediction) {
+      try {
+        mlPrediction = await mlService.predict(predictionText);
+      } catch (mlError) {
+        console.log('[AutoFix] ML service not available, using category from notification');
+        mlPrediction = null;
+      }
     }
 
     const category = mlPrediction?.predicted_label || notification.errorCategory || 'unknown';

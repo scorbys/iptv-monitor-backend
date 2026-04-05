@@ -984,8 +984,21 @@ const FAQ_DATA = [
 ];
 
 // ==================== STATUS GENERATION FUNCTIONS ====================
-function generateDummyChannelStatus() {
+const dummyStatusCache = new Map(); // deviceId → { status, expiresAt }
+const dummyTVStatusCache = new Map();       // roomNo → { status, expiresAt }
+const dummyChromecastStatusCache = new Map(); // idCast → { status, expiresAt }
+
+function generateDummyChannelStatus(deviceId) {
+  const cached = dummyStatusCache.get(deviceId);
+  const now = Date.now();
+
+  // Use cached status for 4 hours before re-rolling
+  if (cached && now < cached.expiresAt) {
+    return cached.status;
+  }
+
   const isOnline = Math.random() < CHANNEL_STATUS_CONFIG.ONLINE_PROBABILITY;
+  let status;
 
   if (!isOnline) {
     // Generate labeled metrics for offline device (all labels = 1)
@@ -998,7 +1011,7 @@ function generateDummyChannelStatus() {
     };
     const labeledMetrics = generateLabeledMetrics(offlineMetrics, true); // isOffline = true
 
-    return {
+    status = {
       status: "offline",
       responseTime: null,
       error: ["Stream source unavailable", "Multicast timeout", "Encoder offline"][Math.floor(Math.random() * 3)],
@@ -1008,61 +1021,73 @@ function generateDummyChannelStatus() {
       labeledMetrics: labeledMetrics,
       errorCategory: "Kategori-7" // Connection Failure for offline devices
     };
+  } else {
+    const signalLevel = Math.floor(Math.random() *
+      (CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max - CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min + 1))
+      + CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min;
+
+    const responseTime = Math.floor(Math.random() *
+      (CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1))
+      + CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min;
+
+    const bitrate = Math.floor(Math.random() *
+      (CHANNEL_STATUS_CONFIG.BITRATE_RANGE.max - CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min + 1))
+      + CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min;
+
+    const networkStats = {
+      sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
+      received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
+      latency: Math.floor(Math.random() * 30) + 10, // 10-40ms
+      jitter: Math.floor(Math.random() * 12) + 2, // 2-14ms
+      ttl: Math.floor(Math.random() * 10) + 58, // 58-67
+      packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)), // 0-0.8%
+      bandwidth: Math.floor(Math.random() * 80) + 40, // 40-120 Mbps
+      hops: Math.floor(Math.random() * 18) + 8, // 8-25 hops
+      signalStrength: signalLevel,
+      bitrate: bitrate,
+      error: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
+      recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1)) // 1-7s
+    };
+
+    // Generate labeled metrics using metricCalculator
+    const metrics = {
+      packetLoss: networkStats.packetLoss,
+      latency: networkStats.latency,
+      jitter: networkStats.jitter,
+      error: networkStats.error,
+      recoveryTime: networkStats.recoveryTime
+    };
+
+    // Device is online, so generate labeled metrics normally
+    const labeledMetrics = generateLabeledMetrics(metrics, false);
+    const errorCategory = getErrorCategory(metrics);
+
+    status = {
+      status: "online",
+      responseTime: responseTime,
+      error: null,
+      signalLevel: signalLevel,
+      bitrate: bitrate,
+      networkStats: networkStats,
+      labeledMetrics: labeledMetrics,
+      errorCategory: errorCategory
+    };
   }
 
-  const signalLevel = Math.floor(Math.random() *
-    (CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max - CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min + 1))
-    + CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min;
-
-  const responseTime = Math.floor(Math.random() *
-    (CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1))
-    + CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min;
-
-  const bitrate = Math.floor(Math.random() *
-    (CHANNEL_STATUS_CONFIG.BITRATE_RANGE.max - CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min + 1))
-    + CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min;
-
-  const networkStats = {
-    sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
-    received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
-    latency: Math.floor(Math.random() * 30) + 10, // 10-40ms
-    jitter: Math.floor(Math.random() * 12) + 2, // 2-14ms
-    ttl: Math.floor(Math.random() * 10) + 58, // 58-67
-    packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)), // 0-0.8%
-    bandwidth: Math.floor(Math.random() * 80) + 40, // 40-120 Mbps
-    hops: Math.floor(Math.random() * 18) + 8, // 8-25 hops
-    signalStrength: signalLevel,
-    bitrate: bitrate,
-    error: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
-    recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1)) // 1-7s
-  };
-
-  // Generate labeled metrics using metricCalculator
-  const metrics = {
-    packetLoss: networkStats.packetLoss,
-    latency: networkStats.latency,
-    jitter: networkStats.jitter,
-    error: networkStats.error,
-    recoveryTime: networkStats.recoveryTime
-  };
-
-  // Device is online, so generate labeled metrics normally
-  const labeledMetrics = generateLabeledMetrics(metrics, false);
-  const errorCategory = getErrorCategory(metrics);
-
-  return {
-    status: "online",
-    responseTime: responseTime,
-    error: null,
-    signalLevel: signalLevel,
-    bitrate: bitrate,
-    networkStats: networkStats,
-    labeledMetrics: labeledMetrics,
-    errorCategory: errorCategory
-  };
+  // Simpan ke cache selama 4 jam
+  dummyStatusCache.set(deviceId, { status, expiresAt: now + 4 * 60 * 60 * 1000 });
+  return status;
 }
 
-function generateDummyTVStatus() {
+function generateDummyTVStatus(deviceId = 'default') {
+  const cached = dummyTVStatusCache.get(deviceId);
+  const now = Date.now();
+
+  // Use cached status for 4 hours before re-rolling
+  if (cached && now < cached.expiresAt) {
+    return cached.status;
+  }
+
   const isOnline = Math.random() < TV_STATUS_CONFIG.ONLINE_PROBABILITY;
   const responseTime = isOnline
     ? Math.floor(
@@ -1120,7 +1145,7 @@ function generateDummyTVStatus() {
     errorCategory = "Kategori-3"; // Unplug LAN TV for offline TVs
   }
 
-  return {
+  const returnValue = {
     status: isOnline ? "online" : "offline",
     responseTime,
     error: isOnline ? null : ["Device unreachable", "Network timeout", "Connection refused"][Math.floor(Math.random() * 3)],
@@ -1131,13 +1156,25 @@ function generateDummyTVStatus() {
     labeledMetrics: labeledMetrics,
     errorCategory: errorCategory
   };
+
+  dummyTVStatusCache.set(deviceId, { status: returnValue, expiresAt: now + 4 * 60 * 60 * 1000 });
+  return returnValue;
 }
 
-function generateDummyChromecastStatus() {
+function generateDummyChromecastStatus(deviceId = 'default') {
+  const cached = dummyChromecastStatusCache.get(deviceId);
+  const now = Date.now();
+
+  // Use cached status for 4 hours before re-rolling
+  if (cached && now < cached.expiresAt) {
+    return cached.status;
+  }
+
   const isOnline = Math.random() < CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY;
+  let returnValue;
 
   if (!isOnline) {
-    return {
+    returnValue = {
       isPingable: false,
       isOnline: false,
       signalLevel: null,
@@ -1146,22 +1183,24 @@ function generateDummyChromecastStatus() {
       lastSeen: null,
       error: ["Device unreachable", "Network timeout", "Connection refused"][Math.floor(Math.random() * 3)],
     };
+  } else {
+    const signalLevel = Math.floor(Math.random() * 50) - 70;
+    const baseSpeed = Math.max(10, 100 + signalLevel);
+    const speed = baseSpeed + Math.floor(Math.random() * 20) - 10;
+    const responseTime = Math.max(5, Math.abs(signalLevel) - 20 + Math.floor(Math.random() * 50));
+    returnValue = {
+      isPingable: true,
+      isOnline: true,
+      signalLevel,
+      speed: Math.max(1, speed),
+      responseTime: Math.max(1, responseTime),
+      lastSeen: new Date().toISOString(),
+      error: null,
+    };
   }
 
-  const signalLevel = Math.floor(Math.random() * 50) - 70; // -70 to -20 dBm
-  const baseSpeed = Math.max(10, 100 + signalLevel); // Better signal = better speed
-  const speed = baseSpeed + Math.floor(Math.random() * 20) - 10; // Add some variation
-  const responseTime = Math.max(5, Math.abs(signalLevel) - 20 + Math.floor(Math.random() * 50)); // Worse signal = higher latency
-
-  return {
-    isPingable: true,
-    isOnline: true,
-    signalLevel: signalLevel,
-    speed: Math.max(1, speed),
-    responseTime: Math.max(1, responseTime),
-    lastSeen: new Date().toISOString(),
-    error: null,
-  };
+  dummyChromecastStatusCache.set(deviceId, { status: returnValue, expiresAt: now + 4 * 60 * 60 * 1000 });
+  return returnValue;
 }
 
 function generateHistoricalNetworkData(timeRange, isOnline) {
@@ -1218,12 +1257,10 @@ function generateHistoricalNetworkData(timeRange, isOnline) {
 }
 
 // ==================== CONNECTIVITY CHECK FUNCTIONS ====================
-async function checkMulticastConnectivity(ipAddress, timeout = 5000) {
+async function checkMulticastConnectivity(ipAddress, timeout = 5000, deviceId = ipAddress) {
   if (CHANNEL_STATUS_CONFIG.USE_DUMMY_STATUS) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.random() * 500 + 200)
-    );
-    return generateDummyChannelStatus();
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 200));
+    return generateDummyChannelStatus(deviceId); // ← teruskan deviceId
   }
 
   return new Promise((resolve) => {
@@ -1312,12 +1349,10 @@ async function checkMulticastConnectivity(ipAddress, timeout = 5000) {
   });
 }
 
-async function checkTVConnectivity(ipAddress, timeout = 5000) {
+async function checkTVConnectivity(ipAddress, timeout = 5000, deviceId = ipAddress) {
   if (TV_STATUS_CONFIG.USE_DUMMY_STATUS) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.random() * 500 + 200)
-    );
-    return generateDummyTVStatus();
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 200));
+    return generateDummyTVStatus(deviceId); // ← teruskan deviceId
   }
 
   return new Promise((resolve) => {
@@ -1367,12 +1402,10 @@ async function checkTVConnectivity(ipAddress, timeout = 5000) {
   });
 }
 
-async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
+async function checkChromecastConnectivity(ipAddr, timeout = 5000, deviceId = ipAddr) {
   if (CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.random() * 1000 + 500)
-    );
-    return generateDummyChromecastStatus();
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
+    return generateDummyChromecastStatus(deviceId);
   }
 
   return new Promise((resolve) => {
@@ -1427,79 +1460,44 @@ async function checkChromecastConnectivity(ipAddr, timeout = 5000) {
 async function checkAllChannelsStatus(skipNotifications = false) {
   try {
     const allChannels = await getAllChannelsFromDB();
-    const offlineNotifications = [];
     let onlineCount = 0;
 
-    for (const channel of allChannels) {
-      try {
-        const previousStatus = channelStatus.get(channel.id)?.status;
-        const result = await checkMulticastConnectivity(channel.ipMulticast);
+    const results = await Promise.all(allChannels.map(async (channel) => {
+      const previousStatus = channelStatus.get(channel.id)?.status;
+      const result = await checkMulticastConnectivity(channel.ipMulticast, 5000, channel.id);
+      channelStatus.set(channel.id, { ...result, lastChecked: new Date().toISOString() });
+      return { channel, result, previousStatus };
+    }));
 
-        channelStatus.set(channel.id, {
-          ...result,
-          lastChecked: new Date().toISOString(),
+    const offlineNotifications = [];
+
+    for (const { channel, result, previousStatus } of results) {
+      if (result.status === "online") {
+        onlineCount++; // ← wajib ada
+
+        if (previousStatus === "offline" && !skipNotifications) {
+          const { autoResolveNotification } = require('./utils/notificationUtil');
+          await autoResolveNotification(channel.channelName);
+        }
+      }
+
+      if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
+        // ← errorDetail wajib dideklarasikan di sini
+        let errorDetail = 'Channel not found';
+        if (result.responseTime === null) {
+          errorDetail = 'Connection failure - Multicast stream unavailable';
+        } else {
+          errorDetail = 'Error playing - Stream issue detected';
+        }
+
+        offlineNotifications.push({
+          source: 'channel',
+          message: `${channel.channelName || 'Unknown Channel'} is now offline - ${errorDetail}`,
+          ipAddr: channel.ipMulticast,
+          deviceName: channel.channelName,
+          error: errorDetail,
+          timestamp: new Date().toISOString()
         });
-
-        if (result.status === "online") {
-          onlineCount++;
-
-          // Auto-resolve notifications when device comes back online
-          if (previousStatus === "offline" && !skipNotifications) {
-            const { autoResolveNotification } = require('./utils/notificationUtil');
-            await autoResolveNotification(channel.channelName);
-          }
-        }
-
-        // Only add notification if:
-        // 1. Notifications are not skipped (startup mode)
-        // 2. Previous status was explicitly "online"
-        // 3. Channel is now "offline"
-        if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
-          // Determine specific error type for channel
-          let errorDetail = 'Channel not found';
-          if (result.responseTime === null) {
-            errorDetail = 'Connection failure - Multicast stream unavailable';
-          } else {
-            errorDetail = 'Error playing - Stream issue detected';
-          }
-
-          offlineNotifications.push({
-            source: 'channel',
-            message: `${channel.channelName || 'Unknown Channel'} is now offline - ${errorDetail}`,
-            ipAddr: channel.ipMulticast,
-            deviceName: channel.channelName,
-            error: errorDetail,
-            timestamp: new Date().toISOString()
-          });
-        }
-      } catch (error) {
-        const previousStatus = channelStatus.get(channel.id)?.status;
-
-        channelStatus.set(channel.id, {
-          status: "offline",
-          responseTime: null,
-          error: error.message,
-          lastChecked: new Date().toISOString(),
-        });
-
-        // Only add notification if not skipped and previous status was "online"
-        if (!skipNotifications && previousStatus === "online") {
-          let errorDetail = error.message || 'Connection failed';
-          if (error.message?.includes('ECONNREFUSED')) {
-            errorDetail = 'Connection refused - Stream unavailable';
-          } else if (error.message?.includes('timeout')) {
-            errorDetail = 'Stream timeout - Network issue detected';
-          }
-
-          offlineNotifications.push({
-            source: 'channel',
-            message: `${channel.channelName || 'Unknown Channel'} connection failed - ${errorDetail}`,
-            ipAddr: channel.ipMulticast,
-            deviceName: channel.channelName,
-            error: errorDetail,
-            timestamp: new Date().toISOString()
-          });
-        }
       }
     }
 
@@ -1524,87 +1522,47 @@ async function checkAllChannelsStatus(skipNotifications = false) {
 async function checkAllTVsStatus(skipNotifications = false) {
   try {
     const allTVs = await getHospitalityTVs();
-    const offlineNotifications = [];
     let onlineCount = 0;
 
-    for (const tv of allTVs) {
-      try {
-        const previousStatus = tvStatus.get(tv.roomNo)?.status;
-        const result = await checkTVConnectivity(tv.ipAddress);
+    const results = await Promise.all(allTVs.map(async (tv) => {
+      const previousStatus = tvStatus.get(tv.roomNo)?.status;
+      const result = await checkTVConnectivity(tv.ipAddress, 5000, tv.roomNo);
+      tvStatus.set(tv.roomNo, { ...result, lastChecked: new Date().toISOString(), roomNo: tv.roomNo, ipAddress: tv.ipAddress });
+      return { tv, result, previousStatus };
+    }));
 
-        tvStatus.set(tv.roomNo, {
-          ...result,
-          lastChecked: new Date().toISOString(),
+    const offlineNotifications = [];
+
+    for (const { tv, result, previousStatus } of results) {
+      if (result.status === "online") {
+        onlineCount++; // ← wajib ada
+
+        if (previousStatus === "offline" && !skipNotifications) {
+          const { autoResolveNotification } = require('./utils/notificationUtil');
+          await autoResolveNotification(tv.roomNo || `Room ${tv.roomNo}`);
+        }
+      }
+
+      if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
+        // ← errorDetail wajib dideklarasikan di sini
+        let errorDetail = 'No signal detected';
+        if (result.responseTime && result.responseTime > 5000) {
+          errorDetail = 'Connection timeout - Weak or no signal';
+        } else if (result.responseTime === null) {
+          errorDetail = 'Device not responding - Possible LAN cable disconnected';
+        } else if (result.responseTime > 0) {
+          errorDetail = 'Device offline - Weak signal';
+        }
+
+        offlineNotifications.push({
+          source: 'tv',
+          message: `Room ${tv.roomNo} TV is now offline - ${errorDetail}`,
+          ipAddr: tv.ipAddress,
+          deviceName: `Room ${tv.roomNo}`,
           roomNo: tv.roomNo,
-          ipAddress: tv.ipAddress,
+          error: errorDetail,
+          timestamp: new Date().toISOString()
         });
-
-        if (result.status === "online") {
-          onlineCount++;
-
-          // Auto-resolve notifications when TV comes back online
-          if (previousStatus === "offline" && !skipNotifications) {
-            const { autoResolveNotification } = require('./utils/notificationUtil');
-            await autoResolveNotification(tv.roomNo || `Room ${tv.roomNo}`);
-          }
-        }
-
-        // Only add notification if:
-        // 1. Notifications are not skipped (startup mode)
-        // 2. Previous status was explicitly "online"
-        // 3. TV is now "offline"
-        if (!skipNotifications && previousStatus === "online" && result.status === "offline") {
-          // Determine specific error type based on response time and status
-          let errorDetail = 'No signal detected';
-          if (result.responseTime && result.responseTime > 5000) {
-            errorDetail = 'Connection timeout - Weak or no signal';
-          } else if (result.responseTime === null) {
-            errorDetail = 'Device not responding - Possible LAN cable disconnected';
-          } else if (result.responseTime > 0) {
-            errorDetail = 'Device offline - Weak signal';
-          }
-
-          offlineNotifications.push({
-            source: 'tv',
-            message: `Room ${tv.roomNo} TV is now offline - ${errorDetail}`,
-            ipAddr: tv.ipAddress,
-            deviceName: `Room ${tv.roomNo}`,
-            roomNo: tv.roomNo,
-            error: errorDetail,
-            timestamp: new Date().toISOString()
-          });
-        }
-      } catch (error) {
-        const previousStatus = tvStatus.get(tv.roomNo)?.status;
-
-        tvStatus.set(tv.roomNo, {
-          status: "offline",
-          responseTime: null,
-          error: error.message,
-          lastChecked: new Date().toISOString(),
-          roomNo: tv.roomNo,
-          ipAddress: tv.ipAddress,
-        });
-
-        // Only add notification if not skipped and previous status was "online"
-        if (!skipNotifications && previousStatus === "online") {
-          let errorDetail = error.message || 'Connection failed';
-          if (error.message?.includes('ECONNREFUSED')) {
-            errorDetail = 'Device not responding - Possible power issue or LAN cable disconnected';
-          } else if (error.message?.includes('timeout')) {
-            errorDetail = 'Connection timeout - Weak or no signal';
-          }
-
-          offlineNotifications.push({
-            source: 'tv',
-            message: `Room ${tv.roomNo} TV connection failed - ${errorDetail}`,
-            ipAddr: tv.ipAddress,
-            deviceName: `Room ${tv.roomNo}`,
-            roomNo: tv.roomNo,
-            error: errorDetail,
-            timestamp: new Date().toISOString()
-          });
-        }
       }
     }
 
@@ -1647,71 +1605,37 @@ async function checkAllTVsStatus(skipNotifications = false) {
 async function checkAllChromecastsStatus(skipNotifications = false) {
   try {
     const allDevices = await getChromecastDevices();
-    const offlineNotifications = [];
     let onlineCount = 0;
 
-    for (const device of allDevices) {
-      try {
-        const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
-        const result = await checkChromecastConnectivity(device.ipAddr);
+    const results = await Promise.all(allDevices.map(async (device) => {
+      const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
+      const result = await checkChromecastConnectivity(device.ipAddr, 5000, device.idCast);
+      chromecastStatus.set(device.idCast, { ...result, lastChecked: new Date().toISOString() });
+      return { device, result, previousStatus };
+    }));
 
-        chromecastStatus.set(device.idCast, {
-          ...result,
-          lastChecked: new Date().toISOString(),
+    const offlineNotifications = [];
+
+    for (const { device, result, previousStatus } of results) {
+      if (result.isOnline) {
+        onlineCount++; // ← wajib ada
+
+        if (previousStatus === false && !skipNotifications) {
+          const { autoResolveNotification } = require('./utils/notificationUtil');
+          await autoResolveNotification(device.deviceName || `Chromecast-${device.idCast}`);
+        }
+      }
+
+      if (!skipNotifications && previousStatus === true && !result.isOnline) {
+        offlineNotifications.push({
+          source: 'chromecast',
+          message: `${device.deviceName || 'Unknown Device'} went offline`,
+          ipAddr: device.ipAddr,
+          deviceName: device.deviceName,
+          previousStatus: 'online',
+          currentStatus: 'offline',
+          timestamp: new Date().toISOString()
         });
-
-        if (result.isOnline) {
-          onlineCount++;
-
-          // Auto-resolve notifications when Chromecast comes back online
-          if (previousStatus === false && !skipNotifications) {
-            const { autoResolveNotification } = require('./utils/notificationUtil');
-            await autoResolveNotification(device.deviceName || `Chromecast-${device.idCast}`);
-          }
-        }
-
-        // Only add notification if:
-        // 1. Notifications are not skipped (startup mode)
-        // 2. Previous status was explicitly true (was online before)
-        // 3. Device is now offline
-        if (!skipNotifications && previousStatus === true && !result.isOnline) {
-          offlineNotifications.push({
-            source: 'chromecast',
-            message: `${device.deviceName || 'Unknown Device'} went offline`,
-            ipAddr: device.ipAddr,
-            deviceName: device.deviceName,
-            previousStatus: 'online',
-            currentStatus: 'offline',
-            timestamp: new Date().toISOString()
-          });
-        }
-      } catch (error) {
-        const previousStatus = chromecastStatus.get(device.idCast)?.isOnline;
-
-        chromecastStatus.set(device.idCast, {
-          isPingable: false,
-          isOnline: false,
-          signalLevel: null,
-          speed: null,
-          responseTime: null,
-          lastSeen: null,
-          error: `Check failed: ${error.message}`,
-          lastChecked: new Date().toISOString(),
-        });
-
-        // Only add notification if not skipped and previous status was explicitly true
-        if (!skipNotifications && previousStatus === true) {
-          offlineNotifications.push({
-            source: 'chromecast',
-            message: `${device.deviceName || 'Unknown Device'} check failed`,
-            ipAddr: device.ipAddr,
-            deviceName: device.deviceName,
-            error: error.message,
-            previousStatus: 'online',
-            currentStatus: 'error',
-            timestamp: new Date().toISOString()
-          });
-        }
       }
     }
 
@@ -6011,14 +5935,7 @@ app.listen(port, async () => {
 
   // Start auto-resolve scheduler - run every 2 minutes
   console.log("Starting auto-resolve scheduler (every 2 minutes, resolves after 10-15s)...");
-  setInterval(async () => {
-    try {
-      const { checkAndAutoResolve } = require('./services/autoResolveScheduler');
-      await checkAndAutoResolve();
-    } catch (error) {
-      console.error("Error in auto-resolve scheduler:", error);
-    }
-  }, 2 * 60 * 1000); // Every 2 minutes
+  require('./services/autoResolveScheduler');
 
   console.log(`Server is running on port ${port}`);
 });

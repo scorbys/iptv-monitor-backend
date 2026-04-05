@@ -13,6 +13,8 @@ from app.config import config
 from utils import ml_service
 
 # Thread pool for blocking operations
+train_pool = ThreadPoolExecutor(max_workers=1)   # Training tetap 1 (resource-heavy)
+predict_pool = ThreadPoolExecutor(max_workers=4)  # Predict bisa concurrent
 thread_pool = ThreadPoolExecutor(max_workers=1)
 
 # Configure logging
@@ -132,7 +134,12 @@ async def predict(request: PredictRequest):
         raise HTTPException(status_code=400, detail="Text too long (max 10000 characters)")
 
     try:
-        result = ml_service.predict(request.text)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            predict_pool, 
+            ml_service.predict, 
+            request.text
+        )
         return result
     except Exception as e:
         logger.error(f"Prediction error: {e}")
@@ -173,7 +180,7 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            thread_pool,
+            train_pool,
             ml_service.train_from_excel,
             file_path,
             sheet_name

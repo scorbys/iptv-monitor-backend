@@ -213,7 +213,7 @@ async function checkAndAutoResolve() {
 checkAndAutoResolve();
 
 // Then run every 2 minutes
-const interval = 2 * 60 * 1000; // 2 minutes
+const interval = 5 * 60 * 1000; // 5 menit, dari 2 menit
 setInterval(() => {
   checkAndAutoResolve();
 }, interval);
