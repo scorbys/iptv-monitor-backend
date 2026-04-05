@@ -2,12 +2,12 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
+from imblearn.ensemble import BalancedRandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 from scipy import sparse
-from imblearn.ensemble import BalancedRandomForestClassifier
 from imblearn.over_sampling import SMOTE
 from collections import Counter
 from typing import Tuple, Dict, Any, Optional

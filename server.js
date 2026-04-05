@@ -6009,8 +6009,8 @@ app.listen(port, async () => {
     }
   }, 7 * 24 * 60 * 60 * 1000); // Every 7 days
 
-  // Start auto-resolve scheduler - run every 5 seconds
-  console.log("Starting auto-resolve scheduler (every 5 seconds, resolves after 10-15s)...");
+  // Start auto-resolve scheduler - run every 2 minutes
+  console.log("Starting auto-resolve scheduler (every 2 minutes, resolves after 10-15s)...");
   setInterval(async () => {
     try {
       const { checkAndAutoResolve } = require('./services/autoResolveScheduler');
@@ -6018,7 +6018,7 @@ app.listen(port, async () => {
     } catch (error) {
       console.error("Error in auto-resolve scheduler:", error);
     }
-  }, 5 * 1000); // Every 5 seconds
+  }, 2 * 60 * 1000); // Every 2 minutes
 
   console.log(`Server is running on port ${port}`);
 });
