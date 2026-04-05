@@ -2,12 +2,12 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
 from scipy import sparse
+from imblearn.ensemble import BalancedRandomForestClassifier
 from imblearn.over_sampling import SMOTE
 from collections import Counter
 from typing import Tuple, Dict, Any, Optional
@@ -187,21 +187,23 @@ class MLModelService:
                 print("SMOTE not applied (matching Colab behavior).")
 
             # Train model
-            self.model = RandomForestClassifier(
+            self.model = BalancedRandomForestClassifier(
                 n_estimators=1200,
                 max_depth=None,
                 max_features="sqrt",
                 min_samples_split=2,
                 min_samples_leaf=2,
                 bootstrap=True,
+                sampling_strategy="all",
                 random_state=config.RANDOM_STATE,
                 n_jobs=-1,
+                replacement=False,
                 oob_score=True
             )
 
             self.model.fit(X_train_res, y_train_res)
 
-            # Evaluate - RandomForest can handle sparse arrays directly
+            # Evaluate - BalancedRandomForest can handle sparse arrays directly
             y_pred = self.model.predict(X_test)
             accuracy = accuracy_score(y_test, y_pred)
 
