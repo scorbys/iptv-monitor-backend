@@ -52,6 +52,7 @@ class ModelInfoResponse(BaseModel):
     classes: Optional[list] = None
     n_features: Optional[int] = None
     oob_score: Optional[float] = None
+    accuracy: Optional[float] = None
 
 class TrainResponse(BaseModel):
     success: bool

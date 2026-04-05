@@ -24,6 +24,7 @@ class MLModelService:
         self.label_encoder: Optional[LabelEncoder] = None
         self.fix_mapping: Dict[str, Any] = {}
         self.is_trained = False
+        self.accuracy: Optional[float] = None  # Test set accuracy (persisted)
 
     def load_artifacts(self) -> bool:
         """Load saved model artifacts"""
@@ -44,6 +45,12 @@ class MLModelService:
             if os.path.exists(fix_mapping_path):
                 with open(fix_mapping_path, 'rb') as f:
                     self.fix_mapping = pickle.load(f)
+
+            # Load persisted test accuracy if exists
+            accuracy_path = os.path.join(config.ARTIFACTS_DIR, "accuracy.pkl")
+            if os.path.exists(accuracy_path):
+                with open(accuracy_path, 'rb') as f:
+                    self.accuracy = pickle.load(f)
 
             self.is_trained = True
             return True
@@ -66,6 +73,11 @@ class MLModelService:
         # Save fix mapping
         with open(os.path.join(config.ARTIFACTS_DIR, "fix_mapping.pkl"), 'wb') as f:
             pickle.dump(self.fix_mapping, f)
+
+        # Save test accuracy
+        if self.accuracy is not None:
+            with open(os.path.join(config.ARTIFACTS_DIR, "accuracy.pkl"), 'wb') as f:
+                pickle.dump(self.accuracy, f)
 
     def train_from_excel(self, file_path: str, sheet_name: str = "Sheet1") -> Dict[str, Any]:
         """Train model from Excel file"""
@@ -224,8 +236,7 @@ class MLModelService:
             )
 
             self.is_trained = True
-
-            # Generate fix mapping from training data
+            self.accuracy = float(accuracy)  # Persist test accuracy
             self._generate_fix_mapping(df, label_col)
 
             # Save artifacts
@@ -521,7 +532,8 @@ class MLModelService:
             "n_classes": len(self.label_encoder.classes_),
             "classes": list(self.label_encoder.classes_),
             "n_features": self.model.n_features_in_ if hasattr(self.model, "n_features_in_") else None,
-            "oob_score": float(self.model.oob_score_) if hasattr(self.model, "oob_score_") else None
+            "oob_score": float(self.model.oob_score_) if hasattr(self.model, "oob_score_") else None,
+            "accuracy": float(self.accuracy) if self.accuracy is not None else None
         }
 
 # Global model service instance
