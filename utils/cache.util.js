@@ -134,6 +134,7 @@ module.exports = {
   system: {
     get: (key) => systemContextCache.get(key),
     set: (key, value, ttl) => systemContextCache.set(key, value, ttl),
-    del: (key) => systemContextCache.del(key)
+    del: (key) => systemContextCache.del(key),
+    getStats: () => systemContextCache.getStats()
   }
 };

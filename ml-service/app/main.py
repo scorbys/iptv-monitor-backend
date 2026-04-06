@@ -12,6 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 from app.config import config
 from utils import ml_service
 
+# Cache 30 seconds
+_model_info_cache = {"data": None, "ts": 0, "ttl": 30}
+
 # Thread pool for blocking operations
 train_pool = ThreadPoolExecutor(max_workers=1)   # Training tetap 1 (resource-heavy)
 predict_pool = ThreadPoolExecutor(max_workers=4)  # Predict bisa concurrent
@@ -109,10 +112,14 @@ async def health_check():
 # Get model info
 @app.get("/api/model/info", response_model=ModelInfoResponse)
 async def get_model_info():
-    """Get model information"""
+    now = time.time()
+    if _model_info_cache["data"] and (now - _model_info_cache["ts"]) < _model_info_cache["ttl"]:
+        return _model_info_cache["data"]
     try:
         logger.info("Received request for model info")
         result = ml_service.get_model_info()
+        _model_info_cache["data"] = result
+        _model_info_cache["ts"] = now
         logger.info(f"Model info: {result}")
         return result
     except Exception as e:
@@ -187,6 +194,8 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
         )
 
         logger.info(f"Model trained successfully. Accuracy: {result.get('accuracy', 0):.4f}, OOB: {result.get('oob_score', 0):.4f}, Features: {result.get('n_features', 0)}")
+        _model_info_cache["data"] = None  # invalidate cache
+        _model_info_cache["ts"] = 0
 
         return TrainResponse(
             success=True,
@@ -220,6 +229,8 @@ async def delete_model():
         ml_service.tfidf = None
         ml_service.label_encoder = None
         ml_service.is_trained = False
+        _model_info_cache["data"] = None  # invalidate cache
+        _model_info_cache["ts"] = 0
 
         return {"success": True, "message": "Model deleted successfully"}
 

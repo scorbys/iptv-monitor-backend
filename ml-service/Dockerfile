@@ -51,9 +51,9 @@ ENV PORT=8080
 EXPOSE 8080
 
 # NOTE: Disabled health check temporarily to diagnose connection issues
-# HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
-#     CMD python -c "import urllib.request, os, sys; port = os.getenv('PORT', '8080'); sys.stdout.write(f'Health check on port {port}...\n'); urllib.request.urlopen(f'http://0.0.0.0:{port}/health', timeout=5)" || exit 1
+HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=3 \
+    CMD python -c "import urllib.request, os; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8080\")}/health', timeout=10)" || exit 1
 
 # Run the application
 # CRITICAL: Use Python to start uvicorn to ensure proper binding
-CMD ["python", "-c", "import os, subprocess, time, sys; time.sleep(5); port = os.getenv('PORT', '8080'); print(f'=== Starting ML Service on port {port} ==='); sys.stdout.flush(); subprocess.run(['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', port, '--workers', '1', '--log-level', 'debug', '--timeout-keep-alive', '300'])"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level info --timeout-keep-alive 300"]

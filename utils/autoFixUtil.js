@@ -4,6 +4,7 @@
  */
 
 const autoFixService = require('../services/autoFixService');
+const { systemContextCache } = require('./cache.util');
 
 /**
  * Enhanced notification creator that includes ML processing
@@ -38,22 +39,28 @@ async function createNotificationWithML(notification) {
       notification.source || ''
     ].filter(Boolean).join(' | ');
 
-    // Call ML service for prediction
-    let mlPrediction = null;
-    try {
-      const mlResponse = await fetch('http://localhost:8001/api/predict', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text: textForML })
-      });
+    // Sebelum memanggil fetch ke ML:
+    const cacheKey = `ml:predict:${Buffer.from(textForML).toString('base64').slice(0, 40)}`;
+    const cachedPrediction = systemContextCache.get(cacheKey);
 
-      if (mlResponse.ok) {
-        mlPrediction = await mlResponse.json();
+    // Call ML service for prediction
+    let mlPrediction = cachedPrediction || null;
+    if (!mlPrediction) {
+      try {
+        const mlResponse = await fetch('http://localhost:8001/api/predict', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ text: textForML })
+        });
+        if (mlResponse.ok) {
+          mlPrediction = await mlResponse.json();
+          systemContextCache.set(cacheKey, mlPrediction, 300); // cache 5 menit
+        }
+      } catch (mlError) {
+        console.error('ML service error:', mlError);
       }
-    } catch (mlError) {
-      console.error('ML service error:', mlError);
     }
 
     // Process with auto-fix if ML prediction is available
