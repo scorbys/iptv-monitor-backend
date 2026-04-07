@@ -51,7 +51,7 @@ class Config:
     except ValueError:
         raise ValueError("RANDOM_STATE must be an integer")
 
-    MAX_FEATURES_STR = os.getenv("MAX_FEATURES", "5000")
+    MAX_FEATURES_STR = os.getenv("MAX_FEATURES", "8000")
     try:
         MAX_FEATURES = int(MAX_FEATURES_STR)
         if MAX_FEATURES <= 0:

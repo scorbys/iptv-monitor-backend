@@ -200,10 +200,10 @@ class MLModelService:
 
             # Train model
             self.model = BalancedRandomForestClassifier(
-                n_estimators=200,
-                max_depth=30,
+                n_estimators=400,
+                max_depth=None,
                 max_features="sqrt",
-                min_samples_split=2,
+                min_samples_split=4, # reduce overfiting
                 min_samples_leaf=2,
                 bootstrap=True,
                 sampling_strategy="all",
