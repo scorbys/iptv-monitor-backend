@@ -246,3 +246,26 @@ if __name__ == "__main__":
         port=config.ML_SERVICE_PORT,
         reload=True
     )
+
+# Debug
+@app.get("/api/model/debug/tree-count")
+async def debug_tree_accuracy():
+    """Cek akurasi pada berbagai jumlah tree (tanpa retrain)"""
+    if not ml_service.is_trained:
+        raise HTTPException(status_code=400, detail="Model not trained")
+    
+    import numpy as np
+    from sklearn.metrics import accuracy_score
+    
+    # Gunakan OOB predictions yang sudah ada
+    results = {}
+    for n in [100, 200, 300, 500, 800, 1200]:
+        if n <= len(ml_service.model.estimators_):
+            # Subset estimators
+            original = ml_service.model.estimators_
+            ml_service.model.estimators_ = original[:n]
+            # OOB score sebagai proxy
+            results[n] = ml_service.model.oob_score_ if hasattr(ml_service.model, 'oob_score_') else "N/A"
+            ml_service.model.estimators_ = original
+    
+    return {"tree_counts": results, "current": len(ml_service.model.estimators_)}

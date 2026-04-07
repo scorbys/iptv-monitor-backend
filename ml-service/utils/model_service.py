@@ -200,8 +200,8 @@ class MLModelService:
 
             # Train model
             self.model = BalancedRandomForestClassifier(
-                n_estimators=1200,
-                max_depth=None,
+                n_estimators=200,
+                max_depth=30,
                 max_features="sqrt",
                 min_samples_split=2,
                 min_samples_leaf=2,
