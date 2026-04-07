@@ -62,9 +62,9 @@ class MLModelService:
         """Save model artifacts"""
         os.makedirs(config.ARTIFACTS_DIR, exist_ok=True)
 
-        joblib.dump(self.model, os.path.join(config.ARTIFACTS_DIR, config.MODEL_NAME))
-        joblib.dump(self.tfidf, os.path.join(config.ARTIFACTS_DIR, config.TFIDF_NAME))
-        joblib.dump(self.label_encoder, os.path.join(config.ARTIFACTS_DIR, config.LABEL_ENCODER_NAME))
+        joblib.dump(self.model, os.path.join(config.ARTIFACTS_DIR, config.MODEL_NAME), compress=3)
+        joblib.dump(self.tfidf, os.path.join(config.ARTIFACTS_DIR, config.TFIDF_NAME), compress=3)
+        joblib.dump(self.label_encoder, os.path.join(config.ARTIFACTS_DIR, config.LABEL_ENCODER_NAME), compress=3)
 
         # Save stopwords
         with open(os.path.join(config.ARTIFACTS_DIR, config.STOPWORDS_NAME), 'wb') as f:
@@ -176,10 +176,10 @@ class MLModelService:
             print(f"Sample TF-IDF features: {list(self.tfidf.get_feature_names_out()[:10])}")
 
             # Debug exports
-            df.loc[train_idx].to_csv(os.path.join(config.ARTIFACTS_DIR, "debug_train_data.csv"), index=False)
-            df.loc[test_idx].to_csv(os.path.join(config.ARTIFACTS_DIR, "debug_test_data.csv"), index=False)
-            with open(os.path.join(config.ARTIFACTS_DIR, "debug_tfidf_features.txt"), "w", encoding="utf-8") as f:
-                f.write("\n".join(self.tfidf.get_feature_names_out()))
+            # df.loc[train_idx].to_csv(os.path.join(config.ARTIFACTS_DIR, "debug_train_data.csv"), index=False)
+            # df.loc[test_idx].to_csv(os.path.join(config.ARTIFACTS_DIR, "debug_test_data.csv"), index=False)
+            # with open(os.path.join(config.ARTIFACTS_DIR, "debug_tfidf_features.txt"), "w", encoding="utf-8") as f:
+            #     f.write("\n".join(self.tfidf.get_feature_names_out()))
 
             # Numeric features
             X_train_num = sparse.csr_matrix(df.loc[train_idx, ["text_len", "word_count"]].values)
@@ -208,7 +208,7 @@ class MLModelService:
                 bootstrap=True,
                 sampling_strategy="all",
                 random_state=config.RANDOM_STATE,
-                n_jobs=-1,
+                n_jobs=1,
                 replacement=False,
                 oob_score=True
             )
@@ -241,6 +241,12 @@ class MLModelService:
 
             # Save artifacts
             self.save_artifacts()
+
+            # Bebaskan memori training setelah selesai
+            import gc
+            del X_train, X_test, X_train_tfidf, X_test_tfidf
+            del X_train_num, X_test_num, X_train_res, y_train_res
+            gc.collect()
 
             return {
                 "accuracy": accuracy,
