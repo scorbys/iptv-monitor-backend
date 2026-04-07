@@ -239,6 +239,11 @@ class MLModelService:
             self.accuracy = float(accuracy)  # Persist test accuracy
             self._generate_fix_mapping(df, label_col)
 
+            # Simpan nilai yang dibutuhkan SEBELUM del
+            n_features = X_train.shape[1]
+            train_samples = X_train_res.shape[0]
+            test_samples = X_test.shape[0]
+
             # Save artifacts
             self.save_artifacts()
 
@@ -254,9 +259,9 @@ class MLModelService:
                 "classification_report": report,
                 "n_classes": len(self.label_encoder.classes_),
                 "classes": list(self.label_encoder.classes_),
-                "n_features": X_train.shape[1],
-                "train_samples": X_train_res.shape[0],  # Use shape[0] for sparse arrays
-                "test_samples": X_test.shape[0],  # Use shape[0] for consistency
+                "n_features": n_features,
+                "train_samples": train_samples,  # Use shape[0] for sparse arrays
+                "test_samples": test_samples,  # Use shape[0] for consistency
                 "debug_info": {
                     "vocab_size": len(self.tfidf.vocabulary_),
                     "sample_features": list(self.tfidf.get_feature_names_out()[:20]),
