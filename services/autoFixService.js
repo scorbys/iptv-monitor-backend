@@ -177,6 +177,63 @@ const FIX_ACTIONS = {
         confidence: 0.80
       }
     ]
+  },
+  'Kategori-12': {
+    // Network Connection Failed
+    actions: [
+      {
+        type: 'network_command',
+        description: 'Reset network configuration',
+        command: 'reset_network_config',
+        isAutomatic: true,
+        confidence: 0.85
+      },
+      {
+        type: 'check',
+        description: 'Verify WiFi router connection',
+        command: 'check_wifi_router',
+        isAutomatic: false,
+        confidence: 0.75
+      }
+    ]
+  },
+  'Kategori-13': {
+    // System Initialization Error
+    actions: [
+      {
+        type: 'system_command',
+        description: 'Restart system initialization',
+        command: 'restart_system_init',
+        isAutomatic: true,
+        confidence: 0.80
+      },
+      {
+        type: 'suggestion',
+        description: 'Check firmware version and update if needed',
+        command: 'check_firmware_update',
+        isAutomatic: false,
+        confidence: 0.70
+      }
+    ]
+  },
+  'Kategori-14': {
+    // No Device Found: Logined
+    actions: [
+      {
+        type: 'check',
+        description: 'Verify device registration status',
+        command: 'check_device_registration',
+        isAutomatic: true,
+        confidence: 0.85
+      },
+      {
+        type: 'suggestion',
+        description: 'Re-authenticate device credentials',
+        command: 'reauth_device',
+        isAutomatic: false,
+        confidence: 0.75
+      }
+    ]
   }
 };
 

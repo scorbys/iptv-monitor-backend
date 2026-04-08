@@ -189,18 +189,34 @@ function getErrorCategory(metrics) {
   // Map label to FAQ categories based on severity and type of issue
   if (worstLabel === 1) { // Very Poor - Critical issues
     // Determine specific category based on which metric is worst
-    if (metrics.packetLoss > 10) return "Kategori-7"; // Connection Failure
+    if (metrics.packetLoss > 10) {
+      // Network-related critical issues
+      if (metrics.latency > 500) return "Kategori-12"; // Network Connection Failed
+      return "Kategori-7"; // Connection Failure
+    }
     if (metrics.latency > 500) return "Kategori-6"; // Player Error
     if (metrics.jitter > 200) return "Kategori-5"; // Error Playing
-    if (metrics.error > 20) return "Kategori-1"; // No Device Found
+    if (metrics.error > 20) {
+      // Device authentication or initialization issues
+      if (metrics.recoveryTime > 30) return "Kategori-13"; // System Initialization Error
+      return "Kategori-1"; // No Device Found
+    }
     return "Kategori-6"; // Default critical
   }
 
   if (worstLabel === 2) { // Poor - Major issues
-    if (metrics.packetLoss > 5) return "Kategori-11"; // Channel Not Found
+    if (metrics.packetLoss > 5) {
+      // Network issues with moderate packet loss
+      if (metrics.jitter > 100) return "Kategori-12"; // Network Connection Failed
+      return "Kategori-11"; // Channel Not Found
+    }
     if (metrics.latency > 200) return "Kategori-5"; // Error Playing
     if (metrics.jitter > 100) return "Kategori-3"; // Unplug LAN
-    if (metrics.error > 10) return "Kategori-2"; // Weak Signal
+    if (metrics.error > 10) {
+      // Authentication or device registration issues
+      if (metrics.recoveryTime > 20) return "Kategori-14"; // No Device Found: Logined
+      return "Kategori-2"; // Weak Signal
+    }
     return "Kategori-11"; // Default poor
   }
 
@@ -243,6 +259,12 @@ function getErrorCategoryWithDescription(metrics) {
     return `Kategori-7 (Connection Failure - Loss: ${metrics.packetLoss.toFixed(1)}%)`;
   } else if (category === "Kategori-11") {
     return `Kategori-11 (Channel Not Found - Loss: ${metrics.packetLoss.toFixed(1)}%)`;
+  } else if (category === "Kategori-12") {
+    return `Kategori-12 (Network Connection Failed - Loss: ${metrics.packetLoss.toFixed(1)}%, Latency: ${metrics.latency}ms)`;
+  } else if (category === "Kategori-13") {
+    return `Kategori-13 (System Init Error - Error: ${metrics.error.toFixed(1)}%, Recovery: ${metrics.recoveryTime}s)`;
+  } else if (category === "Kategori-14") {
+    return `Kategori-14 (No Device Logined - Error: ${metrics.error.toFixed(1)}%)`;
   }
 
   return category;
