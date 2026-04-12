@@ -29,7 +29,7 @@ pipeline {
 
     stage('Deploy New Version') {
       steps {
-        sh 'docker compose up -d iptv-backend-v2'
+        sh 'docker compose up -d iptv-backend-v2-1'
       }
     }
 
@@ -46,13 +46,13 @@ pipeline {
 
     stage('Switch Traffic') {
       steps {
-        sh 'docker compose restart nginx'
+        sh 'docker compose restart iptv-nginx-1'
       }
     }
 
     stage('Stop Old Version') {
       steps {
-        sh 'docker stop iptv-backend-v1 || true'
+        sh 'docker stop iptv-backend-v1-1 || true'
       }
     }
   }
