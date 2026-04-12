@@ -18,8 +18,8 @@ COPY package*.json ./
 
 # Install dependencies
 # Use npm install instead of npm ci for more compatibility
-RUN npm install --production=false && \
-    npm cache clean --force
+RUN npm install --only=production && \
+ npm cache clean --force
 
 # Copy all source code
 COPY . .
