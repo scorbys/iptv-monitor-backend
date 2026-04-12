@@ -14,7 +14,7 @@ services:
 
   ml-service:
     build:
-      context: ./ml_service
+      context: ./ml-service
       dockerfile: Dockerfile
     restart: unless-stopped
     expose:
