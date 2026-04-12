@@ -1,10 +1,23 @@
 pipeline {
   agent any
 
+  triggers {
+    githubPush()
+  }
+
   stages {
     stage('Pull Code') {
       steps {
         git 'https://github.com/scorbys/iptv-monitor-backend.git'
+      }
+    }
+
+    stage('Deploy Zero Downtime') {
+      steps {
+        sh '''
+        docker compose pull
+        docker compose up -d --build --remove-orphans
+        '''
       }
     }
 
