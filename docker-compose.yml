@@ -1,8 +1,17 @@
 version: "3.8"
 
 services:
-  # ==================== BACKEND API ====================
-  backend:
+  backend-v1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "3001"
+    env_file:
+      - .env
+
+  backend-v2:
     build:
       context: .
       dockerfile: Dockerfile

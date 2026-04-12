@@ -8,27 +8,38 @@ pipeline {
       }
     }
 
-    stage('Stop Old') {
-      steps {
-        sh 'docker compose down'
-      }
-    }
-
     stage('Build') {
       steps {
-        sh 'docker compose build --no-cache'
+        sh 'docker compose build'
       }
     }
 
-    stage('Deploy') {
+    stage('Deploy New Version') {
       steps {
-        sh 'docker compose up -d'
+        sh 'docker compose up -d iptv-backend-v2'
       }
     }
 
-    stage('Cleanup') {
+    stage('Wait for Health') {
       steps {
-        sh 'docker system prune -f'
+        script {
+          retry(5) {
+            sleep 5
+            sh 'curl -f http://localhost:3000/health'
+          }
+        }
+      }
+    }
+
+    stage('Switch Traffic') {
+      steps {
+        sh 'docker compose restart nginx'
+      }
+    }
+
+    stage('Stop Old Version') {
+      steps {
+        sh 'docker stop iptv-backend-v1 || true'
       }
     }
   }

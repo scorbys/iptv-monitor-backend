@@ -5872,6 +5872,13 @@ app.get("/api/health", authenticateToken, async (req, res) => {
   }
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get("/api/status", (req, res) => {
   res.json({
     success: true,
