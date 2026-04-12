@@ -5,14 +5,14 @@ const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  `${process.env.BASE_URL}/api/auth/google/callback`
+  `${process.env.PUBLIC_BASE_URL}/api/auth/google/callback`
 );
 
 // GET /api/auth/google → Redirect ke Google OAuth
 router.get("/", (req, res) => {
   try {
     console.log("=== GOOGLE AUTH START ===");
-    console.log("Base URL:", process.env.BASE_URL);
+    console.log("Base URL:", process.env.PUBLIC_BASE_URL);
     console.log("Frontend URL:", process.env.FRONTEND_URL);
     
     const redirectTo = req.query.redirect || "/dashboard";
@@ -27,7 +27,7 @@ router.get("/", (req, res) => {
       });
     }
 
-    const baseUrl = process.env.BASE_URL || process.env.VERCEL_URL || 'http://localhost:3000';
+    const baseUrl = process.env.PUBLIC_BASE_URL || process.env.VERCEL_URL || 'http://localhost:3000';
     const finalState = state || `${process.env.FRONTEND_URL}${redirectTo}`;
 
     console.log("Generating auth URL with state:", finalState);

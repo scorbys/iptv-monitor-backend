@@ -11,7 +11,7 @@ const {
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  `${process.env.BASE_URL}/api/auth/google/callback`
+  `${process.env.PUBLIC_BASE_URL}/api/auth/google/callback`
 );
 
 const JWT_SECRET = process.env.JWT_SECRET;
