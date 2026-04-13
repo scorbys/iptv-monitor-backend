@@ -1,76 +1,59 @@
 pipeline {
   agent any
 
-  triggers {
-    githubPush()
+  triggers { 
+    githubPush() 
   }
 
   environment {
-    // Mengambil file rahasia dari Jenkins Credentials
     BACKEND_ENV_FILE = credentials('iptv-backend-env')
     ML_ENV_FILE = credentials('ml-service-env')
   }
 
   stages {
-    stage('Pull Code') {
+    stage('Prepare') {
       steps {
-        // Tentukan branch agar tidak mencari 'master'
         git branch: 'main', url: 'https://github.com/scorbys/iptv-monitor-backend.git'
-      }
-    }
-
-    stage('Prepare Environment Files') {
-      steps {
-        // Salin .env ke root folder (untuk backend-v1 & v2)
         sh 'cp $BACKEND_ENV_FILE .env'
-        
-        // Salin .env ke dalam folder ml-service
         sh 'cp $ML_ENV_FILE ./ml-service/.env'
-        
-        echo 'Environment files have been prepared.'
       }
     }
 
-    stage('Deploy Zero Downtime') {
+    stage('Update Backend V2 (Green)') {
       steps {
-        // Gabungkan pull & up agar efisien
-        sh 'docker compose pull'
-        sh 'docker compose up -d --build --remove-orphans'
+        echo 'Updating Backend V2...'
+        // Hanya build dan jalankan v2 agar v1 tetap melayani trafik
+        sh 'docker compose up -d --build backend-v2'
       }
     }
 
-    stage('Build') {
-      steps {
-        sh 'docker compose build'
-      }
-    }
-
-    stage('Deploy New Version') {
-      steps {
-        sh 'docker compose up -d iptv-backend-v2-1'
-      }
-    }
-
-    stage('Wait for Health') {
+    stage('Health Check V2') {
       steps {
         script {
-          retry(5) {
+          // Tunggu sampai V2 benar-benar siap
+          retry(10) {
             sleep 5
-            sh 'curl -f http://localhost:3000/health'
+            // Cek langsung ke kontainer v2 (port internal 3001)
+            sh 'docker exec iptv-backend-v2-1 curl -f http://localhost:3001/health'
           }
         }
       }
     }
 
-    stage('Switch Traffic') {
+    stage('Switch & Update Backend V1 (Blue)') {
       steps {
-        sh 'docker compose restart iptv-nginx-1'
+        echo 'Switching traffic and updating V1...'
+        // Sekarang update V1, ML Service, dan Nginx
+        sh 'docker compose up -d --build nginx ml-service backend-v1'
+        // Reload nginx agar mengenali backend yang baru
+        sh 'docker exec iptv-nginx-1 nginx -s reload'
       }
     }
 
-    stage('Stop Old Version') {
+    stage('Final Cleanup') {
       steps {
-        sh 'docker stop iptv-backend-v1-1 || true'
+        sh 'docker image prune -f'
+        echo 'Deployment Successful!'
       }
     }
   }

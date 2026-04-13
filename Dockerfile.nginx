@@ -1,0 +1,5 @@
+FROM nginx:alpine
+# Hapus config bawaan
+RUN rm /etc/nginx/nginx.conf
+# Masukkan config milik Anda
+COPY nginx.conf /etc/nginx/nginx.conf
