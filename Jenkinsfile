@@ -46,7 +46,7 @@ pipeline {
         sh 'docker compose up -d --build nginx ml-service backend-v1'
         
         script {
-            // Beri jeda sedikit agar Nginx benar-benar up sebelum di-reload
+          
             retry(3) {
                 echo 'Attempting Nginx reload...'
                 sleep 5
@@ -54,6 +54,7 @@ pipeline {
             }
         }
       }
+    }
 
     stage('Final Cleanup') {
       steps {
