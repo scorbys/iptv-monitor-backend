@@ -6,8 +6,9 @@ pipeline {
   }
 
   environment {
-    // Ini akan mengambil Secret File dari Jenkins dan menyimpannya sementara
-    DOTENV = credentials('iptv-backend-env')
+    // Mengambil file rahasia dari Jenkins Credentials
+    BACKEND_ENV_FILE = credentials('iptv-backend-env')
+    ML_ENV_FILE = credentials('ml-service-env')
   }
 
   stages {
@@ -18,12 +19,23 @@ pipeline {
       }
     }
 
+    stage('Prepare Environment Files') {
+      steps {
+        // Salin .env ke root folder (untuk backend-v1 & v2)
+        sh 'cp $BACKEND_ENV_FILE .env'
+        
+        // Salin .env ke dalam folder ml-service
+        sh 'cp $ML_ENV_FILE ./ml-service/.env'
+        
+        echo 'Environment files have been prepared.'
+      }
+    }
+
     stage('Deploy Zero Downtime') {
       steps {
-        sh '''
-        docker compose pull
-        docker compose up -d --build --remove-orphans
-        '''
+        // Gabungkan pull & up agar efisien
+        sh 'docker compose pull'
+        sh 'docker compose up -d --build --remove-orphans'
       }
     }
 
