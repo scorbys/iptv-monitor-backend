@@ -8,7 +8,8 @@ pipeline {
   stages {
     stage('Pull Code') {
       steps {
-        git 'https://github.com/scorbys/iptv-monitor-backend.git'
+        // Tentukan branch agar tidak mencari 'master'
+        git branch: 'main', url: 'https://github.com/scorbys/iptv-monitor-backend.git'
       }
     }
 
