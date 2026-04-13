@@ -34,7 +34,7 @@ pipeline {
           retry(10) {
             sleep 5
             // Cek langsung ke kontainer v2 (port internal 3001)
-            sh 'docker exec iptv-backend-v2-1 curl -f http://localhost:3001/health'
+            sh "docker exec iptv-backend-v2 node -e \"require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""
           }
         }
       }
@@ -43,10 +43,13 @@ pipeline {
     stage('Switch & Update Backend V1 (Blue)') {
       steps {
         echo 'Switching traffic and updating V1...'
-        // Sekarang update V1, ML Service, dan Nginx
         sh 'docker compose up -d --build nginx ml-service backend-v1'
-        // Reload nginx agar mengenali backend yang baru
-        sh 'docker exec iptv-nginx-1 nginx -s reload'
+        
+        script {
+            // Beri jeda sedikit agar Nginx benar-benar up sebelum di-reload
+            sleep 3
+            sh 'docker exec iptv-nginx nginx -s reload'
+        }
       }
     }
 

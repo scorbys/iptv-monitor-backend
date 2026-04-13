@@ -1,5 +1,8 @@
+name: iptv-app
+
 services:
   backend-v1:
+    container_name: iptv-backend-v1
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,6 +13,7 @@ services:
       - .env
 
   backend-v2:
+    container_name: iptv-backend-v2
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,6 +24,7 @@ services:
       - .env
 
   ml-service:
+    container_name: iptv-ml-service
     build:
       context: ./ml-service
       dockerfile: Dockerfile
@@ -30,12 +35,16 @@ services:
       - ./ml-service/.env
 
   nginx:
+    container_name: iptv-nginx
     build:
       context: .
       dockerfile: Dockerfile.nginx
     restart: unless-stopped
     ports:
       - "3000:80"
+    depends_on:
+      - backend-v1
+      - backend-v2
 
 networks:
   default:
