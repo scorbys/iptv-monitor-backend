@@ -56,6 +56,10 @@ services:
       dockerfile: Dockerfile.prometheus
     expose:
       - "9090"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   grafana:
     container_name: iptv-grafana
@@ -64,6 +68,10 @@ services:
     environment:
       - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   cadvisor:
     container_name: iptv-cadvisor

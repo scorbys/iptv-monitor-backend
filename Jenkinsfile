@@ -42,14 +42,14 @@ pipeline {
 
     stage('Switch & Update Backend V1 (Blue)') {
       steps {
-        echo 'Switching traffic and updating V1...'
-        sh 'docker compose up -d --build nginx ml-service backend-v1'
+        echo 'Updating remaining services...'
+        // Build satu per satu jika RAM terbatas, atau gunakan satu perintah ini
+        sh 'docker compose up -d --build nginx ml-service backend-v1 prometheus grafana cadvisor node-exporter'
         
         script {
-          
+            echo 'Waiting for Nginx stability...'
+            sleep 20 // Jeda lebih lama karena banyak kontainer baru naik
             retry(3) {
-                echo 'Attempting Nginx reload...'
-                sleep 5
                 sh 'docker exec iptv-nginx nginx -s reload'
             }
         }
