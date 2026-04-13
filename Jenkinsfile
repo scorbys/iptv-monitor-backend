@@ -8,7 +8,7 @@ pipeline {
   stages {
     stage('Pull Code') {
       steps {
-        git pull origin main
+        git 'https://github.com/scorbys/iptv-monitor-backend.git'
       }
     }
 
