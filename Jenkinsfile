@@ -47,11 +47,13 @@ pipeline {
         
         script {
             // Beri jeda sedikit agar Nginx benar-benar up sebelum di-reload
-            sleep 3
-            sh 'docker exec iptv-nginx nginx -s reload'
+            retry(3) {
+                echo 'Attempting Nginx reload...'
+                sleep 5
+                sh 'docker exec iptv-nginx nginx -s reload'
+            }
         }
       }
-    }
 
     stage('Final Cleanup') {
       steps {
