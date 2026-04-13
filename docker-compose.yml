@@ -45,6 +45,48 @@ services:
     depends_on:
       - backend-v1
       - backend-v2
+      - ml-service
+      - prometheus
+      - grafana
+  
+  prometheus:
+    image: prom/prometheus
+    container_name: iptv-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    expose: ["9090"]
+
+  grafana:
+    image: grafana/grafana
+    container_name: iptv-grafana
+    expose: ["3000"]
+    environment:
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: iptv-cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    expose: ["8080"]
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: iptv-node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    expose: ["9100"]
 
 networks:
   default:
