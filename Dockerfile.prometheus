@@ -1,0 +1,3 @@
+FROM prom/prometheus
+# Salin konfigurasi prometheus Anda ke dalam image
+COPY prometheus.yml /etc/prometheus/prometheus.yml
