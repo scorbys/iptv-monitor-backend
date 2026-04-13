@@ -5,6 +5,11 @@ pipeline {
     githubPush()
   }
 
+  environment {
+    // Ini akan mengambil Secret File dari Jenkins dan menyimpannya sementara
+    DOTENV = credentials('iptv-backend-env')
+  }
+
   stages {
     stage('Pull Code') {
       steps {
