@@ -5,6 +5,7 @@
  */
 
 const { connectDB } = require('../autofix-db');
+const { ObjectId } = require('mongodb');
 const { updateStaffStatsOnResolution } = require('../utils/notificationUtil');
 const { evaluateAndPerformHandoff } = require('../utils/staffHandoffUtil');
 
