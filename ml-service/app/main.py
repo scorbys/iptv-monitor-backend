@@ -308,6 +308,38 @@ async def get_training_status(job_id: str):
         }
     }
 
+@app.get("/api/model/train/status")
+async def get_current_training_status():
+    active_jobs = [
+        {
+            "job_id": jid,
+            "status": job["status"],
+            "created_at": job["created_at"],
+            "completed_at": job["completed_at"],
+            "error": job["error"],
+            "result": job["result"] if job["status"] == "completed" else None,
+        }
+        for jid, job in training_jobs.items()
+        if job.get("status") in ["pending", "running"]
+    ]
+
+    if active_jobs:
+        return {
+            "success": True,
+            "data": {
+                "has_active_job": True,
+                "active_job": active_jobs[0],
+            }
+        }
+
+    return {
+        "success": True,
+        "data": {
+            "has_active_job": False,
+            "active_job": None,
+        }
+    }
+
 # Delete model endpoint
 @app.delete("/api/model")
 async def delete_model():
