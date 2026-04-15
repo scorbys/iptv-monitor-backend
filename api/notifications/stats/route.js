@@ -133,9 +133,11 @@ router.get('/', async (req, res) => {
     const stats = await getNotificationStats();
 
     res.json({
-      success: true,
+      success: stats.success,
       data: {
-        ...stats.data,
+        total: stats.total,
+        totalNotifications: stats.total,
+        byStatus: stats.byStatus,
         config: {
           notificationCooldown: `${NOTIFICATION_CONFIG.NOTIFICATION_COOLDOWN} minutes`,
           autoResolveDelay: `${NOTIFICATION_CONFIG.AUTO_RESOLVE_DELAY} minutes`,

@@ -46,6 +46,7 @@ RUN mkdir -p /app/data
 ENV ML_SERVICE_HOST=0.0.0.0
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
+ENV UVICORN_RELOAD=0
 
 # Expose port for Railway - CRITICAL: This tells Railway which port to use
 EXPOSE 8080
@@ -55,5 +56,5 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=3 \
     CMD python -c "import urllib.request, os; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8080\")}/health', timeout=10)" || exit 1
 
 # Run the application
-# CRITICAL: Use Python to start uvicorn to ensure proper binding
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --log-level info --timeout-keep-alive 300"]
+# CRITICAL: Use Python to start uvicorn to ensure proper binding and honor UVICORN_RELOAD
+CMD ["python", "app/main.py"]

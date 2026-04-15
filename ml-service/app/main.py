@@ -1,13 +1,16 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
+import json
+import threading
 import shutil
 import logging
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 from app.config import config
 from utils import ml_service
@@ -19,6 +22,11 @@ _model_info_cache = {"data": None, "ts": 0, "ttl": 30}
 train_pool = ThreadPoolExecutor(max_workers=1)   # Training tetap 1 (resource-heavy)
 predict_pool = ThreadPoolExecutor(max_workers=4)  # Predict bisa concurrent
 thread_pool = ThreadPoolExecutor(max_workers=1)
+
+# In-memory training job store
+training_jobs: Dict[str, Dict[str, Any]] = {}
+training_jobs_lock = threading.Lock()
+training_jobs_file = os.path.join(config.DATA_DIR, "training_jobs.json")
 
 # Configure logging
 logging.basicConfig(level=config.LOG_LEVEL.upper())
@@ -67,6 +75,7 @@ class ModelInfoResponse(BaseModel):
 class TrainResponse(BaseModel):
     success: bool
     message: str
+    job_id: Optional[str] = None
     accuracy: Optional[float] = None
     oob_score: Optional[float] = None
     classification_report: Optional[dict] = None
@@ -89,6 +98,9 @@ async def startup_event():
     logger.info(f"CORS origins: {config.CORS_ORIGINS}")
     logger.info(f"Artifacts directory: {config.ARTIFACTS_DIR}")
     logger.info(f"Data directory: {config.DATA_DIR}")
+
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    load_training_jobs()
 
     try:
         if ml_service.load_artifacts():
@@ -157,10 +169,64 @@ async def predict(request: PredictRequest):
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail="Prediction failed")
 
+def save_training_jobs() -> None:
+    with training_jobs_lock:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        try:
+            with open(training_jobs_file, "w", encoding="utf-8") as f:
+                json.dump(training_jobs, f, indent=2)
+        except Exception as exc:
+            logger.warning(f"Unable to save training jobs: {exc}")
+
+
+def load_training_jobs() -> None:
+    with training_jobs_lock:
+        if not os.path.exists(training_jobs_file):
+            return
+        try:
+            with open(training_jobs_file, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if isinstance(saved, dict):
+                changed = False
+                for job_id, job in saved.items():
+                    if job.get("status") in ["pending", "running"]:
+                        job["status"] = "failed"
+                        job["error"] = "Training interrupted by server restart"
+                        job["completed_at"] = time.time()
+                        changed = True
+                training_jobs.clear()
+                training_jobs.update(saved)
+                if changed:
+                    save_training_jobs()
+        except Exception as exc:
+            logger.warning(f"Unable to load training jobs: {exc}")
+
+
+def _on_training_done(job_id: str, future):
+    job = training_jobs.get(job_id)
+    if job is None:
+        return
+
+    try:
+        result = future.result()
+        job["status"] = "completed"
+        job["result"] = result
+        job["error"] = None
+        job["completed_at"] = time.time()
+        _model_info_cache["data"] = None
+        _model_info_cache["ts"] = 0
+    except Exception as exc:
+        job["status"] = "failed"
+        job["result"] = None
+        job["error"] = str(exc)
+        job["completed_at"] = time.time()
+    finally:
+        save_training_jobs()
+
 # Train model endpoint
 @app.post("/api/model/train", response_model=TrainResponse)
 async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
-    """Train model from uploaded Excel file"""
+    """Start model training as a background job"""
     try:
         # Input validation
         if not file.filename.lower().endswith(('.xlsx', '.xls')):
@@ -168,6 +234,9 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
 
         if len(sheet_name.strip()) == 0:
             raise HTTPException(status_code=400, detail="Sheet name cannot be empty")
+
+        if any(job["status"] in ["pending", "running"] for job in training_jobs.values()):
+            raise HTTPException(status_code=409, detail="Another training job is already in progress")
 
         logger.info(f"Received training request - File: {file.filename}, Sheet: {sheet_name}")
 
@@ -187,30 +256,24 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
         with open(file_path, "wb") as buffer:
             buffer.write(file_content)
 
-        # Train model in thread pool to avoid blocking
         logger.info(f"Starting model training with file: {secure_filename}")
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            train_pool,
-            ml_service.train_from_excel,
-            file_path,
-            sheet_name
-        )
-
-        logger.info(f"Model trained successfully. Accuracy: {result.get('accuracy', 0):.4f}, OOB: {result.get('oob_score', 0):.4f}, Features: {result.get('n_features', 0)}")
-        _model_info_cache["data"] = None  # invalidate cache
-        _model_info_cache["ts"] = 0
+        job_id = str(uuid4())
+        future = train_pool.submit(ml_service.train_from_excel, file_path, sheet_name)
+        training_jobs[job_id] = {
+            "status": "running",
+            "created_at": time.time(),
+            "completed_at": None,
+            "result": None,
+            "error": None,
+        }
+        save_training_jobs()
+        future.add_done_callback(lambda fut, jid=job_id: _on_training_done(jid, fut))
 
         return TrainResponse(
             success=True,
-            message="Model trained successfully",
-            accuracy=result.get("accuracy"),
-            oob_score=result.get("oob_score"),
-            classification_report=result.get("classification_report"),
-            n_classes=result.get("n_classes"),
-            classes=result.get("classes"),
-            n_features=result.get("n_features")
+            message="Training started",
+            job_id=job_id
         )
 
     except HTTPException:
@@ -218,6 +281,24 @@ async def train_model(file: UploadFile = File(...), sheet_name: str = "Sheet1"):
     except Exception as e:
         logger.error(f"Training error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+
+@app.get("/api/model/train/status/{job_id}")
+async def get_training_status(job_id: str):
+    job = training_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Training job not found")
+
+    return {
+        "success": True,
+        "data": {
+            "job_id": job_id,
+            "status": job["status"],
+            "created_at": job["created_at"],
+            "completed_at": job["completed_at"],
+            "error": job["error"],
+            "result": job["result"] if job["status"] == "completed" else None,
+        }
+    }
 
 # Delete model endpoint
 @app.delete("/api/model")
@@ -245,11 +326,13 @@ async def delete_model():
 
 if __name__ == "__main__":
     import uvicorn
+
+    reload_mode = os.getenv("UVICORN_RELOAD", "false").lower() in ["1", "true", "yes"]
     uvicorn.run(
         "app.main:app",
         host=config.ML_SERVICE_HOST,
         port=config.ML_SERVICE_PORT,
-        reload=True
+        reload=reload_mode
     )
 
 # Debug

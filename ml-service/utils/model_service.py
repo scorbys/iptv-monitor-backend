@@ -174,6 +174,7 @@ class MLModelService:
             y_test = y[df.index.get_indexer(test_idx)]
 
             # TF-IDF Vectorization
+            # Keep feature dimensionality lower for memory-constrained deployments.
             self.tfidf = TfidfVectorizer(
                 max_features=config.MAX_FEATURES,
                 ngram_range=config.NGRAM_RANGE,
@@ -212,7 +213,7 @@ class MLModelService:
 
             # Train model
             self.model = BalancedRandomForestClassifier(
-                n_estimators=400,
+                n_estimators=200,
                 max_depth=None,
                 max_features="sqrt",
                 min_samples_split=4, # reduce overfiting
