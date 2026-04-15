@@ -535,6 +535,27 @@ class MLModelService:
                 "params": {},
                 "description": "Verify LAN connection for channel",
                 "category": category
+            },
+            "Kategori-12": {
+                "action": "verify_provider_status",
+                "command": "check_provider_connectivity",
+                "params": {},
+                "description": "Verify external provider status and network connectivity",
+                "category": category
+            },
+            "Kategori-13": {
+                "action": "reset_streaming_pipeline",
+                "command": "reset_streaming_pipeline",
+                "params": {},
+                "description": "Restart the streaming pipeline and clear temporary session state",
+                "category": category
+            },
+            "Kategori-14": {
+                "action": "manual_review",
+                "command": None,
+                "params": {},
+                "description": "Manual review required for this issue category",
+                "category": category
             }
         }
 

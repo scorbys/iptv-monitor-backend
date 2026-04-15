@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="IPTV ML Prediction Service",
     description="Machine Learning service for IPTV comment classification",
-    version="1.0.0"
+    version="1.0.0",
+    root_path="/ml",
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    redoc_url=None,
 )
 
 # Configure CORS
