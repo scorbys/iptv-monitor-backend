@@ -47,7 +47,8 @@ async function createNotificationWithML(notification) {
     let mlPrediction = cachedPrediction || null;
     if (!mlPrediction) {
       try {
-        const mlResponse = await fetch('http://localhost:8001/api/predict', {
+        const ML_URL = process.env.ML_SERVICE_URL || 'http://ml-service:8080';
+        const mlResponse = await fetch(`${ML_URL}/api/predict`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'

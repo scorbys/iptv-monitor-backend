@@ -24,7 +24,8 @@ async function checkMLService() {
   try {
     log('\n📡 Checking ML Service connection...', 'cyan');
 
-    const response = await fetch('http://localhost:8001/health');
+    const ML_URL = process.env.ML_SERVICE_URL || 'http://ml-service:8080';
+    const response = await fetch(`${ML_URL}/health`);
 
     if (response.ok) {
       const data = await response.json();
