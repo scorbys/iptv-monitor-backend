@@ -4,9 +4,6 @@ const router = express.Router();
 const { getNotificationStats, NOTIFICATION_CONFIG } = require('../../../utils/notificationUtil');
 const { connectDB } = require('../../../autofix-db');
 
-const totalNotifications = await connectDB.countDocuments({});
-res.json({ success: true, data: { totalNotifications } });
-
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
 const jwt = require('jsonwebtoken');
