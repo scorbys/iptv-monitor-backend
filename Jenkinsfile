@@ -33,7 +33,7 @@ pipeline {
           retry(12) {
             sleep 5
             // curl lebih reliable daripada node -e untuk health check
-            sh 'docker exec iptv-backend-v2 curl -sf http://localhost:3001/health'
+            sh "docker exec iptv-backend-v2 node -e \"require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""
           }
         }
       }
@@ -56,7 +56,7 @@ pipeline {
         script {
           retry(12) {
             sleep 5
-            sh 'docker exec iptv-backend-v1 curl -sf http://localhost:3001/health'
+            sh "docker exec iptv-backend-v1 node -e \"require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""
           }
         }
         // Reload final agar load balance kembali ke v1 + v2
