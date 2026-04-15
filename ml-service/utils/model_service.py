@@ -25,6 +25,7 @@ class MLModelService:
         self.fix_mapping: Dict[str, Any] = {}
         self.is_trained = False
         self.accuracy: Optional[float] = None  # Test set accuracy (persisted)
+        self.per_class_accuracy: Optional[Dict[str, float]] = None  # Per-class recall (accuracy)
 
     def load_artifacts(self) -> bool:
         """Load saved model artifacts"""
@@ -52,6 +53,12 @@ class MLModelService:
                 with open(accuracy_path, 'rb') as f:
                     self.accuracy = pickle.load(f)
 
+            # Load per-class accuracy if exists
+            per_class_path = os.path.join(config.ARTIFACTS_DIR, "per_class_accuracy.pkl")
+            if os.path.exists(per_class_path):
+                with open(per_class_path, 'rb') as f:
+                    self.per_class_accuracy = pickle.load(f)
+
             self.is_trained = True
             return True
         except Exception as e:
@@ -78,6 +85,11 @@ class MLModelService:
         if self.accuracy is not None:
             with open(os.path.join(config.ARTIFACTS_DIR, "accuracy.pkl"), 'wb') as f:
                 pickle.dump(self.accuracy, f)
+
+        # Save per-class accuracy
+        if self.per_class_accuracy is not None:
+            with open(os.path.join(config.ARTIFACTS_DIR, "per_class_accuracy.pkl"), 'wb') as f:
+                pickle.dump(self.per_class_accuracy, f)
 
     def train_from_excel(self, file_path: str, sheet_name: str = "Sheet1") -> Dict[str, Any]:
         """Train model from Excel file"""
@@ -234,6 +246,14 @@ class MLModelService:
                 zero_division=0,
                 output_dict=True
             )
+
+            # Per-class accuracy = recall per class (what fraction of true positives were caught)
+            # This matches the notebook's "AKURASI PER KATEGORI" which uses recall
+            self.per_class_accuracy = {
+                label: float(report[label]["recall"])
+                for label in self.label_encoder.inverse_transform(unique_labels)
+                if label in report
+            }
 
             self.is_trained = True
             self.accuracy = float(accuracy)  # Persist test accuracy
@@ -544,7 +564,8 @@ class MLModelService:
             "classes": list(self.label_encoder.classes_),
             "n_features": self.model.n_features_in_ if hasattr(self.model, "n_features_in_") else None,
             "oob_score": float(self.model.oob_score_) if hasattr(self.model, "oob_score_") else None,
-            "accuracy": float(self.accuracy) if self.accuracy is not None else None
+            "accuracy": float(self.accuracy) if self.accuracy is not None else None,
+            "per_class_accuracy": self.per_class_accuracy  # dict: {label: recall_float} or None
         }
 
 # Global model service instance
