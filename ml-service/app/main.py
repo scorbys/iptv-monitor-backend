@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import os
+import sys
 import json
 import threading
 import shutil
@@ -10,7 +11,14 @@ import logging
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from uuid import uuid4
+
+# Ensure the project root is on sys.path so `from app.config import config` works
+# even when the script is started from a different working directory.
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from app.config import config
 from utils import ml_service

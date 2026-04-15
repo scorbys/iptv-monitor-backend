@@ -56,5 +56,5 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=3 \
     CMD python -c "import urllib.request, os; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8080\")}/health', timeout=10)" || exit 1
 
 # Run the application
-# CRITICAL: Use Python to start uvicorn to ensure proper binding and honor UVICORN_RELOAD
-CMD ["python", "app/main.py"]
+# CRITICAL: Run as a module so package imports resolve consistently in production
+CMD ["python", "-m", "app.main"]
