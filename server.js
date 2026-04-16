@@ -2007,33 +2007,33 @@ app.post("/api/chat/notification-query", authenticateToken, async (req, res) => 
     // Build prompt khusus untuk notification context
     let prompt = `${notificationContext}Kamu teknisi IPTV yang membantu analisis notifikasi sistem.
 
-Pertanyaan: "${message}"
+    Pertanyaan: "${message}"
 
-DATA SISTEM:
-- Channels: ${systemContext?.channelOnline}/${systemContext?.totalChannels} online
-- TVs: ${systemContext?.tvOnline}/${systemContext?.totalTVs} online
-- Chromecasts: ${systemContext?.chromecastOnline}/${systemContext?.totalChromecasts} online
+    DATA SISTEM:
+    - Channels: ${systemContext?.channelOnline}/${systemContext?.totalChannels} online
+    - TVs: ${systemContext?.tvOnline}/${systemContext?.totalTVs} online
+    - Chromecasts: ${systemContext?.chromecastOnline}/${systemContext?.totalChromecasts} online
 
-`;
+    `;
 
     if (relatedFAQs.length > 0 && relatedFAQs[0].score > 3) {
       const faq = relatedFAQs[0];
       prompt += `\nSOLUSI YANG RELEVAN:
-${faq.device} - ${faq.issue}
-Biasanya: ${faq.solutions.slice(0, 2).join(', ')}
+      ${faq.device} - ${faq.issue}
+      Biasanya: ${faq.solutions.slice(0, 2).join(', ')}
 
-`;
+      `;
     }
 
     prompt += `Jawab dengan natural dan langsung. Fokus pada:
-1. Analisis masalah dari notifikasi
-2. Root cause yang mungkin
-3. Solusi praktis yang bisa dicoba
-4. Preventive action
+    1. Analisis masalah dari notifikasi
+    2. Root cause yang mungkin
+    3. Solusi praktis yang bisa dicoba
+    4. Preventive action
 
-Maksimal 4-5 kalimat, to the point.
+    Maksimal 4-5 kalimat, to the point.
 
-Jawab:`;
+    Jawab:`;
 
     const aiResponse = await callGeminiAPI(prompt);
 
@@ -2095,35 +2095,35 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
   if (isGeneralHelp) {
     return `Kamu asisten virtual IPTV Monitoring System yang ramah dan informatif.
 
-User bertanya: "${userMessage}"
+    User bertanya: "${userMessage}"
 
-Berikan pengenalan sistem dengan struktur:
+    Berikan pengenalan sistem dengan struktur:
 
-**🎯 IPTV MONITORING SYSTEM**
-Platform monitoring untuk perangkat IPTV hotel dengan fitur:
+    **🎯 IPTV MONITORING SYSTEM**
+    Platform monitoring untuk perangkat IPTV hotel dengan fitur:
 
-**📺 MENU UTAMA:**
-• **Dashboard**: Overview statistik semua perangkat (Channel, TV, Chromecast)
-• **Channel**: Monitoring saluran TV - status, signal, bitrate, network stats
-• **Chromecast**: Monitoring perangkat streaming - status, connection, response time
-• **Hospitality**: Monitoring TV IPTV di kamar - status per kamar
-• **ML Dashboard**: Prediksi AI & Auto-Fix suggestion
-• **Notifications**: Pusat alert dan notifikasi masalah
-• **Help**: Dokumentasi dan panduan lengkap
+    **📺 MENU UTAMA:**
+    • **Dashboard**: Overview statistik semua perangkat (Channel, TV, Chromecast)
+    • **Channel**: Monitoring saluran TV - status, signal, bitrate, network stats
+    • **Chromecast**: Monitoring perangkat streaming - status, connection, response time
+    • **Hospitality**: Monitoring TV IPTV di kamar - status per kamar
+    • **ML Dashboard**: Prediksi AI & Auto-Fix suggestion
+    • **Notifications**: Pusat alert dan notifikasi masalah
+    • **Help**: Dokumentasi dan panduan lengkap
 
-**👥 MANAGEMENT (Admin Only):**
-• **Users**: Manajemen pengguna sistem (role, authentication)
-• **Staff**: Kelola tim teknisi (assignment, performance)
+    **👥 MANAGEMENT (Admin Only):**
+    • **Users**: Manajemen pengguna sistem (role, authentication)
+    • **Staff**: Kelola tim teknisi (assignment, performance)
 
-**🔧 FITUR UTAMA:**
-• Real-time monitoring semua device
-• Auto-notifikasi untuk device offline
-• AI-powered error prediction
-• Auto-Fix suggestion otomatis
-• Export data ke CSV
-• Performance analytics
+    **🔧 FITUR UTAMA:**
+    • Real-time monitoring semua device
+    • Auto-notifikasi untuk device offline
+    • AI-powered error prediction
+    • Auto-Fix suggestion otomatis
+    • Export data ke CSV
+    • Performance analytics
 
-Jawab 4-6 kalimat yang informatif dan friendly. Akhiri dengan ajakan bertanya spesifik tentang fitur yang diminati.`;
+    Jawab 4-6 kalimat yang informatif dan friendly. Akhiri dengan ajakan bertanya spesifik tentang fitur yang diminati.`;
   }
 
   // Detect TV/Chromecast/Channel analysis query
@@ -2415,11 +2415,11 @@ Jawab 4-6 kalimat yang informatif dan friendly. Akhiri dengan ajakan bertanya sp
 
   return `Kamu teknisi IPTV yang ngobrol santai tapi informatif.
 
-${knowledgeContext}${historyContext}
+  ${knowledgeContext}${historyContext}
 
-Pertanyaan: "${userMessage}"
+  Pertanyaan: "${userMessage}"
 
-Jawab natural 3-4 kalimat, langsung kasih solusi praktis tanpa format list atau bold berlebihan. Kalau ada context dari conversation history, gunakan itu untuk berikan jawaban yang lebih personalized.`;
+  Jawab natural 3-4 kalimat, langsung kasih solusi praktis tanpa format list atau bold berlebihan. Kalau ada context dari conversation history, gunakan itu untuk berikan jawaban yang lebih personalized.`;
 }
 
 async function callGeminiAPI(prompt) {
