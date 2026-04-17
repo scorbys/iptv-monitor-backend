@@ -66,7 +66,7 @@ services:
     image: grafana/grafana
     expose: ["3000"]
     environment:
-      - GF_SERVER_ROOT_URL=https://sufficient-probably-entirely-rotation.trycloudflare.comm/grafana/
+      - GF_SERVER_ROOT_URL=https://sufficient-probably-entirely-rotation.trycloudflare.com/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_SERVER_DOMAIN=https://sufficient-probably-entirely-rotation.trycloudflare.com
     deploy:
