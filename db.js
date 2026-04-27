@@ -3,6 +3,7 @@ require('dotenv').config();
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const uri = process.env.MONGO_URL;
+const { insertWithSync, updateWithSync, deleteWithSync, bulkInsertWithSync } = require('./utils/dbSyncWrapper');
 
 let client = null;
 let isConnecting = false;
@@ -149,20 +150,25 @@ async function getHospitalityTVByRoomNo(roomNo) {
 async function updateHospitalityTVStatus(roomNo, statusData) {
   try {
     const { hospitality } = await connectDB();
-    const result = await hospitality.updateOne(
+    
+    // Try update
+    const result = await updateWithSync(
+      hospitality,
       { roomNo: roomNo },
-      {
-        $set: {
-          ...statusData,
-          lastUpdated: new Date()
-        }
-      }
+      { ...statusData, lastUpdated: new Date() },
+      'tv_hospitality'
     );
+
+    if (result.matchedCount === 0) {
+      console.log(`TV for room ${roomNo} not found`);
+      return null;
+    }
 
     console.log(`Updated status for room ${roomNo}`);
     return result;
   } catch (error) {
     console.error(`Error updating status for room ${roomNo}:`, error);
+    // Sync failure tidak throw error, hanya log
     return null;
   }
 }
@@ -170,11 +176,15 @@ async function updateHospitalityTVStatus(roomNo, statusData) {
 async function addHospitalityTV(tvData) {
   try {
     const { hospitality } = await connectDB();
-    const result = await hospitality.insertOne({
-      ...tvData,
-      createdAt: new Date(),
-      lastUpdated: new Date()
-    });
+    const result = await insertWithSync(
+      hospitality,
+      {
+        ...tvData,
+        createdAt: new Date(),
+        lastUpdated: new Date()
+      },
+      'tv_hospitality'
+    );
 
     console.log(`Added new TV for room ${tvData.roomNo}`);
     return result;
@@ -194,7 +204,7 @@ async function bulkInsertHospitalityTVs(tvData) {
       lastUpdated: new Date()
     }));
 
-    const result = await hospitality.insertMany(tvsWithTimestamps);
+    const result = await bulkInsertWithSync(hospitality, tvsWithTimestamps, 'tv_hospitality');
     console.log(`Inserted ${result.insertedCount} hospitality TVs`);
     return result;
   } catch (error) {
@@ -206,7 +216,7 @@ async function bulkInsertHospitalityTVs(tvData) {
 async function deleteHospitalityTV(roomNo) {
   try {
     const { hospitality } = await connectDB();
-    const result = await hospitality.deleteOne({ roomNo: roomNo });
+    const result = await deleteWithSync(hospitality, { roomNo: roomNo }, 'tv_hospitality');
 
     console.log(`Deleted TV for room ${roomNo}`);
     return result;
@@ -244,17 +254,17 @@ async function comparePassword(password, hashedPassword) {
 async function updateUserWithGoogleInfo(email, googleData) {
   try {
     const { users } = await connectDB();
-    const result = await users.updateOne(
+    const result = await updateWithSync(
+      users,
       { email: email.toLowerCase() },
       {
-        $set: {
-          googleId: googleData.googleId,
-          avatar: googleData.avatar,
-          name: googleData.name || null,
-          provider: 'google',
-          updatedAt: new Date()
-        }
-      }
+        googleId: googleData.googleId,
+        avatar: googleData.avatar,
+        name: googleData.name || null,
+        provider: 'google',
+        updatedAt: new Date()
+      },
+      'login_page'
     );
     return result;
   } catch (error) {
@@ -480,7 +490,7 @@ async function insertUser(userData) {
       updatedAt: new Date()
     };
 
-    const result = await users.insertOne(userDoc);
+    const result = await insertWithSync(users, userDoc, 'login_page');
     console.log(`User created with ID: ${result.insertedId}`);
     return result.insertedId;
   } catch (error) {
@@ -515,9 +525,11 @@ async function updateUserProfile(userId, profileData) {
       updateDoc.name = profileData.name;
     }
 
-    const result = await users.updateOne(
+    const result = await updateWithSync(
+      users,
       { _id: new ObjectId(userId) },
-      { $set: updateDoc }
+      updateDoc,
+      'login_page'
     );
 
     if (result.matchedCount === 0) {
@@ -561,14 +573,14 @@ async function updateUserPassword(userId, newPassword) {
     // Hash new password
     const hashedPassword = await hashPassword(newPassword);
 
-    const result = await users.updateOne(
+    const result = await updateWithSync(
+      users,
       { _id: new ObjectId(userId) },
       {
-        $set: {
-          password: hashedPassword,
-          updatedAt: new Date()
-        }
-      }
+        password: hashedPassword,
+        updatedAt: new Date()
+      },
+      'login_page'
     );
 
     if (result.matchedCount === 0) {
@@ -599,14 +611,14 @@ async function updateUserAvatar(userId, avatarUrl) {
 
     const { users } = await connectDB();
 
-    const result = await users.updateOne(
+    const result = await updateWithSync(
+      users,
       { _id: new ObjectId(userId) },
       {
-        $set: {
-          avatar: avatarUrl,
-          updatedAt: new Date()
-        }
-      }
+        avatar: avatarUrl,
+        updatedAt: new Date()
+      },
+      'login_page'
     );
 
     if (result.matchedCount === 0) {
@@ -908,7 +920,7 @@ async function addChromecastDevice(deviceData) {
       lastUpdated: new Date()
     };
 
-    const result = await chromecast.insertOne(deviceDoc);
+    const result = await insertWithSync(chromecast, deviceDoc, 'chromecast');
     console.log(`Added new Chromecast device: ${deviceData.deviceName}`);
 
     return {
@@ -931,14 +943,14 @@ async function updateChromecastDevice(deviceName, updateData) {
     // Remove sensitive fields from update
     const { _id, createdAt, ...safeUpdateData } = updateData;
 
-    const result = await chromecast.updateOne(
+    const result = await updateWithSync(
+      chromecast,
       { deviceName: deviceName },
       {
-        $set: {
-          ...safeUpdateData,
-          lastUpdated: new Date()
-        }
-      }
+        ...safeUpdateData,
+        lastUpdated: new Date()
+      },
+      'chromecast'
     );
 
     if (result.matchedCount === 0) {
@@ -966,15 +978,15 @@ async function updateChromecastDeviceStatus(deviceName, statusData) {
   try {
     const { chromecast } = await connectDB();
 
-    const result = await chromecast.updateOne(
+    const result = await updateWithSync(
+      chromecast,
       { deviceName: deviceName },
       {
-        $set: {
-          ...statusData,
-          lastSeen: new Date().toISOString(),
-          lastUpdated: new Date()
-        }
-      }
+        ...statusData,
+        lastSeen: new Date().toISOString(),
+        lastUpdated: new Date()
+      },
+      'chromecast'
     );
 
     if (result.matchedCount === 0) {
@@ -1005,12 +1017,12 @@ async function deleteChromecastDevice(deviceId) {
 
     // Try to delete by ObjectId first, then by numeric id
     try {
-      result = await chromecast.deleteOne({ _id: new ObjectId(deviceId) });
+      result = await deleteWithSync(chromecast, { _id: new ObjectId(deviceId) }, 'chromecast');
     } catch (objectIdError) {
       // If ObjectId conversion fails, try numeric id
       const numericId = parseInt(deviceId);
       if (!isNaN(numericId)) {
-        result = await chromecast.deleteOne({ idCast: numericId });
+        result = await deleteWithSync(chromecast, { idCast: numericId }, 'chromecast');
       } else {
         throw new Error('Invalid device ID format');
       }
@@ -1047,7 +1059,7 @@ async function bulkInsertChromecastDevices(devicesData) {
       lastUpdated: new Date()
     }));
 
-    const result = await chromecast.insertMany(devicesWithTimestamps);
+    const result = await bulkInsertWithSync(chromecast, devicesWithTimestamps, 'chromecast');
     console.log(`Inserted ${result.insertedCount} Chromecast devices`);
 
     return {
@@ -1091,7 +1103,7 @@ async function saveAutoFixHistory(autoFixData) {
       createdAt: new Date()
     };
 
-    const result = await autoFixHistory.insertOne(autoFixDoc);
+    const result = await insertWithSync(autoFixHistory, autoFixDoc, 'auto_fix_history');
     console.log(`Auto-fix history saved: ${result.insertedId}`);
     return { ...autoFixDoc, _id: result.insertedId };
   } catch (error) {
@@ -1134,14 +1146,14 @@ async function updateAutoFixHistoryStatus(historyId, statusData) {
   try {
     const { autoFixHistory } = await connectDB();
 
-    const result = await autoFixHistory.updateOne(
+    const result = await updateWithSync(
+      autoFixHistory,
       { _id: new ObjectId(historyId) },
       {
-        $set: {
-          ...statusData,
-          updatedAt: new Date()
-        }
-      }
+        ...statusData,
+        updatedAt: new Date()
+      },
+      'auto_fix_history'
     );
 
     console.log(`Updated auto-fix history status: ${historyId}`);

@@ -47,6 +47,7 @@ const IPTVTelegramBot = require('./api/services/telegram/bot-tele');
 const userProfileRoute = require("./api/user/profile/route");
 const userPasswordRoute = require("./api/user/password/route");
 const userAvatarRoute = require("./api/user/avatar/route");
+const { initSupabase } = require('./config/supabase.config');
 const {
   generateLabeledMetrics,
   getErrorCategory,
@@ -273,6 +274,12 @@ app.use('/api/notifications', require('./api/notifications/route'));
 
 // Auto Fix routes (unified)
 app.use('/api/auto-fix', require('./api/auto-fix/route'));
+
+// Supabase
+app.use('/api/backup', require('./api/backup/route'));
+
+// Monitoring & Sync Status (for production verification)
+app.use('/api/monitoring', require('./api/monitoring/route'));
 
 // Channel-specific Auto Fix route
 app.use('/api/channels', require('./api/channels/route'));
@@ -5990,6 +5997,7 @@ app.listen(port, async () => {
   if (!dbConnected) {
     console.warn("Database connection failed, but server will continue running");
   }
+  await initSupabase();
 
   console.log("Starting initial status checks...");
   console.log(`TV Status Mode: ${TV_STATUS_CONFIG.USE_DUMMY_STATUS ? 'Dummy Status (Testing)' : 'Real Connectivity Checks'}`);
