@@ -88,6 +88,8 @@ async function connectDB() {
       users: db.collection('login_page'),
       chromecast: db.collection('chromecast'),
       autoFixHistory: db.collection('auto_fix_history'),
+      staff: db.collection('staff'),
+      notifications: db.collection('notifications'),
       client: client
     };
   } catch (error) {
@@ -150,7 +152,7 @@ async function getHospitalityTVByRoomNo(roomNo) {
 async function updateHospitalityTVStatus(roomNo, statusData) {
   try {
     const { hospitality } = await connectDB();
-    
+
     // Try update
     const result = await updateWithSync(
       hospitality,
