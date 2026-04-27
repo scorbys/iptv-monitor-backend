@@ -155,4 +155,26 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get total notification count (lightweight, used for stats cards)
+router.get('/count/total', async (req, res) => {
+  try {
+    const db = await connectDB();
+    const total = await db.notifications.countDocuments();
+
+    res.json({
+      success: true,
+      data: {
+        total,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching notification count:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;
