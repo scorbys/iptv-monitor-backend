@@ -21,9 +21,9 @@ const {
  * GET /api/monitoring/sync-metrics
  * Get real-time sync metrics
  */
-router.get('/sync-metrics', (req, res) => {
+router.get('/sync-metrics', async (req, res) => {
   try {
-    const metrics = getSyncMetrics();
+    const metrics = await getSyncMetrics();
     res.json({
       success: true,
       data: metrics,
@@ -140,7 +140,7 @@ router.get('/report', async (req, res) => {
  */
 router.get('/quick-check', async (req, res) => {
   try {
-    const metrics = getSyncMetrics();
+    const metrics = await getSyncMetrics();
     const consistency = await checkAllConsistency();
     
     const isHealthy = 
