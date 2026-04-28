@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { connectDB } = require('../../db');
 const { getBackupStatus } = require('../../utils/supabaseSync');
-const { 
-  forceSyncCollection, 
-  getSyncStatus, 
-  clearSyncQueue 
+const {
+  forceSyncCollection,
+  getSyncStatus,
+  clearSyncQueue
 } = require('../../utils/dbSyncWrapper');
 
 /**
@@ -45,14 +45,28 @@ router.post('/force-sync', async (req, res) => {
       console.log('🔄 Starting full database sync to Supabase...');
 
       const db = await connectDB();
-      const collections = ['international_channels', 'local_channels', 'tv_hospitality', 
-                          'login_page', 'chromecast', 'auto_fix_history', 'notifications', 'staff'];
+
+      // Mapping key db → nama tabel Supabase
+      const collectionMap = {
+        'international_channels': db.international,
+        'local_channels': db.local,
+        'tv_hospitality': db.hospitality,
+        'login_page': db.users,
+        'chromecast': db.chromecast,
+        'auto_fix_history': db.autoFixHistory,
+        'notifications': db.notifications,
+        'staff': db.staff
+      };
 
       const results = {};
 
-      for (const collName of collections) {
+      for (const [collName, mongoCol] of Object.entries(collectionMap)) {
         try {
-          results[collName] = await forceSyncCollection(db[collName], collName);
+          if (!mongoCol) {
+            results[collName] = { success: false, error: 'Collection not found in db' };
+            continue;
+          }
+          results[collName] = await forceSyncCollection(mongoCol, collName);
         } catch (error) {
           results[collName] = { success: false, error: error.message };
         }
@@ -68,7 +82,7 @@ router.post('/force-sync', async (req, res) => {
 
     // Sync specific collection
     const db = await connectDB();
-    
+
     // Map collection names
     const collectionMap = {
       'international_channels': db.international,
