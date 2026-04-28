@@ -10,7 +10,8 @@
  */
 
 const { getSupabaseClient } = require('../config/supabase.config');
-const { connectDB } = require('../db');
+// connectDB di-import lazy (di dalam fungsi) untuk hindari circular dependency
+// db.js → dbSyncWrapper.js → syncMonitor.js → db.js
 
 // Sync event tracking
 const syncMetrics = {
@@ -89,7 +90,8 @@ async function verifyDataConsistency(collection) {
   try {
     console.log(`🔍 Checking data consistency for: ${collection}`);
 
-    // Get count from MongoDB — gunakan mapping key yang benar
+    // Get count from MongoDB — lazy import untuk hindari circular dependency
+    const { connectDB } = require('../db');
     const db = await connectDB();
     const dbKey = getCollectionMap(collection);
     const mongoCollection = db[dbKey];
@@ -158,7 +160,8 @@ async function compareSampleDocuments(collection, limit = 5) {
   try {
     console.log(`🔎 Comparing sample documents for: ${collection}`);
 
-    // Get from MongoDB
+    // Get from MongoDB — lazy import
+    const { connectDB } = require('../db');
     const db = await connectDB();
     const mongoCollection = db[getCollectionMap(collection)];
     const mongoSamples = await mongoCollection.find({}).limit(limit).toArray();
