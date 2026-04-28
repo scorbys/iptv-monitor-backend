@@ -2,6 +2,80 @@ const { ObjectId } = require('mongodb');
 const { getSupabaseClient } = require('../config/supabase.config');
 
 /**
+ * Parse berbagai format tanggal ke ISO string yang valid untuk PostgreSQL.
+ * Menangani: Date object, ISO string, format "DD.MM.YYYY HH:mm:ss", epoch number
+ */
+function parseDate(value) {
+  if (!value) return null;
+
+  // Sudah Date object
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value.toISOString();
+  }
+
+  // Sudah ISO string yang valid
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    return value;
+  }
+
+  // Format Eropa: "DD.MM.YYYY HH:mm:ss" atau "DD.MM.YYYY"
+  if (typeof value === 'string' && /^\d{1,2}\.\d{1,2}\.\d{4}/.test(value)) {
+    const match = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
+    if (match) {
+      const [, day, month, year, h = '00', m = '00', s = '00'] = match;
+      const iso = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${h}:${m}:${s}.000Z`;
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    }
+  }
+
+  // Format "YYYY-MM-DD HH:mm:ss" (tanpa T)
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(value)) {
+    const d = new Date(value.replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  // Epoch number (milliseconds)
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  // Fallback: coba parse langsung
+  try {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Field-field yang diketahui bertipe tanggal per koleksi
+ */
+const DATE_FIELDS = {
+  chromecast: ['lastSeen'],
+  notifications: ['handlingStartTime', 'handlingEndTime', 'createdAt', 'updatedAt'],
+  staff: ['joinedDate', 'createdAt', 'updatedAt'],
+  login_page: ['createdAt', 'lastLogin', 'updatedAt', 'roleUpdatedAt', 'deactivatedAt'],
+  international_channels: ['createdAt', 'updatedAt'],
+  local_channels: ['createdAt', 'updatedAt'],
+  tv_hospitality: ['createdAt', 'updatedAt', 'lastUpdated'],
+  auto_fix_history: ['createdAt', 'updatedAt', 'resolvedAt'],
+};
+
+/**
+ * Convert MongoDB ObjectId (string atau object) ke string
+ */
+function toStringId(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (value instanceof ObjectId) return value.toString();
+  if (typeof value === 'object' && value._bsontype === 'ObjectId') return value.toString();
+  return String(value);
+}
+
+/**
  * Convert MongoDB document to Supabase format
  */
 function mongoToSupabase(doc, collectionName) {
@@ -9,28 +83,44 @@ function mongoToSupabase(doc, collectionName) {
 
   const converted = { ...doc };
 
-  // Convert MongoDB ObjectId to string
-  if (converted._id && typeof converted._id === 'object') {
-    converted.id = converted._id.toString();
+  // Convert MongoDB _id ke id string
+  if (converted._id) {
+    converted.id = toStringId(converted._id);
     delete converted._id;
   }
 
-  // Convert nested ObjectIds
-  if (collectionName === 'notifications') {
-    if (converted.channelId) {
-      converted.channelId = converted.channelId.toString();
-    }
-    if (converted.assignedStaffId) {
-      converted.assignedStaffId = converted.assignedStaffId.toString();
-    }
+  // Jika ada field 'id' dari MongoDB (bukan _id), gunakan itu sebagai primary key
+  if (!converted.id && doc.id) {
+    converted.id = String(doc.id);
   }
 
-  // Convert dates to ISO strings
+  // Convert semua ObjectId nested ke string
   Object.keys(converted).forEach(key => {
-    if (converted[key] instanceof Date) {
-      converted[key] = converted[key].toISOString();
+    const val = converted[key];
+    if (val instanceof ObjectId) {
+      converted[key] = val.toString();
+    } else if (val && typeof val === 'object' && val._bsontype === 'ObjectId') {
+      converted[key] = val.toString();
     }
   });
+
+  // Convert field tanggal yang diketahui
+  const dateFields = DATE_FIELDS[collectionName] || [];
+  dateFields.forEach(field => {
+    if (converted[field] !== undefined) {
+      converted[field] = parseDate(converted[field]);
+    }
+  });
+
+  // Sweep semua field: jika Date object, convert ke ISO
+  Object.keys(converted).forEach(key => {
+    if (converted[key] instanceof Date) {
+      converted[key] = parseDate(converted[key]);
+    }
+  });
+
+  // Hapus field 'id' duplikat dari MongoDB (international/local/hospitality punya field id sendiri)
+  // Sudah di-handle di atas, pastikan tidak ada konflik
 
   // Add metadata
   converted.synced_at = new Date().toISOString();
@@ -99,7 +189,7 @@ async function syncDocumentToSupabase(doc, collectionName, operation = 'upsert')
 }
 
 /**
- * Bulk sync documents to Supabase
+ * Bulk sync documents to Supabase (dengan batching otomatis 100 docs)
  */
 async function bulkSyncToSupabase(docs, collectionName, operation = 'upsert') {
   try {
@@ -111,44 +201,59 @@ async function bulkSyncToSupabase(docs, collectionName, operation = 'upsert') {
 
     const convertedDocs = docs
       .map(doc => mongoToSupabase(doc, collectionName))
-      .filter(doc => doc !== null);
+      .filter(doc => doc !== null && doc.id);
 
     if (convertedDocs.length === 0) {
-      return { success: true, data: [] };
+      return { success: true, data: [], count: 0 };
     }
 
-    let result;
+    // Batch per 100 dokumen agar tidak timeout
+    const BATCH_SIZE = 100;
+    let totalSynced = 0;
+    let lastError = null;
 
-    switch (operation) {
-      case 'insert':
-        result = await supabase
-          .from(collectionName)
-          .insert(convertedDocs, { onConflict: 'id' });
-        break;
+    for (let i = 0; i < convertedDocs.length; i += BATCH_SIZE) {
+      const batch = convertedDocs.slice(i, i + BATCH_SIZE);
+      let result;
 
-      case 'upsert':
-      default:
-        result = await supabase
-          .from(collectionName)
-          .upsert(convertedDocs, { onConflict: 'id' });
-        break;
+      switch (operation) {
+        case 'insert':
+          result = await supabase
+            .from(collectionName)
+            .insert(batch, { onConflict: 'id' });
+          break;
 
-      case 'delete':
-        const ids = convertedDocs.map(doc => doc.id);
-        result = await supabase
-          .from(collectionName)
-          .delete()
-          .in('id', ids);
-        break;
+        case 'upsert':
+        default:
+          result = await supabase
+            .from(collectionName)
+            .upsert(batch, { onConflict: 'id' });
+          break;
+
+        case 'delete':
+          const ids = batch.map(doc => doc.id);
+          result = await supabase
+            .from(collectionName)
+            .delete()
+            .in('id', ids);
+          break;
+      }
+
+      if (result.error) {
+        console.error(`❌ Bulk sync error batch ${i}-${i + BATCH_SIZE} (${collectionName}):`, result.error.message);
+        lastError = result.error;
+      } else {
+        totalSynced += batch.length;
+        console.log(`✅ Batch synced ${collectionName}: ${i + batch.length}/${convertedDocs.length}`);
+      }
     }
 
-    if (result.error) {
-      console.error(`❌ Bulk sync error (${operation} ${collectionName}):`, result.error.message);
-      return { success: false, error: result.error };
+    if (lastError && totalSynced === 0) {
+      return { success: false, error: lastError };
     }
 
-    console.log(`✅ Bulk synced ${operation} ${collectionName}: ${convertedDocs.length} documents`);
-    return { success: true, count: convertedDocs.length, data: result.data };
+    console.log(`✅ Bulk sync selesai ${collectionName}: ${totalSynced}/${convertedDocs.length} dokumen`);
+    return { success: true, count: totalSynced, total: convertedDocs.length };
 
   } catch (error) {
     console.error(`❌ Error bulk syncing to Supabase:`, error);
@@ -157,30 +262,21 @@ async function bulkSyncToSupabase(docs, collectionName, operation = 'upsert') {
 }
 
 /**
- * Sync from Supabase to MongoDB (for two-way sync)
+ * Sync from Supabase to MongoDB (two-way sync)
  */
 async function syncDocumentFromSupabase(supabaseDoc, collectionName, mongoCollection) {
   try {
     if (!supabaseDoc || !supabaseDoc.id) return null;
 
     const mongoDoc = { ...supabaseDoc };
-
-    // Convert id back to MongoDB ObjectId if this is the main id
     mongoDoc._id = new ObjectId(supabaseDoc.id);
     delete mongoDoc.id;
-
-    // Remove sync metadata
     delete mongoDoc.synced_at;
     delete mongoDoc.collection_name;
 
-    // Convert date strings back to Date objects
     Object.keys(mongoDoc).forEach(key => {
       if (typeof mongoDoc[key] === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(mongoDoc[key])) {
-        try {
-          mongoDoc[key] = new Date(mongoDoc[key]);
-        } catch (e) {
-          // Keep as string if parse fails
-        }
+        try { mongoDoc[key] = new Date(mongoDoc[key]); } catch { }
       }
     });
 
@@ -190,9 +286,7 @@ async function syncDocumentFromSupabase(supabaseDoc, collectionName, mongoCollec
       { upsert: true }
     );
 
-    console.log(`✅ Synced from Supabase to MongoDB: ${mongoDoc._id}`);
     return { success: true, data: result };
-
   } catch (error) {
     console.error(`❌ Error syncing from Supabase to MongoDB:`, error);
     return { success: false, error };
@@ -209,7 +303,6 @@ async function getBackupStatus() {
       return { enabled: false, status: 'Supabase not configured' };
     }
 
-    // Check if we can reach Supabase
     const { error } = await supabase
       .from('backup_status')
       .select('count()', { count: 'exact', head: true })
