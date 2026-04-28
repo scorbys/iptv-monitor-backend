@@ -28,12 +28,12 @@ const syncMetrics = {
 function trackSyncSuccess(collection, count = 1) {
   syncMetrics.totalSynced += count;
   syncMetrics.lastSyncTime = new Date().toISOString();
-  
+
   if (!syncMetrics.syncdCollections[collection]) {
     syncMetrics.syncdCollections[collection] = 0;
   }
   syncMetrics.syncdCollections[collection] += count;
-  
+
   console.log(`📊 SYNC TRACKED [${collection}]: +${count} | Total: ${syncMetrics.totalSynced}`);
 }
 
@@ -43,7 +43,7 @@ function trackSyncSuccess(collection, count = 1) {
 function trackSyncError(collection, error, operation = 'unknown') {
   syncMetrics.totalErrors++;
   syncMetrics.lastErrorTime = new Date().toISOString();
-  
+
   const errorEntry = {
     timestamp: new Date().toISOString(),
     collection,
@@ -51,14 +51,14 @@ function trackSyncError(collection, error, operation = 'unknown') {
     error: error?.message || String(error),
     stack: error?.stack
   };
-  
+
   syncMetrics.errorLog.push(errorEntry);
-  
+
   // Keep only last 100 errors
   if (syncMetrics.errorLog.length > 100) {
     syncMetrics.errorLog.shift();
   }
-  
+
   console.error(`❌ SYNC ERROR [${collection}]:`, error?.message);
 }
 
@@ -88,12 +88,22 @@ function getSyncMetrics() {
 async function verifyDataConsistency(collection) {
   try {
     console.log(`🔍 Checking data consistency for: ${collection}`);
-    
-    // Get count from MongoDB
+
+    // Get count from MongoDB — gunakan mapping key yang benar
     const db = await connectDB();
-    const mongoCollection = db[collection] || db[getCollectionMap(collection)];
+    const dbKey = getCollectionMap(collection);
+    const mongoCollection = db[dbKey];
+
+    if (!mongoCollection) {
+      return {
+        success: false,
+        error: `MongoDB collection not found for: ${collection} (key: ${dbKey})`,
+        collection
+      };
+    }
+
     const mongoCount = await mongoCollection.countDocuments();
-    
+
     // Get count from Supabase
     const supabase = await getSupabaseClient();
     if (!supabase) {
@@ -103,11 +113,12 @@ async function verifyDataConsistency(collection) {
         collection
       };
     }
-    
+
+    // Gunakan count: 'exact' dengan cara yang benar untuk Supabase JS v2
     const { count: supabaseCount, error } = await supabase
       .from(collection)
-      .select('count()', { count: 'exact', head: true });
-    
+      .select('*', { count: 'exact', head: true });
+
     if (error) {
       return {
         success: false,
@@ -116,11 +127,11 @@ async function verifyDataConsistency(collection) {
         mongoCount
       };
     }
-    
+
     const isConsistent = mongoCount === supabaseCount;
-    
+
     console.log(`📊 ${collection}: MongoDB=${mongoCount}, Supabase=${supabaseCount}, Match=${isConsistent}`);
-    
+
     return {
       success: true,
       collection,
@@ -146,19 +157,19 @@ async function verifyDataConsistency(collection) {
 async function compareSampleDocuments(collection, limit = 5) {
   try {
     console.log(`🔎 Comparing sample documents for: ${collection}`);
-    
+
     // Get from MongoDB
     const db = await connectDB();
-    const mongoCollection = db[collection] || db[getCollectionMap(collection)];
+    const mongoCollection = db[getCollectionMap(collection)];
     const mongoSamples = await mongoCollection.find({}).limit(limit).toArray();
-    
+
     // Get from Supabase
     const supabase = await getSupabaseClient();
     const { data: supabaseSamples, error } = await supabase
       .from(collection)
       .select('*')
       .limit(limit);
-    
+
     if (error) {
       return {
         success: false,
@@ -166,7 +177,7 @@ async function compareSampleDocuments(collection, limit = 5) {
         collection
       };
     }
-    
+
     // Compare
     const comparison = {
       collection,
@@ -174,12 +185,12 @@ async function compareSampleDocuments(collection, limit = 5) {
       supabaseSampleCount: supabaseSamples?.length || 0,
       documents: []
     };
-    
+
     for (let i = 0; i < Math.min(mongoSamples.length, supabaseSamples?.length || 0); i++) {
       const mongoDoc = mongoSamples[i];
       const mongoId = mongoDoc._id?.toString();
       const supabaseDoc = supabaseSamples.find(d => d.id === mongoId);
-      
+
       comparison.documents.push({
         mongoId,
         found: !!supabaseDoc,
@@ -188,7 +199,7 @@ async function compareSampleDocuments(collection, limit = 5) {
         match: supabaseDoc ? compareObjects(mongoDoc, supabaseDoc) : false
       });
     }
-    
+
     return {
       success: true,
       ...comparison,
@@ -210,9 +221,9 @@ async function compareSampleDocuments(collection, limit = 5) {
 function compareObjects(obj1, obj2) {
   const keys1 = Object.keys(obj1);
   const keys2 = Object.keys(obj2);
-  
+
   if (keys1.length !== keys2.length) return false;
-  
+
   for (const key of keys1) {
     if (typeof obj1[key] === 'object' && typeof obj2[key] === 'object') {
       if (!compareObjects(obj1[key], obj2[key])) return false;
@@ -223,7 +234,7 @@ function compareObjects(obj1, obj2) {
       }
     }
   }
-  
+
   return true;
 }
 
@@ -258,9 +269,9 @@ async function checkAllConsistency() {
     'notifications',
     'staff'
   ];
-  
+
   console.log('🔍 Running full consistency check...');
-  
+
   const results = {};
   for (const collection of collections) {
     try {
@@ -269,7 +280,7 @@ async function checkAllConsistency() {
       results[collection] = { success: false, error: error.message };
     }
   }
-  
+
   return {
     timestamp: new Date().toISOString(),
     results,
@@ -290,7 +301,7 @@ async function generateSyncReport() {
   try {
     const metrics = getSyncMetrics();
     const consistency = await checkAllConsistency();
-    
+
     const report = {
       generated: new Date().toISOString(),
       metrics,
@@ -299,12 +310,12 @@ async function generateSyncReport() {
         totalOperations: metrics.summary.totalSynced + metrics.summary.totalErrors,
         successRate: metrics.summary.successRate,
         databaseStatus: consistency.allConsistent ? '✅ CONSISTENT' : '⚠️ INCONSISTENT',
-        recommendedAction: consistency.allConsistent 
-          ? 'All systems operational' 
+        recommendedAction: consistency.allConsistent
+          ? 'All systems operational'
           : 'Review inconsistent collections'
       }
     };
-    
+
     return report;
   } catch (error) {
     console.error('Error generating sync report:', error);
