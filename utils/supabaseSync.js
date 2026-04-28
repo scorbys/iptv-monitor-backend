@@ -23,7 +23,7 @@ function parseDate(value) {
     const match = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
     if (match) {
       const [, day, month, year, h = '00', m = '00', s = '00'] = match;
-      const iso = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${h}:${m}:${s}.000Z`;
+      const iso = `${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}T${h}:${m}:${s}.000Z`;
       const d = new Date(iso);
       return isNaN(d.getTime()) ? null : d.toISOString();
     }
@@ -63,6 +63,61 @@ const DATE_FIELDS = {
   tv_hospitality: ['createdAt', 'updatedAt', 'lastUpdated'],
   auto_fix_history: ['createdAt', 'updatedAt', 'resolvedAt'],
 };
+
+/**
+ * Field-field yang diketahui bertipe BOOLEAN per koleksi
+ */
+const BOOLEAN_FIELDS = {
+  chromecast: ['isPingable', 'isOnline', 'screenOn'],
+  notifications: ['isStartup'],
+  staff: ['isActive'],
+  login_page: ['isActive'],
+  tv_hospitality: [],
+  auto_fix_history: ['autoResolved'],
+};
+
+/**
+ * Sanitize nilai boolean — handle string kosong, angka, null
+ */
+function parseBoolean(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || value === 'true' || value === 'yes') return true;
+  if (value === 0 || value === '0' || value === 'false' || value === 'no') return false;
+  return null; // nilai tidak dikenali → simpan null, jangan crash
+}
+
+/**
+ * Sanitize nilai numerik — handle string kosong
+ */
+function parseNumeric(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return isNaN(value) ? null : value;
+  const n = Number(value);
+  return isNaN(n) ? null : n;
+}
+
+/**
+ * Sanitize satu nilai field secara generik:
+ * - empty string pada non-string type → null
+ * - object/array yang tidak terduga → JSON string
+ */
+function sanitizeValue(value) {
+  // Biarkan null/undefined
+  if (value === null || value === undefined) return null;
+  // Biarkan primitive biasa
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return isNaN(value) ? null : value;
+  if (typeof value === 'boolean') return value;
+  // Date object sudah dihandle di tahap date conversion
+  if (value instanceof Date) return value;
+  // Array of strings → biarkan (untuk TEXT[] di Postgres)
+  if (Array.isArray(value)) return value;
+  // ObjectId sudah dihandle sebelumnya
+  // Object biasa → simpan sebagai JSONB (pastikan kolom adalah JSONB)
+  if (typeof value === 'object') return value;
+  return value;
+}
 
 /**
  * Convert MongoDB ObjectId (string atau object) ke string
@@ -119,8 +174,25 @@ function mongoToSupabase(doc, collectionName) {
     }
   });
 
-  // Hapus field 'id' duplikat dari MongoDB (international/local/hospitality punya field id sendiri)
-  // Sudah di-handle di atas, pastikan tidak ada konflik
+  // Sanitize boolean fields — empty string "" akan crash PostgreSQL
+  const boolFields = BOOLEAN_FIELDS[collectionName] || [];
+  boolFields.forEach(field => {
+    if (converted[field] !== undefined) {
+      converted[field] = parseBoolean(converted[field]);
+    }
+  });
+
+  // Sanitize numeric fields — nilai "" pada NUMERIC akan crash PostgreSQL
+  const NUMERIC_FIELDS = {
+    chromecast: ['noiseLevel', 'signalLevel', 'uptime', 'speedUp', 'speedDown'],
+    notifications: ['mlConfidence'],
+    auto_fix_history: ['resolutionTime'],
+  };
+  (NUMERIC_FIELDS[collectionName] || []).forEach(field => {
+    if (converted[field] !== undefined) {
+      converted[field] = parseNumeric(converted[field]);
+    }
+  });
 
   // Add metadata
   converted.synced_at = new Date().toISOString();
@@ -240,7 +312,7 @@ async function bulkSyncToSupabase(docs, collectionName, operation = 'upsert') {
       }
 
       if (result.error) {
-        console.error(`❌ Bulk sync error batch ${i}-${i + BATCH_SIZE} (${collectionName}):`, result.error.message);
+        console.error(`❌ Bulk sync error batch ${i}-${i+BATCH_SIZE} (${collectionName}):`, result.error.message);
         lastError = result.error;
       } else {
         totalSynced += batch.length;
@@ -276,7 +348,7 @@ async function syncDocumentFromSupabase(supabaseDoc, collectionName, mongoCollec
 
     Object.keys(mongoDoc).forEach(key => {
       if (typeof mongoDoc[key] === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(mongoDoc[key])) {
-        try { mongoDoc[key] = new Date(mongoDoc[key]); } catch { }
+        try { mongoDoc[key] = new Date(mongoDoc[key]); } catch {}
       }
     });
 
