@@ -1861,6 +1861,12 @@ app.post("/api/chat/query", authenticateToken, async (req, res) => {
     }
 
     const lowerMsg = message.toLowerCase();
+    const isCategoryQuery =
+      lowerMsg.includes('kategori') ||
+      lowerMsg.includes('masuk kategori') ||
+      lowerMsg.includes('kategori berapa') ||
+      lowerMsg.includes('error masuk kategori') ||
+      lowerMsg.includes('eror masuk kategori');
 
     // Status query detection (tetap seperti sebelumnya)
     const isSimpleStatusQuery = (
@@ -1868,7 +1874,8 @@ app.post("/api/chat/query", authenticateToken, async (req, res) => {
         lowerMsg.includes('mana saja') || lowerMsg.includes('berapa')) &&
       !lowerMsg.includes('cara') && !lowerMsg.includes('bagaimana') &&
       !lowerMsg.includes('solusi') && !lowerMsg.includes('mengatasi') &&
-      !lowerMsg.includes('masalah') && !lowerMsg.includes('perbaiki')
+      !lowerMsg.includes('masalah') && !lowerMsg.includes('perbaiki') &&
+      !isCategoryQuery
     );
 
     const systemContext = await getSystemContext();
@@ -2084,6 +2091,12 @@ app.post("/api/chat/notification-query", authenticateToken, async (req, res) => 
 
 function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
   const lowerMsg = userMessage.toLowerCase();
+  const isCategoryQuery =
+    lowerMsg.includes('kategori') ||
+    lowerMsg.includes('masuk kategori') ||
+    lowerMsg.includes('kategori berapa') ||
+    lowerMsg.includes('error masuk kategori') ||
+    lowerMsg.includes('eror masuk kategori');
 
   // Detect general help/information queries
   const isGeneralHelp =
@@ -2098,6 +2111,19 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     (lowerMsg.includes('semua') && lowerMsg.includes('menu')) ||
     lowerMsg === 'halo' ||
     lowerMsg === 'hi';
+
+  if (isCategoryQuery) {
+    return `Kamu teknisi IPTV yang menjelaskan pertanyaan teknis tentang kategori error di sistem monitoring.
+
+    ${userMessage}
+
+    Jelaskan dengan singkat dan jelas:
+    1. Kategori error dalam sistem ini ditentukan oleh jenis issue atau pesan error, bukan oleh jumlah device offline.
+    2. Berikan contoh kategori yang umum untuk channel error: Error Playing biasanya masuk Kategori-5, Error_Player_Error_Err biasanya masuk Kategori-6, Connection_Failure biasanya masuk Kategori-7.
+    3. Jika pesan error tidak spesifik, beri tahu bahwa perlu lihat error log atau pesan error persis untuk menentukan kategori.
+
+    Jawab dalam 3-4 kalimat, tanpa format list panjang, fokus ke definisi kategori dan kapan error dapat masuk ke masing-masing kategori.`;
+  }
 
   if (isGeneralHelp) {
     return `Kamu asisten virtual IPTV Monitoring System yang ramah dan informatif.
