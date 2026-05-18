@@ -48,6 +48,7 @@ services:
       - ml-service
       - prometheus
       - grafana
+      - jenkins
   
   prometheus:
     container_name: iptv-prometheus
@@ -105,6 +106,8 @@ services:
     ports:
       - "8080:8080"
       - "50000:50000"
+    environment:
+      - JENKINS_OPTS=--prefix=/jenkins
     volumes:
       - jenkins_data:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
