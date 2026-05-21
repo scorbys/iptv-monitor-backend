@@ -109,7 +109,6 @@ services:
     environment:
       - JENKINS_OPTS=--prefix=/jenkins
       - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Dhudson.security.csrf.GlobalCrumbIssuerConfiguration.DISABLE_CSRF_PROTECTION=true
-      - JENKINS_URL=https://seek-contributions-cove-mobiles.trycloudflare.com/jenkins/
     volumes:
       - jenkins_data:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
