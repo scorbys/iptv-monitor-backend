@@ -1,11 +1,9 @@
 FROM prom/prometheus
-# Salin konfigurasi prometheus Anda ke dalam image
 COPY prometheus.yml /etc/prometheus/prometheus.yml
 
-# Tambahkan argumen ini agar Prometheus tahu base path-nya
 ENTRYPOINT [ "/bin/prometheus" ]
 CMD [ "--config.file=/etc/prometheus/prometheus.yml", \
       "--storage.tsdb.path=/prometheus", \
       "--web.console.libraries=/usr/share/prometheus/console_libraries", \
       "--web.console.templates=/usr/share/prometheus/consoles", \
-      "--web.external-url=https://URL_TUNNEL_VERCEL_ANDA/prometheus/" ]
+      "--web.external-url=https://be.radissonuluwatu.my.id/prometheus/" ]
