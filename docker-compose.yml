@@ -124,7 +124,7 @@ services:
       - "50000:50000"
     environment:
       - JENKINS_OPTS=--prefix=/jenkins
-      - JENKINS_URL=https://be.radissonuluwatu.my.id/jenkins
+      - JENKINS_URL=https://be.radissonuluwatu.my.id/jenkins/
       - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Dhudson.security.csrf.GlobalCrumbIssuerConfiguration.DISABLE_CSRF_PROTECTION=true
     volumes:
       - jenkins_data:/var/jenkins_home
