@@ -2580,7 +2580,13 @@ app.get("/api/channels", trackRequestMetrics('channels'), authenticateToken, asy
         jitter: statusData.networkStats.jitter || 0,
         error: statusData.networkStats.error || 0,
         recoveryTime: statusData.networkStats.recoveryTime || 0
-      } : null;
+      } : {
+        packetLoss: 0,
+        latency: 0,
+        jitter: 0,
+        error: 0,
+        recoveryTime: 0
+      };
 
       return {
         ...channel,
