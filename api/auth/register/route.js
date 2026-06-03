@@ -64,24 +64,42 @@ const getCookieDomain = (req) => {
 
   try {
     const originUrl = new URL(origin);
+    const hostname = originUrl.hostname;
 
-    // Vercel deployment preview (3+ parts like xxx-yyy-zzz.vercel.app)
-    // -> DON'T set domain attribute
-    if (originUrl.hostname.endsWith('.vercel.app')) {
-      const parts = originUrl.hostname.split('.');
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return undefined;
+    }
+
+    // Vercel preview deployment should not set domain attribute
+    if (hostname.endsWith('.vercel.app')) {
+      const parts = hostname.split('.');
       if (parts.length > 2) return undefined;
-      // Production Vercel domain (2 parts like xxx.vercel.app)
-      // -> Set domain to .vercel.app
-      if (parts.length === 2) return '.vercel.app';
+      return '.vercel.app';
     }
 
-    // Custom domain with subdomain
-    const parts = originUrl.hostname.split('.');
-    if (parts.length >= 2) {
-      return `.${parts.slice(-2).join('.')}`;
+    const publicSuffixes = [
+      'co.id',
+      'or.id',
+      'ac.id',
+      'sch.id',
+      'web.id',
+      'my.id',
+      'gov.id',
+      'net.id',
+      'mil.id'
+    ];
+
+    const parts = hostname.split('.');
+    if (parts.length < 2) return undefined;
+
+    const lastTwo = parts.slice(-2).join('.');
+    const lastThree = parts.slice(-3).join('.');
+
+    if (publicSuffixes.includes(lastTwo) && parts.length >= 3) {
+      return `.${lastThree}`;
     }
 
-    return undefined;
+    return `.${lastTwo}`;
   } catch (e) {
     return undefined;
   }
