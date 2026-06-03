@@ -2801,7 +2801,21 @@ app.get("/api/channels/:id", authenticateToken, async (req, res) => {
         .replace(/[^a-z0-9-]/g, '') : null,
       isOnline: status.status === "online",
       isPingable: status.status === "online",
-      statusText: status.status === "online" ? "Online" : "Offline"
+      statusText: status.status === "online" ? "Online" : "Offline",
+      metrics: status.networkStats ? {
+        packetLoss: status.networkStats.packetLoss || 0,
+        latency: status.networkStats.latency || 0,
+        jitter: status.networkStats.jitter || 0,
+        error: status.networkStats.error || 0,
+        recoveryTime: status.networkStats.recoveryTime || 0,
+      } : {
+        packetLoss: 0,
+        latency: 0,
+        jitter: 0,
+        error: 0,
+        recoveryTime: 0,
+      },
+      labeledMetrics: status.labeledMetrics || null,
     };
 
     res.json({
