@@ -5,37 +5,43 @@ const { authenticateUser } = require("../../../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// CORS middleware - Dynamic origin based on Origin header or Referer
-const setCorsHeaders = (req, res, next) => {
-  // Get origin from request headers
-  const requestOrigin = req.headers.origin || req.headers.referer;
+// CORS middleware - use environment-provided allowed origins when available
+const getAllowedOrigins = () => {
+  const envList = (process.env.CORS_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const add = [];
+  if (process.env.FRONTEND_URL) add.push(process.env.FRONTEND_URL);
+  if (process.env.PUBLIC_BASE_URL) add.push(process.env.PUBLIC_BASE_URL);
+  if (process.env.NEXT_PUBLIC_API_URL) add.push(process.env.NEXT_PUBLIC_API_URL);
+  return Array.from(new Set([...envList, ...add]));
+};
 
-  // Check if origin is from Vercel or localhost
-  let allowedOrigin = requestOrigin;
+const getDefaultOrigin = () => process.env.FRONTEND_URL || process.env.PUBLIC_BASE_URL || 'https://be.radissonuluwatu.my.id';
+
+const setCorsHeaders = (req, res, next) => {
+  const requestOrigin = req.headers.origin || req.headers.referer;
+  const allowedOrigins = getAllowedOrigins();
+  let allowedOrigin = allowedOrigins[0] || getDefaultOrigin();
 
   if (requestOrigin) {
     try {
       const originUrl = new URL(requestOrigin);
+      const hostname = originUrl.hostname;
 
-      // Allow any Vercel deployment (both production and preview)
-      if (originUrl.hostname.endsWith('.vercel.app')) {
+      if (hostname.endsWith('.vercel.app') || hostname === 'localhost' || hostname === '127.0.0.1') {
         allowedOrigin = requestOrigin;
-      }
-      // Allow localhost for development
-      else if (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1') {
+      } else if (allowedOrigins.includes(requestOrigin) || allowedOrigins.includes(hostname)) {
         allowedOrigin = requestOrigin;
-      }
-      // Default to production if unknown
-      else {
-        console.warn(`[CORS] Unknown origin: ${requestOrigin}, using production origin`);
-        allowedOrigin = 'https://iptv-monitor.vercel.app';
+      } else {
+        console.warn(`[CORS] Unknown origin: ${requestOrigin}, using ${allowedOrigin}`);
       }
     } catch (e) {
       console.error('[CORS] Invalid origin:', requestOrigin);
-      allowedOrigin = 'https://iptv-monitor.vercel.app';
     }
   } else {
-    allowedOrigin = 'https://iptv-monitor.vercel.app';
+    if (req.headers.host && (req.headers.host.includes('localhost') || req.headers.host.includes('127.0.0.1'))) {
+      allowedOrigin = '*';
+      console.log(`[CORS] Local development detected (host: ${req.headers.host}), allowing all origins`);
+    }
   }
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin);

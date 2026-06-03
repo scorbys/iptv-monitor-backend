@@ -143,39 +143,40 @@ const networkStats = {
 };
 
 // ==================== CORS CONFIGURATION ====================
+const buildAllowedOrigins = () => {
+  const envList = (process.env.CORS_ORIGINS || "").split(',').map(s => s.trim()).filter(Boolean);
+  const add = [];
+  if (process.env.FRONTEND_URL) add.push(process.env.FRONTEND_URL);
+  if (process.env.PUBLIC_BASE_URL) add.push(process.env.PUBLIC_BASE_URL);
+  if (process.env.NEXT_PUBLIC_API_URL) add.push(process.env.NEXT_PUBLIC_API_URL);
+  return Array.from(new Set([...envList, ...add]));
+};
+
 const corsOptions = {
   origin: function (origin, callback) {
-    // Dynamic origin support for Vercel deployments
-    let allowedOrigin = null;
+    if (!origin) return callback(null, true); // server-to-server or same-origin
 
-    if (!origin) {
-      // Same-origin request or server-to-server
-      return callback(null, true);
-    }
+    const allowedOrigins = buildAllowedOrigins();
 
     try {
       const originUrl = new URL(origin);
       const hostname = originUrl.hostname;
 
-      // Allow any Vercel deployment (both production and preview)
-      if (hostname.endsWith('.vercel.app')) {
-        allowedOrigin = origin;
-      }
-      // Allow localhost for development
-      else if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        allowedOrigin = origin;
-      }
-      // Allow IP addresses for local network testing
-      else if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
-        allowedOrigin = origin;
-      }
-      // Default to production if unknown
-      else {
-        console.warn(`[CORS] Unknown origin: ${origin}, blocking request`);
-        return callback(new Error("Not allowed by CORS"));
+      if (hostname.endsWith('.vercel.app') || hostname === 'localhost' || hostname === '127.0.0.1') {
+        return callback(null, origin);
       }
 
-      return callback(null, allowedOrigin);
+      // Allow common private network ranges
+      if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
+        return callback(null, origin);
+      }
+
+      if (allowedOrigins.includes(origin) || allowedOrigins.includes(hostname)) {
+        return callback(null, origin);
+      }
+
+      console.warn(`[CORS] Unknown origin: ${origin}, blocking request`);
+      return callback(new Error("Not allowed by CORS"));
     } catch (e) {
       console.error('[CORS] Invalid origin:', origin);
       return callback(new Error("Not allowed by CORS"));
@@ -197,26 +198,20 @@ app.use((req, res, next) => {
 
   // Dynamic origin support for Vercel deployments
   let allowedOrigin = null;
+  const allowedOrigins = buildAllowedOrigins();
 
   if (origin) {
     try {
       const originUrl = new URL(origin);
       const hostname = originUrl.hostname;
 
-      // Allow any Vercel deployment (both production and preview)
-      if (hostname.endsWith('.vercel.app')) {
+      if (hostname.endsWith('.vercel.app') || hostname === 'localhost' || hostname === '127.0.0.1') {
         allowedOrigin = origin;
-      }
-      // Allow localhost for development
-      else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      } else if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
         allowedOrigin = origin;
-      }
-      // Allow IP addresses for local network testing
-      else if (/^192\.168\.\d+\.\d+$|^10\.\d+\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) {
+      } else if (allowedOrigins.includes(origin) || allowedOrigins.includes(hostname)) {
         allowedOrigin = origin;
-      }
-      // Default to production origin if unknown (don't set custom header)
-      else {
+      } else {
         console.warn(`[MIDDLEWARE CORS] Unknown origin: ${origin}, not setting CORS header`);
       }
     } catch (e) {
@@ -224,7 +219,6 @@ app.use((req, res, next) => {
     }
   }
 
-  // Only set Access-Control-Allow-Origin if we validated the origin
   if (allowedOrigin) {
     res.header("Access-Control-Allow-Origin", allowedOrigin);
   }

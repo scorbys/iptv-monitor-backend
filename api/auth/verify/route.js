@@ -5,69 +5,51 @@ const { getUserById } = require("../../../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// CORS middleware - Dynamic origin based on Origin header or Referer
+// CORS middleware - use environment-provided allowed origins when available
+const getAllowedOrigins = () => {
+  const envList = (process.env.CORS_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const add = [];
+  if (process.env.FRONTEND_URL) add.push(process.env.FRONTEND_URL);
+  if (process.env.PUBLIC_BASE_URL) add.push(process.env.PUBLIC_BASE_URL);
+  if (process.env.NEXT_PUBLIC_API_URL) add.push(process.env.NEXT_PUBLIC_API_URL);
+  return Array.from(new Set([...envList, ...add]));
+};
+
+const getDefaultOrigin = () => process.env.FRONTEND_URL || process.env.PUBLIC_BASE_URL || 'https://be.radissonuluwatu.my.id';
+
 const setCorsHeaders = (req, res, next) => {
-  // Get origin from request headers
   const requestOrigin = req.headers.origin || req.headers.referer;
-
-  // List of allowed origins (both production and deployment previews)
-  const allowedOrigins = [
-    // Production domain
-    'https://iptv-monitor.vercel.app',
-    // Allow any Vercel deployment preview (using wildcard pattern)
-    // We'll check if it matches *.vercel.app
-  ];
-
-  // Check if origin is from Vercel or is in our allowed list
-  let allowedOrigin = requestOrigin;
+  const allowedOrigins = getAllowedOrigins();
+  let allowedOrigin = allowedOrigins[0] || getDefaultOrigin();
 
   if (requestOrigin) {
     try {
       const originUrl = new URL(requestOrigin);
+      const hostname = originUrl.hostname;
 
-      // Allow any Vercel deployment (both production and preview)
-      if (originUrl.hostname.endsWith('.vercel.app')) {
+      if (hostname.endsWith('.vercel.app') || hostname === 'localhost' || hostname === '127.0.0.1') {
         allowedOrigin = requestOrigin;
-      }
-      // Allow localhost for development
-      else if (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1') {
+      } else if (allowedOrigins.includes(requestOrigin) || allowedOrigins.includes(hostname)) {
         allowedOrigin = requestOrigin;
-      }
-      // Check against explicit allowed origins
-      else if (allowedOrigins.includes(requestOrigin)) {
-        allowedOrigin = requestOrigin;
-      }
-      // Default to production if unknown
-      else {
-        console.warn(`[CORS] Unknown origin: ${requestOrigin}, using production origin`);
-        allowedOrigin = 'https://iptv-monitor.vercel.app';
+      } else {
+        console.warn(`[CORS] Unknown origin: ${requestOrigin}, using ${allowedOrigin}`);
       }
     } catch (e) {
       console.error('[CORS] Invalid origin:', requestOrigin);
-      allowedOrigin = 'https://iptv-monitor.vercel.app';
     }
   } else {
-    // No origin header - this is a same-origin request (likely from localhost)
-    // For development, we should allow same-origin requests
     const host = req.headers.host;
     if (host && (host.includes('localhost') || host.includes('127.0.0.1'))) {
-      // Local development - allow the request
-      allowedOrigin = '*'; // Allow any origin for local dev
+      allowedOrigin = '*';
       console.log(`[CORS] Local development detected (host: ${host}), allowing all origins`);
-    } else {
-      // Production without origin header
-      allowedOrigin = 'https://iptv-monitor.vercel.app';
     }
   }
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS"
-  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Vary", "Origin"); // Important for caching
+  res.setHeader("Vary", "Origin");
 
   next();
 };
