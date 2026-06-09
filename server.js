@@ -256,14 +256,14 @@ const notificationStatusGauge = new promClient.Gauge({
 
 const notificationErrorCategoryGauge = new promClient.Gauge({
   name: 'iptv_notification_errors_by_category',
-  help: 'Active/offline notification count by error category and source',
+  help: 'Offline/error notification count by error category and source',
   labelNames: ['category', 'source', 'status'],
   registers: [metricsRegistry],
 });
 
 const notificationErrorDeviceGauge = new promClient.Gauge({
   name: 'iptv_error_devices',
-  help: 'Active/offline error notifications grouped by affected device or channel',
+  help: 'Offline/error notifications grouped by affected device or channel',
   labelNames: ['device', 'room', 'category', 'source', 'status'],
   registers: [metricsRegistry],
 });
@@ -786,6 +786,11 @@ async function getSystemContext() {
   }
 }
 
+function normalizePrometheusCategory(category) {
+  if (!category) return 'Uncategorized';
+  return String(category).replace(/^Katagori-/i, 'Kategori-');
+}
+
 async function updatePrometheusMetrics() {
   backendInfoGauge.set(
     { service: 'iptv-backend', node_env: process.env.NODE_ENV || 'development' },
@@ -857,18 +862,18 @@ async function updatePrometheusMetrics() {
       );
     });
 
-    const activeErrorMatch = {
-      currentStatus: 'offline',
+    const errorNotificationMatch = {
+      type: 'offline',
     };
 
     const notificationErrorCategories = await db.collection('notifications').aggregate([
-      { $match: activeErrorMatch },
+      { $match: errorNotificationMatch },
       {
         $group: {
           _id: {
             category: { $ifNull: ['$errorCategory', 'Uncategorized'] },
             source: { $ifNull: ['$source', 'unknown'] },
-            status: { $ifNull: ['$currentStatus', 'unknown'] },
+            status: { $ifNull: ['$reportStatus', { $ifNull: ['$currentStatus', 'unknown'] }] },
           },
           count: { $sum: 1 },
         },
@@ -879,7 +884,7 @@ async function updatePrometheusMetrics() {
     notificationErrorCategories.forEach(item => {
       notificationErrorCategoryGauge.set(
         {
-          category: item._id.category || 'Uncategorized',
+          category: normalizePrometheusCategory(item._id.category),
           source: item._id.source || 'unknown',
           status: item._id.status || 'unknown',
         },
@@ -888,11 +893,11 @@ async function updatePrometheusMetrics() {
     });
 
     const notificationErrorDevices = await db.collection('notifications').aggregate([
-      { $match: activeErrorMatch },
+      { $match: errorNotificationMatch },
       {
         $project: {
           source: { $ifNull: ['$source', 'unknown'] },
-          status: { $ifNull: ['$currentStatus', 'unknown'] },
+          status: { $ifNull: ['$reportStatus', { $ifNull: ['$currentStatus', 'unknown'] }] },
           category: { $ifNull: ['$errorCategory', 'Uncategorized'] },
           room: {
             $cond: [
@@ -942,7 +947,7 @@ async function updatePrometheusMetrics() {
         {
           device: item._id.device || 'Unknown Device',
           room: item._id.room || 'N/A',
-          category: item._id.category || 'Uncategorized',
+          category: normalizePrometheusCategory(item._id.category),
           source: item._id.source || 'unknown',
           status: item._id.status || 'unknown',
         },

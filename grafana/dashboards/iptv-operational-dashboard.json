@@ -508,12 +508,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (category) (iptv_notification_errors_by_category{status=\"offline\"})",
+          "expr": "sum by (category) (iptv_notification_errors_by_category)",
           "legendFormat": "{{category}}",
           "refId": "A"
         }
       ],
-      "title": "Active Error Categories",
+      "title": "Error Categories from Notifications",
       "type": "piechart"
     },
     {
@@ -575,26 +575,25 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Active Errors"
+            "displayName": "Error Count"
           }
         ]
       },
       "targets": [
         {
-          "expr": "sort_desc(sum by (source, device, room, category) (iptv_error_devices{status=\"offline\"}))",
+          "expr": "sort_desc(sum by (source, device, room, category, status) (iptv_error_devices))",
           "format": "table",
           "instant": true,
           "refId": "A"
         }
       ],
-      "title": "Affected Devices / Channels",
+      "title": "Affected Devices / Channels from Notifications",
       "transformations": [
         {
           "id": "organize",
           "options": {
             "excludeByName": {
               "Time": true,
-              "status": true,
               "__name__": true
             },
             "indexByName": {
@@ -602,14 +601,16 @@
               "device": 1,
               "room": 2,
               "category": 3,
-              "Value": 4
+              "status": 4,
+              "Value": 5
             },
             "renameByName": {
               "source": "Type",
               "device": "Device / Channel",
               "room": "Room",
               "category": "Category",
-              "Value": "Active Errors"
+              "status": "Status",
+              "Value": "Error Count"
             }
           }
         }
@@ -636,6 +637,6 @@
   "timezone": "browser",
   "title": "IPTV Operational Dashboard",
   "uid": "iptv-operational",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
