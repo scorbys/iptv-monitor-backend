@@ -5,6 +5,10 @@ pipeline {
     skipDefaultCheckout(true)
   }
 
+  triggers {
+    githubPush()
+  }
+
   environment {
     BACKEND_ENV_FILE = credentials('iptv-backend-env')
     ML_ENV_FILE = credentials('ml-service-env')
