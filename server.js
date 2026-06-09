@@ -1513,7 +1513,19 @@ function generateDummyChromecastStatus(deviceId = 'default') {
   return returnValue;
 }
 
-function generateHistoricalNetworkData(timeRange, isOnline) {
+function varyMetric(baseValue, variation = 0.2, decimals = 0) {
+  const numericBase = Number(baseValue) || 0;
+  if (numericBase <= 0) return 0;
+
+  const varied = numericBase + (Math.random() - 0.5) * numericBase * variation;
+  const safeValue = Math.max(0, varied);
+
+  return decimals > 0
+    ? parseFloat(safeValue.toFixed(decimals))
+    : Math.floor(safeValue);
+}
+
+function generateHistoricalNetworkData(timeRange, isOnline, baseMetrics = {}) {
   const now = new Date();
   const data = [];
 
@@ -1538,6 +1550,20 @@ function generateHistoricalNetworkData(timeRange, isOnline) {
       intervalMs = 3600000;
   }
 
+  const metrics = {
+    latency: baseMetrics.latency ?? 25,
+    bandwidth: baseMetrics.bandwidth ?? 75,
+    jitter: baseMetrics.jitter ?? 8,
+    packetLoss: baseMetrics.packetLoss ?? 0.5,
+    sent: baseMetrics.sent ?? 4.5,
+    received: baseMetrics.received ?? 2.8,
+    hops: baseMetrics.hops ?? 14,
+    signalStrength: baseMetrics.signalStrength ?? 80,
+    bitrate: baseMetrics.bitrate ?? 5000,
+    error: baseMetrics.error ?? 0,
+    recoveryTime: baseMetrics.recoveryTime ?? 0,
+  };
+
   for (let i = points - 1; i >= 0; i--) {
     const time = new Date(now.getTime() - i * intervalMs);
     const timeStr =
@@ -1551,15 +1577,18 @@ function generateHistoricalNetworkData(timeRange, isOnline) {
 
     data.push({
       time: timeStr,
-      latency: isOnline ? Math.floor(Math.random() * 20) + 10 : 0,
-      bandwidth: isOnline ? Math.floor(Math.random() * 80) + 40 : 0,
-      jitter: isOnline ? Math.floor(Math.random() * 8) + 1 : 0,
-      packetLoss: isOnline ? parseFloat((Math.random() * 0.6).toFixed(2)) : 0,
-      sent: isOnline ? parseFloat((Math.random() * 6 + 2).toFixed(2)) : 0,
-      received: isOnline ? parseFloat((Math.random() * 5 + 1).toFixed(2)) : 0,
-      hops: isOnline ? Math.floor(Math.random() * 10) + 8 : 0,
-      signalStrength: isOnline ? Math.floor(Math.random() * 25) + 75 : 0,
-      bitrate: isOnline ? Math.floor(Math.random() * 4000) + 3500 : 0,
+      timestamp: time.toISOString(),
+      latency: isOnline ? varyMetric(metrics.latency, 0.22) : 0,
+      bandwidth: isOnline ? varyMetric(metrics.bandwidth, 0.22) : 0,
+      jitter: isOnline ? varyMetric(metrics.jitter, 0.22) : 0,
+      packetLoss: isOnline ? varyMetric(metrics.packetLoss, 0.22, 2) : 0,
+      sent: isOnline ? varyMetric(metrics.sent, 0.22, 2) : 0,
+      received: isOnline ? varyMetric(metrics.received, 0.22, 2) : 0,
+      hops: isOnline ? varyMetric(metrics.hops, 0.18) : 0,
+      signalStrength: isOnline ? varyMetric(metrics.signalStrength, 0.12) : 0,
+      bitrate: isOnline ? varyMetric(metrics.bitrate, 0.18) : 0,
+      error: isOnline ? varyMetric(metrics.error, 0.22, 2) : 0,
+      recoveryTime: isOnline ? varyMetric(metrics.recoveryTime, 0.22, 1) : 0,
     });
   }
 
@@ -3228,9 +3257,12 @@ app.get("/api/channels/:id/history", authenticateToken, async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channel.id) || { status: "offline" };
+    const status = channelStatus.get(channel.id) || generateDummyChannelStatus(channel.id);
+    if (!channelStatus.has(channel.id)) {
+      channelStatus.set(channel.id, status);
+    }
     const isOnline = status.status === "online";
-    const historicalData = generateHistoricalNetworkData(timeRange, isOnline);
+    const historicalData = generateHistoricalNetworkData(timeRange, isOnline, status.networkStats);
 
     res.json({
       success: true,
@@ -3922,66 +3954,12 @@ app.get("/api/hospitality/tvs/:id/history", authenticateToken, async (req, res) 
       });
     }
 
-    const tvStatusData = tvStatus.get(tv.roomNo);
+    const tvStatusData = tvStatus.get(tv.roomNo) || generateDummyTVStatus(tv.roomNo);
+    if (!tvStatus.has(tv.roomNo)) {
+      tvStatus.set(tv.roomNo, tvStatusData);
+    }
     const isOnline = tvStatusData?.status === "online";
-
-    const generateTVHistoricalData = (timeRange, isOnline) => {
-      const now = new Date();
-      const data = [];
-
-      let points, intervalMs;
-      switch (timeRange) {
-        case '1h':
-          points = 60;
-          intervalMs = 60000; // 1 minute
-          break;
-        case '24h':
-          points = 24;
-          intervalMs = 3600000; // 1 hour
-          break;
-        case '7d':
-          points = 7;
-          intervalMs = 86400000; // 1 day
-          break;
-        default:
-          points = 24;
-          intervalMs = 3600000;
-      }
-
-      const baseLatency = isOnline ? 22 : 0;
-      const baseBandwidth = isOnline ? 65 : 0;
-      const baseJitter = isOnline ? 6 : 0;
-      const basePacketLoss = isOnline ? 0.3 : 0;
-      const baseSent = isOnline ? 4.5 : 0;
-      const baseReceived = isOnline ? 2.8 : 0;
-      const baseHops = isOnline ? 14 : 0;
-
-      for (let i = points - 1; i >= 0; i--) {
-        const time = new Date(now.getTime() - i * intervalMs);
-        const timeStr = timeRange === '1h'
-          ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
-          : timeRange === '24h'
-            ? `${String(time.getHours()).padStart(2, '0')}:00`
-            : time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-        const variation = 0.2;
-        data.push({
-          time: timeStr,
-          timestamp: time.toISOString(),
-          latency: Math.max(0, Math.floor(baseLatency + (Math.random() - 0.5) * baseLatency * variation)),
-          bandwidth: Math.max(0, Math.floor(baseBandwidth + (Math.random() - 0.5) * baseBandwidth * variation)),
-          jitter: Math.max(0, Math.floor(baseJitter + (Math.random() - 0.5) * baseJitter * variation)),
-          packetLoss: Math.max(0, parseFloat((basePacketLoss + (Math.random() - 0.5) * basePacketLoss * variation).toFixed(2))),
-          sent: Math.max(0, parseFloat((baseSent + (Math.random() - 0.5) * baseSent * variation).toFixed(2))),
-          received: Math.max(0, parseFloat((baseReceived + (Math.random() - 0.5) * baseReceived * variation).toFixed(2))),
-          hops: Math.max(0, Math.floor(baseHops + (Math.random() - 0.5) * baseHops * variation))
-        });
-      }
-
-      return data;
-    };
-
-    const historicalData = generateTVHistoricalData(timeRange, isOnline);
+    const historicalData = generateHistoricalNetworkData(timeRange, isOnline, tvStatusData.networkStats);
 
     res.json({
       success: true,
@@ -4825,66 +4803,16 @@ app.get("/api/chromecast/:id/history", authenticateToken, async (req, res) => {
       });
     }
 
-    const deviceStatus = chromecastStatus.get(device.idCast);
+    const deviceStatus = chromecastStatus.get(device.idCast) || generateDummyChromecastStatus(device.idCast);
+    if (!chromecastStatus.has(device.idCast)) {
+      chromecastStatus.set(device.idCast, deviceStatus);
+    }
     const isOnline = deviceStatus?.isOnline || false;
-
-    const generateHistoricalData = (timeRange, isOnline) => {
-      const now = new Date();
-      const data = [];
-
-      let points, intervalMs;
-      switch (timeRange) {
-        case '1h':
-          points = 60;
-          intervalMs = 60000; // 1 minute
-          break;
-        case '24h':
-          points = 24;
-          intervalMs = 3600000; // 1 hour
-          break;
-        case '7d':
-          points = 7;
-          intervalMs = 86400000; // 1 day
-          break;
-        default:
-          points = 24;
-          intervalMs = 3600000;
-      }
-
-      const baseLatency = isOnline ? 25 : 0;
-      const baseBandwidth = isOnline ? 75 : 0;
-      const baseJitter = isOnline ? 8 : 0;
-      const basePacketLoss = isOnline ? 0.5 : 0;
-      const baseSent = isOnline ? 3.2 : 0;
-      const baseReceived = isOnline ? 2.1 : 0;
-      const baseSpeed = isOnline ? 85 : 0;
-
-      for (let i = points - 1; i >= 0; i--) {
-        const time = new Date(now.getTime() - i * intervalMs);
-        const timeStr = timeRange === '1h'
-          ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
-          : timeRange === '24h'
-            ? `${String(time.getHours()).padStart(2, '0')}:00`
-            : time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-        const variation = 0.3;
-        data.push({
-          time: timeStr,
-          timestamp: time.toISOString(),
-          latency: Math.max(0, Math.floor(baseLatency + (Math.random() - 0.5) * baseLatency * variation)),
-          bandwidth: Math.max(0, Math.floor(baseBandwidth + (Math.random() - 0.5) * baseBandwidth * variation)),
-          jitter: Math.max(0, Math.floor(baseJitter + (Math.random() - 0.5) * baseJitter * variation)),
-          packetLoss: Math.max(0, parseFloat((basePacketLoss + (Math.random() - 0.5) * basePacketLoss * variation).toFixed(2))),
-          sent: Math.max(0, parseFloat((baseSent + (Math.random() - 0.5) * baseSent * variation).toFixed(2))),
-          received: Math.max(0, parseFloat((baseReceived + (Math.random() - 0.5) * baseReceived * variation).toFixed(2))),
-          speed: Math.max(0, Math.floor(baseSpeed + (Math.random() - 0.5) * baseSpeed * variation))
-        });
-      }
-
-      return data;
-    };
-
-    const historicalData = generateHistoricalData(timeRange, isOnline);
+    const historicalData = generateHistoricalNetworkData(timeRange, isOnline, {
+      ...deviceStatus.networkStats,
+      signalStrength: deviceStatus.networkStats?.signalStrength || deviceStatus.signalLevel,
+      speed: deviceStatus.speed,
+    });
 
     res.json({
       success: true,
