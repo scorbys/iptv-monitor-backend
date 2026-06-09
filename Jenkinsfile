@@ -78,8 +78,10 @@ pipeline {
         sh 'docker compose up -d --build --no-deps ml-service'
         sleep 10
         sh 'docker compose up -d prometheus grafana cadvisor node-exporter'
-        // Jangan rebuild nginx kecuali ada perubahan config!
-        // nginx -s reload sudah cukup untuk config changes
+        // Supporting services can get new container IPs after recreate.
+        // Reload nginx so upstream DNS is resolved again.
+        sleep 3
+        sh 'docker exec iptv-nginx nginx -s reload'
       }
     }
 
