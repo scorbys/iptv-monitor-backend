@@ -129,7 +129,7 @@
       },
       "targets": [
         {
-          "expr": "sum(iptv_devices_offline)",
+          "expr": "sum(max by (type) (iptv_devices_offline))",
           "legendFormat": "offline",
           "refId": "A"
         }
@@ -181,7 +181,7 @@
       },
       "targets": [
         {
-          "expr": "sum(iptv_auto_fix_total{status=~\"pending|executing\"})",
+          "expr": "sum(max by (status) (iptv_auto_fix_total{status=~\"pending|executing\"}))",
           "legendFormat": "open",
           "refId": "A"
         }
@@ -229,7 +229,7 @@
       },
       "targets": [
         {
-          "expr": "sum(iptv_ml_predictions_total)",
+          "expr": "max(iptv_ml_predictions_total)",
           "legendFormat": "predictions",
           "refId": "A"
         }
@@ -284,12 +284,12 @@
       },
       "targets": [
         {
-          "expr": "iptv_devices_online",
+          "expr": "max by (type) (iptv_devices_online)",
           "legendFormat": "{{type}} online",
           "refId": "A"
         },
         {
-          "expr": "iptv_devices_offline",
+          "expr": "max by (type) (iptv_devices_offline)",
           "legendFormat": "{{type}} offline",
           "refId": "B"
         }
@@ -340,7 +340,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (status) (iptv_auto_fix_total)",
+          "expr": "max by (status) (iptv_auto_fix_total)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -395,7 +395,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (source, status) (iptv_notifications_total)",
+          "expr": "max by (source, status) (iptv_notifications_total)",
           "legendFormat": "{{source}} / {{status}}",
           "refId": "A"
         }
@@ -508,7 +508,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (category) (iptv_notification_errors_by_category)",
+          "expr": "max by (category) (iptv_notification_errors_by_category)",
           "legendFormat": "{{category}}",
           "refId": "A"
         }
@@ -581,7 +581,7 @@
       },
       "targets": [
         {
-          "expr": "sort_desc(sum by (source, device, room, category, status) (iptv_error_devices))",
+          "expr": "sort_desc(max by (source, device, room, category, status) (iptv_error_devices))",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -637,6 +637,6 @@
   "timezone": "browser",
   "title": "IPTV Operational Dashboard",
   "uid": "iptv-operational",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }
