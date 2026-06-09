@@ -1,12 +1,16 @@
 pipeline {
   agent any
 
+  options {
+    skipDefaultCheckout(true)
+  }
+
   triggers { 
     githubPush() 
   }
 
   parameters {
-    choice(name: 'GIT_BRANCH', choices: ['main', 'dev'], description: 'Git branch to deploy')
+    choice(name: 'GIT_BRANCH', choices: ['', 'main', 'dev'], description: 'Leave empty to deploy the branch configured by this Jenkins job')
   }
 
   environment {
@@ -18,7 +22,16 @@ pipeline {
     stage('Prepare') {
       steps {
         script {
-          def deployBranch = env.BRANCH_NAME ?: params.GIT_BRANCH ?: 'main'
+          def configuredBranch = 'main'
+          try {
+            configuredBranch = scm.branches[0].name
+              .replaceFirst(/^origin\//, '')
+              .replaceFirst(/^\*\//, '')
+          } catch (ignored) {
+            configuredBranch = 'main'
+          }
+
+          def deployBranch = env.BRANCH_NAME ?: (params.GIT_BRANCH?.trim() ? params.GIT_BRANCH.trim() : configuredBranch)
           echo "Deploying branch: ${deployBranch}"
           git branch: deployBranch, url: 'https://github.com/scorbys/iptv-monitor-backend.git'
         }

@@ -119,7 +119,11 @@ services:
 
   jenkins:
     container_name: iptv-jenkins
-    image: jenkins/jenkins:lts
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    group_add:
+      - "${DOCKER_GID:-110}"
     restart: unless-stopped
     expose:
       - "8080"
