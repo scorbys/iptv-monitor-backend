@@ -323,6 +323,26 @@ router.get('/stats', requireAdmin, async (req, res) => {
       { $limit: 20 }
     ]).toArray();
 
+    const pendingDetails = await db.autoFixLogs.find({
+      createdAt: { $gte: startDate },
+      status: { $in: ['pending', 'executing'] }
+    })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .project({
+        fixId: 1,
+        status: 1,
+        category: 1,
+        action: 1,
+        deviceType: 1,
+        deviceId: 1,
+        deviceName: 1,
+        roomNo: 1,
+        source: 1,
+        createdAt: 1
+      })
+      .toArray();
+
     // Fix type breakdown
     const fixTypeStats = await db.autoFixLogs.aggregate([
       {
@@ -351,6 +371,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
         byFixType: fixTypeStats,
         byDeviceType: deviceTypeStats,
         byDevice: deviceStats,
+        pendingDetails,
         period: `${period} days`
       }
     };

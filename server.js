@@ -95,8 +95,25 @@ const PERFORMANCE_PROFILE_WEIGHTS = {
   critical: 0.02
 };
 
-function pickPerformanceProfile() {
-  const roll = Math.random();
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomFloat(min, max, decimals = 2) {
+  return parseFloat((Math.random() * (max - min) + min).toFixed(decimals));
+}
+
+function hashToPercent(value, salt = "") {
+  const input = `${salt}:${value ?? "unknown"}`;
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 100;
+}
+
+function pickPerformanceProfile(deviceId = "default", deviceType = "device") {
+  const roll = hashToPercent(deviceId, `${deviceType}:performance`) / 100;
   let cumulative = 0;
 
   for (const [profile, weight] of Object.entries(PERFORMANCE_PROFILE_WEIGHTS)) {
@@ -107,12 +124,8 @@ function pickPerformanceProfile() {
   return "good";
 }
 
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function randomFloat(min, max, decimals = 2) {
-  return parseFloat((Math.random() * (max - min) + min).toFixed(decimals));
+function isSeededOnline(deviceId, deviceType, onlineProbability) {
+  return hashToPercent(deviceId, `${deviceType}:online`) < onlineProbability * 100;
 }
 
 function buildPerformanceMetrics(profile = pickPerformanceProfile()) {
@@ -1275,7 +1288,7 @@ function generateDummyChannelStatus(deviceId) {
     return cached.status;
   }
 
-  const isOnline = Math.random() < CHANNEL_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const isOnline = isSeededOnline(deviceId, "channel", CHANNEL_STATUS_CONFIG.ONLINE_PROBABILITY);
   let status;
 
   if (!isOnline) {
@@ -1300,7 +1313,7 @@ function generateDummyChannelStatus(deviceId) {
       errorCategory: "Kategori-7" // Connection Failure for offline devices
     };
   } else {
-    const performance = buildPerformanceMetrics();
+    const performance = buildPerformanceMetrics(pickPerformanceProfile(deviceId, "channel"));
     const signalLevel = performance.signalStrength;
 
     const responseTime = Math.floor(Math.random() *
@@ -1358,7 +1371,7 @@ function generateDummyTVStatus(deviceId = 'default') {
     return cached.status;
   }
 
-  const isOnline = Math.random() < TV_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const isOnline = isSeededOnline(deviceId, "tv", TV_STATUS_CONFIG.ONLINE_PROBABILITY);
   const responseTime = isOnline
     ? Math.floor(
       Math.random() *
@@ -1368,7 +1381,7 @@ function generateDummyTVStatus(deviceId = 'default') {
     ) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
 
-  const performance = isOnline ? buildPerformanceMetrics() : null;
+  const performance = isOnline ? buildPerformanceMetrics(pickPerformanceProfile(deviceId, "tv")) : null;
   const signalLevel = isOnline ? performance.signalStrength : null;
   const model = ["Samsung Hospitality"][Math.floor(Math.random() * 3)];
 
@@ -1436,7 +1449,7 @@ function generateDummyChromecastStatus(deviceId = 'default') {
     return cached.status;
   }
 
-  const isOnline = Math.random() < CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const isOnline = isSeededOnline(deviceId, "chromecast", CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY);
   let returnValue;
 
   if (!isOnline) {
@@ -1461,7 +1474,7 @@ function generateDummyChromecastStatus(deviceId = 'default') {
       errorCategory: "Kategori-1",
     };
   } else {
-    const performance = buildPerformanceMetrics();
+    const performance = buildPerformanceMetrics(pickPerformanceProfile(deviceId, "chromecast"));
     const signalLevel = -1 * Math.max(25, Math.min(85, 100 - performance.signalStrength));
     const speed = performance.bandwidth;
     const responseTime = performance.metrics.latency;
