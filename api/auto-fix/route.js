@@ -7,6 +7,15 @@ const { Logger } = require('../../utils/logger.util');
 
 const logger = new Logger('AutoFixAPI');
 
+// Parse a legacy synthetic notificationId such as "chromecast-<id>-<ts>",
+// "channel-<id>-<ts>" or "tv-<id>-<ts>" to recover device info for old logs.
+function inferDeviceFromNotificationId(notificationId) {
+  if (typeof notificationId !== 'string') return {};
+  const m = notificationId.match(/^(chromecast|channel|tv)-(.+)-\d+$/);
+  if (!m) return {};
+  return { deviceType: m[1], deviceId: m[2] };
+}
+
 // Get database instance
 async function getDatabase() {
   const db = await connectDB();
@@ -16,6 +25,7 @@ async function getDatabase() {
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
 const jwt = require('jsonwebtoken');
+const { requireAdmin } = require('../../middleware/authMiddleware');
 
 // Authentication middleware
 const authenticateToken = (req, res, next) => {
@@ -58,7 +68,7 @@ router.use(authenticateToken);
  * GET /api/auto-fix/history
  * Get auto fix history with filters (with pagination, staff & notification details)
  */
-router.get('/history', async (req, res) => {
+router.get('/history', requireAdmin, async (req, res) => {
   try {
     const {
       notificationId,
@@ -78,6 +88,9 @@ router.get('/history', async (req, res) => {
     if (category) query.category = category;
     if (fixType) query.fixType = fixType;
     if (staffId) {
+      if (!ObjectId.isValid(staffId)) {
+        return res.status(400).json({ success: false, error: 'Invalid staffId' });
+      }
       query.$or = [
         { triggeredBy: new ObjectId(staffId) },
         { approvedBy: new ObjectId(staffId) },
@@ -136,13 +149,66 @@ router.get('/history', async (req, res) => {
       });
     }
 
-    const populatedLogs = autoFixLogs.map(log => ({
-      ...log,
-      triggeredByStaff: log.triggeredBy ? staffMap[log.triggeredBy.toString()] : null,
-      approvedByStaff: log.approvedBy ? staffMap[log.approvedBy.toString()] : null,
-      executedByStaff: log.executedBy && log.executedBy !== 'system' ? staffMap[log.executedBy.toString()] : null,
-      notification: notificationMap[log.notificationId] || null
-    }));
+    // Resolve device metadata for each log with layered fallbacks:
+    //   1) the log's own device fields (new logs)
+    //   2) the linked notification (deviceName/roomNo/source)
+    //   3) the legacy synthetic notificationId prefix (deviceType/deviceId)
+    const resolved = autoFixLogs.map(log => {
+      const notif = notificationMap[log.notificationId] || null;
+      const inferred = inferDeviceFromNotificationId(log.notificationId);
+      const deviceType = log.deviceType || inferred.deviceType || null;
+      const deviceId = log.deviceId || inferred.deviceId || null;
+      const roomNo = log.roomNo != null ? log.roomNo : (notif && notif.roomNo != null ? notif.roomNo : null);
+      const deviceName =
+        log.deviceName ||
+        (notif && notif.deviceName) ||
+        (roomNo != null ? `Room ${roomNo}` : null);
+      const source = log.source || (notif && notif.source) || null;
+      return { log, deviceType, deviceId, roomNo, deviceName, source };
+    });
+
+    // Secondary fallback: resolve still-missing device names from device collections.
+    // Bounded by the (usually small) set of ids that are still unnamed.
+    const missingIds = { chromecast: new Set(), tv: new Set() };
+    resolved.forEach(r => {
+      if (!r.deviceName && r.deviceId && missingIds[r.deviceType] && ObjectId.isValid(r.deviceId)) {
+        missingIds[r.deviceType].add(r.deviceId);
+      }
+    });
+    const nameById = { chromecast: {}, tv: {} };
+    const loadNames = async (ids, collection, builder) => {
+      if (!ids.size) return;
+      const docs = await collection
+        .find({ _id: { $in: Array.from(ids).map(id => new ObjectId(id)) } })
+        .toArray();
+      docs.forEach(builder);
+    };
+    await loadNames(missingIds.chromecast, db.chromecast, d => {
+      nameById.chromecast[d._id.toString()] = d.deviceName || (d.roomNo != null ? `Room ${d.roomNo}` : null);
+    });
+    await loadNames(missingIds.tv, db.tvHospitality, d => {
+      nameById.tv[d._id.toString()] = d.roomNo != null ? `Room ${d.roomNo}` : (d.deviceName || null);
+    });
+
+    const populatedLogs = resolved.map(r => {
+      const log = r.log;
+      const fallbackName =
+        r.deviceName ||
+        (r.deviceType && nameById[r.deviceType] ? nameById[r.deviceType][r.deviceId] : null) ||
+        null;
+      return {
+        ...log,
+        deviceType: r.deviceType,
+        deviceId: r.deviceId,
+        deviceName: fallbackName,
+        roomNo: r.roomNo,
+        source: r.source,
+        triggeredByStaff: log.triggeredBy ? staffMap[log.triggeredBy.toString()] : null,
+        approvedByStaff: log.approvedBy ? staffMap[log.approvedBy.toString()] : null,
+        executedByStaff: log.executedBy && log.executedBy !== 'system' ? staffMap[log.executedBy.toString()] : null,
+        notification: notificationMap[log.notificationId] || null
+      };
+    });
 
     const total = await db.autoFixLogs.countDocuments(query);
 
@@ -169,7 +235,7 @@ router.get('/history', async (req, res) => {
  * GET /api/auto-fix/stats
  * Get auto fix statistics (with aggregation and period filtering)
  */
-router.get('/stats', async (req, res) => {
+router.get('/stats', requireAdmin, async (req, res) => {
   try {
     const { period = '30', timeseries = 'false' } = req.query; // days
 
@@ -203,22 +269,22 @@ router.get('/stats', async (req, res) => {
       statusStats[stat._id] = stat.count;
     });
 
-    // Category breakdown - using notifications collection for accurate categories
-    const categoryStats = await db.notifications.aggregate([
+    // Category breakdown - from auto_fix_logs.category (authoritative source for auto-fix)
+    const categoryStats = await db.autoFixLogs.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate },
-          errorCategory: { $ne: null, $exists: true }
+          category: { $ne: null, $exists: true }
         }
       },
       {
         $group: {
-          _id: '$errorCategory',
+          _id: '$category',
           count: { $sum: 1 },
           success: {
             $sum: {
               $cond: [
-                { $in: ['$reportStatus', ['resolved', 'closed']] },
+                { $eq: ['$status', 'success'] },
                 1,
                 0
               ]
@@ -232,6 +298,29 @@ router.get('/stats', async (req, res) => {
       {
         $limit: 14 // Limit to top 14 categories
       }
+    ]).toArray();
+
+    // Device-type breakdown (channel / tv / chromecast / null)
+    const deviceTypeStats = await db.autoFixLogs.aggregate([
+      { $match: { createdAt: { $gte: startDate } } },
+      { $group: { _id: '$deviceType', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]).toArray();
+
+    // Per-device breakdown (top devices by auto-fix count)
+    const deviceStats = await db.autoFixLogs.aggregate([
+      { $match: { createdAt: { $gte: startDate }, deviceId: { $ne: null } } },
+      {
+        $group: {
+          _id: { deviceType: '$deviceType', deviceId: '$deviceId' },
+          deviceName: { $first: '$deviceName' },
+          roomNo: { $first: '$roomNo' },
+          count: { $sum: 1 },
+          success: { $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] } }
+        }
+      },
+      { $sort: { count: -1 } },
+      { $limit: 20 }
     ]).toArray();
 
     // Fix type breakdown
@@ -260,6 +349,8 @@ router.get('/stats', async (req, res) => {
         byStatus: statusStats,
         byCategory: categoryStats,
         byFixType: fixTypeStats,
+        byDeviceType: deviceTypeStats,
+        byDevice: deviceStats,
         period: `${period} days`
       }
     };
@@ -333,7 +424,7 @@ router.get('/stats', async (req, res) => {
  * GET /api/auto-fix/dashboard
  * Get ML-integrated auto-fix dashboard statistics
  */
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', requireAdmin, async (req, res) => {
   try {
     logger.info('Fetching ML-integrated auto-fix dashboard stats');
 
@@ -388,7 +479,7 @@ router.get('/notification/:notificationId', async (req, res) => {
  * POST /api/auto-fix/trigger
  * Manually trigger auto-fix for a notification
  */
-router.post('/trigger', async (req, res) => {
+router.post('/trigger', requireAdmin, async (req, res) => {
   try {
     const { notificationId, action } = req.body;
 
@@ -421,7 +512,7 @@ router.post('/trigger', async (req, res) => {
  * POST /api/auto-fix/process-pending
  * Process all pending auto-fixes (cron endpoint with ML)
  */
-router.post('/process-pending', async (req, res) => {
+router.post('/process-pending', requireAdmin, async (req, res) => {
   try {
     // Verify cron authorization (add your auth check here)
     const authHeader = req.headers.authorization;
@@ -448,7 +539,7 @@ router.post('/process-pending', async (req, res) => {
  * POST /api/auto-fix/process-notification
  * Process a notification with ML prediction and auto-fix
  */
-router.post('/process-notification', async (req, res) => {
+router.post('/process-notification', requireAdmin, async (req, res) => {
   try {
     const { notification, mlPrediction } = req.body;
 

@@ -8,6 +8,7 @@ const { connectDB } = require('../autofix-db');
 const { ObjectId } = require('mongodb');
 const { updateStaffStatsOnResolution } = require('../utils/notificationUtil');
 const { evaluateAndPerformHandoff } = require('../utils/staffHandoffUtil');
+const { deviceMetaFromNotification, normalizeCategory } = require('../utils/deviceMeta.util');
 
 // Configuration: How long to wait before auto-resolving (in seconds)
 const AUTO_RESOLVE_TIME = {
@@ -160,7 +161,10 @@ async function checkAndAutoResolve() {
           await db.collection('auto_fix_logs').insertOne({
             fixId: `fix-auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             notificationId: notification.notificationId,
-            category: notification.errorCategory || 'Auto-Resolved',
+            // Auto-resolution is expressed via action/status/result — NOT the category.
+            // Category stays the real issue category (or Uncategorized), never "Auto-Resolved".
+            ...deviceMetaFromNotification(notification),
+            category: normalizeCategory(notification.errorCategory) || 'Uncategorized',
             action: 'auto-resolve',
             description: `Automatically resolved ${notification.errorCategory || 'issue'} after ${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`,
             status: 'success',

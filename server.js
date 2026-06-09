@@ -7,6 +7,8 @@ const dgram = require("dgram");
 const net = require("net");
 const path = require("path");
 const axios = require('axios');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -22,6 +24,9 @@ const {
 // ==================== APP CONFIGURATION ====================
 const app = express();
 const port = process.env.PORT || 3001;
+
+// Trust the first proxy hop (Railway/NGINX) so rate-limit & req.ip use the real client IP
+app.set('trust proxy', 1);
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -48,6 +53,8 @@ const userProfileRoute = require("./api/user/profile/route");
 const userPasswordRoute = require("./api/user/password/route");
 const userAvatarRoute = require("./api/user/avatar/route");
 const { initSupabase } = require('./config/supabase.config');
+const { getInternalToken } = require('./utils/internalAuth');
+const { resolveLogCategory } = require('./utils/deviceMeta.util');
 const {
   generateLabeledMetrics,
   getErrorCategory,
@@ -189,6 +196,37 @@ const corsOptions = {
   preflightContinue: false,
 };
 
+// ==================== SECURITY MIDDLEWARE ====================
+// Helmet with a conservative config so it does NOT break the existing
+// cross-domain (Vercel <-> Railway) CORS/OAuth setup. CSP and the
+// cross-origin policies are intentionally disabled here because the
+// CORS headers and COOP/COEP are managed manually below.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+}));
+
+// Strict limiter for auth endpoints (anti brute-force on login/register/oauth)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many authentication attempts. Please try again later." },
+});
+
+// Loose global limiter for the whole API surface (anti abuse / light DoS).
+// Generous max so normal dashboard polling is never throttled.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many requests. Please slow down." },
+});
+
 // ==================== MIDDLEWARE SETUP ====================
 // Preflight CORS must use corsOptions to avoid wildcard
 app.options(/.*/, cors(corsOptions));
@@ -240,12 +278,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(cors(corsOptions));
 
+// Loose global rate limit across the whole API surface
+app.use('/api', apiLimiter);
+
 // Route middleware
-app.use("/api/auth/login", loginRoute);
-app.use("/api/auth/register", registerRoute);
+// Strict auth limiter only on credential endpoints. The Google OAuth *callback*
+// is mounted before the initiation route so it is NOT subject to authLimiter
+// (avoids breaking the redirect-back step under repeated logins).
+app.use("/api/auth/login", authLimiter, loginRoute);
+app.use("/api/auth/register", authLimiter, registerRoute);
 app.use("/api/auth/verify", verifyRoute);
-app.use("/api/auth/google", googleAuthRoute);
 app.use("/api/auth/google/callback", googleCallbackRoute);
+app.use("/api/auth/google", authLimiter, googleAuthRoute);
 app.use("/api/user/profile", userProfileRoute);
 app.use("/api/user/password", userPasswordRoute);
 app.use("/api/user/avatar", userAvatarRoute);
@@ -275,16 +319,17 @@ app.use('/api/backup', require('./api/backup/route'));
 // Monitoring & Sync Status (for production verification)
 app.use('/api/monitoring', require('./api/monitoring/route'));
 
-// Channel-specific Auto Fix route
-app.use('/api/channels', require('./api/channels/route'));
+// Channel-specific Auto Fix route — DISABLED to unify channel auto-fix on the
+// single working implementation below (app.get/app.post "/api/channels/:id/auto-fix").
+// The modular router shadowed those handlers and its POST path was broken (it built
+// an unsaved temp notification then called manualTriggerAutoFix, which requires a
+// persisted ML prediction and always threw). The server.js handlers below are
+// admin-protected and write device-tagged auto_fix_logs.
+// app.use('/api/channels', require('./api/channels/route'));
 
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-
-  if (req.path.includes('/auth/')) {
-    console.log("Cookies:", req.cookies);
-  }
 
   next();
 });
@@ -375,6 +420,31 @@ const authenticateToken = (req, res, next) => {
       authenticated: false
     });
   }
+};
+
+// Requires an authenticated ADMIN user. Must run AFTER authenticateToken.
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      error: "Admin privileges required.",
+      authenticated: !!req.user
+    });
+  }
+  next();
+};
+
+// Guard for /api/internal/* endpoints: allow trusted server-to-server callers
+// (e.g. the Telegram bot) that present the shared internal token, otherwise
+// fall back to normal user authentication. Prevents these data endpoints from
+// being world-readable while keeping the in-process bot working.
+const requireInternalOrAuth = (req, res, next) => {
+  const internalToken = req.headers['x-internal-token'];
+  if (internalToken && internalToken === getInternalToken()) {
+    req.internal = true;
+    return next();
+  }
+  return authenticateToken(req, res, next);
 };
 
 const trackRequestMetrics = (serviceType) => {
@@ -482,7 +552,17 @@ async function getAllChannelsFromDB() {
       return hasRequiredFields;
     });
 
-    return validChannels;
+    // DB channel docs don't store a slug, but slug-based lookups (auto-fix
+    // history/trigger, detail pages) rely on it. Attach the SAME slug the list
+    // endpoint exposes so c.slug matching works consistently.
+    return validChannels.map((c) => ({
+      ...c,
+      slug:
+        c.slug ||
+        (c.channelName
+          ? c.channelName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
+          : null),
+    }));
   } catch (error) {
     console.error("Error fetching channels from database:", error);
     return [];
@@ -1787,7 +1867,6 @@ async function checkAllChromecastsStatus(skipNotifications = false) {
 app.post("/api/auth/logout", (req, res) => {
   try {
     console.log("=== LOGOUT REQUEST START ===");
-    console.log("Current cookies:", req.cookies);
 
     const cookieConfigs = [
       {
@@ -4883,7 +4962,7 @@ app.post("/api/telegram/test-notification", authenticateToken, async (req, res) 
 });
 
 // ==================== INTERNAL ENDPOINTS (FOR TELEGRAM BOT) ====================
-app.get("/api/internal/channels", async (req, res) => {
+app.get("/api/internal/channels", requireInternalOrAuth, async (req, res) => {
   try {
     const userAgent = req.get('User-Agent');
     if (!userAgent || !userAgent.includes('node')) {
@@ -4918,7 +4997,7 @@ app.get("/api/internal/channels", async (req, res) => {
   }
 });
 
-app.get("/api/internal/chromecast", async (req, res) => {
+app.get("/api/internal/chromecast", requireInternalOrAuth, async (req, res) => {
   try {
     const userAgent = req.get('User-Agent');
     if (!userAgent || !userAgent.includes('node')) {
@@ -4957,7 +5036,7 @@ app.get("/api/internal/chromecast", async (req, res) => {
   }
 });
 
-app.get("/api/internal/hospitality/tvs", async (req, res) => {
+app.get("/api/internal/hospitality/tvs", requireInternalOrAuth, async (req, res) => {
   try {
     const userAgent = req.get('User-Agent');
     if (!userAgent || !userAgent.includes('node')) {
@@ -5124,7 +5203,7 @@ app.get("/api/config", authenticateToken, async (req, res) => {
   });
 });
 
-app.post("/api/config/tv-status-mode", async (req, res) => {
+app.post("/api/config/tv-status-mode", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
 
@@ -5159,7 +5238,7 @@ app.post("/api/config/tv-status-mode", async (req, res) => {
   }
 });
 
-app.post("/api/config/channel-status-mode", async (req, res) => {
+app.post("/api/config/channel-status-mode", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
 
@@ -5195,7 +5274,7 @@ app.post("/api/config/channel-status-mode", async (req, res) => {
   }
 });
 
-app.post("/api/config/chromecast-status-mode", async (req, res) => {
+app.post("/api/config/chromecast-status-mode", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
 
@@ -5246,7 +5325,7 @@ const {
  * POST /api/chromecast/:id/auto-fix
  * Execute auto-fix for a Chromecast device using ML prediction
  */
-app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
+app.post("/api/chromecast/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id: deviceId } = req.params;
     const { text, issue, category } = req.body;
@@ -5309,8 +5388,13 @@ app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
     const fixLog = await createAutoFixLog({
       notificationId: notificationId,
       mlPredictionId: null,
+      deviceType: 'chromecast',
+      deviceId: String(device.idCast || device._id),
+      deviceName: device.deviceName || (device.roomNo ? `Room ${device.roomNo}` : null),
+      roomNo: device.roomNo != null ? device.roomNo : null,
+      source: 'chromecast',
       fixType: 'automatic',
-      category: mlResult.predicted_label,
+      category: resolveLogCategory(mlResult.predicted_label, category),
       action: recommendedFix.action,
       description: recommendedFix.description,
       confidence: mlResult.probabilities?.[0]?.probability || 0,
@@ -5386,7 +5470,7 @@ app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
  * GET /api/chromecast/:id/auto-fix?history=true
  * Get auto-fix history for a Chromecast device
  */
-app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
+app.get("/api/chromecast/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { history } = req.query;
 
@@ -5421,10 +5505,16 @@ app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
     const { client } = await connectDB();
     const db = client.db('iptv');
 
-    // Find all auto-fix logs for this chromecast
+    // Find all auto-fix logs for this chromecast.
+    // Primary lookup by stable device key; fall back to the legacy synthetic
+    // notificationId pattern so existing logs remain visible.
+    const chromecastKey = String(device.idCast || device._id);
     const autoFixLogs = await db.collection('auto_fix_logs')
       .find({
-        notificationId: { $regex: `^chromecast-${device.idCast || device._id}-` }
+        $or: [
+          { deviceType: 'chromecast', deviceId: chromecastKey },
+          { notificationId: { $regex: `^chromecast-${device.idCast || device._id}-` } }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -5465,7 +5555,7 @@ app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
  * POST /api/channels/:id/auto-fix
  * Execute auto-fix for a Channel using ML prediction
  */
-app.post("/api/channels/:id/auto-fix", async (req, res) => {
+app.post("/api/channels/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id: channelId } = req.params;
     const { text, issue, category } = req.body;
@@ -5523,8 +5613,13 @@ app.post("/api/channels/:id/auto-fix", async (req, res) => {
     const fixLog = await createAutoFixLog({
       notificationId: notificationId,
       mlPredictionId: null,
+      deviceType: 'channel',
+      deviceId: String(channel.id),
+      deviceName: channel.channelName || channel.name || null,
+      roomNo: null,
+      source: 'channel',
       fixType: 'automatic',
-      category: mlResult.predicted_label,
+      category: resolveLogCategory(mlResult.predicted_label, category),
       action: recommendedFix.action,
       description: recommendedFix.description,
       confidence: mlResult.probabilities?.[0]?.probability || 0,
@@ -5602,7 +5697,7 @@ app.post("/api/channels/:id/auto-fix", async (req, res) => {
  * GET /api/channels/:id/auto-fix?history=true
  * Get auto-fix history for a Channel
  */
-app.get("/api/channels/:id/auto-fix", async (req, res) => {
+app.get("/api/channels/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { history } = req.query;
 
@@ -5633,10 +5728,15 @@ app.get("/api/channels/:id/auto-fix", async (req, res) => {
     const { client } = await connectDB();
     const db = client.db('iptv');
 
-    // Find all auto-fix logs for this channel
+    // Find all auto-fix logs for this channel.
+    // Primary lookup by stable device key; legacy notificationId pattern as fallback.
+    const channelKey = String(channel.id);
     const autoFixLogs = await db.collection('auto_fix_logs')
       .find({
-        notificationId: { $regex: `^channel-${channel.id}-` }
+        $or: [
+          { deviceType: 'channel', deviceId: channelKey },
+          { notificationId: { $regex: `^channel-${channel.id}-` } }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -5678,7 +5778,7 @@ app.get("/api/channels/:id/auto-fix", async (req, res) => {
  * POST /api/hospitality/tvs/:id/auto-fix
  * Execute auto-fix for a TV device using ML prediction
  */
-app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
+app.post("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id: tvId } = req.params;
     const { text, issue, category } = req.body;
@@ -5741,8 +5841,13 @@ app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
     const fixLog = await createAutoFixLog({
       notificationId: notificationId,
       mlPredictionId: null,
+      deviceType: 'tv',
+      deviceId: String(tv._id),
+      deviceName: tv.roomNo != null ? `Room ${tv.roomNo}` : (tv.deviceName || null),
+      roomNo: tv.roomNo != null ? tv.roomNo : null,
+      source: 'hospitality',
       fixType: 'automatic',
-      category: mlResult.predicted_label,
+      category: resolveLogCategory(mlResult.predicted_label, category),
       action: recommendedFix.action,
       description: recommendedFix.description,
       confidence: mlResult.probabilities?.[0]?.probability || 0,
@@ -5821,7 +5926,7 @@ app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
  * GET /api/hospitality/tvs/:id/auto-fix?history=true
  * Get auto-fix history for a TV device
  */
-app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
+app.get("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { history } = req.query;
 
@@ -5856,10 +5961,15 @@ app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
     const { client } = await connectDB();
     const db = client.db('iptv');
 
-    // Find all auto-fix logs for this TV
+    // Find all auto-fix logs for this TV.
+    // Primary lookup by stable device key; legacy notificationId pattern as fallback.
+    const tvKey = String(tv._id);
     const autoFixLogs = await db.collection('auto_fix_logs')
       .find({
-        notificationId: { $regex: `^tv-${tv._id}-` }
+        $or: [
+          { deviceType: 'tv', deviceId: tvKey },
+          { notificationId: { $regex: `^tv-${tv._id}-` } }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(20)

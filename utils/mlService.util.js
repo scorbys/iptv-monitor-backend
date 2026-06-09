@@ -197,6 +197,40 @@ async function deleteModel() {
 }
 
 /**
+ * Get the current (active) training job status from the ML service.
+ * The FastAPI endpoint already returns a { success, data } envelope,
+ * which is forwarded as-is by the gateway route.
+ */
+async function getCurrentTrainingStatus() {
+  return retryWithBackoff(async () => {
+    const response = await mlServiceClient.get('/api/model/train/status', {
+      timeout: 15000,
+    });
+    return response.data;
+  });
+}
+
+/**
+ * Get the status of a specific training job by id.
+ * @param {string} jobId - Training job id
+ */
+async function getTrainingStatus(jobId) {
+  if (!jobId || typeof jobId !== 'string' || jobId.trim().length === 0) {
+    const err = new Error('Invalid jobId');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return retryWithBackoff(async () => {
+    const response = await mlServiceClient.get(
+      `/api/model/train/status/${encodeURIComponent(jobId.trim())}`,
+      { timeout: 15000 }
+    );
+    return response.data;
+  });
+}
+
+/**
  * Batch predict multiple texts
  * @param {string[]} texts - Array of texts to predict
  */
@@ -219,5 +253,7 @@ module.exports = {
   trainModel,
   deleteModel,
   batchPredict,
+  getCurrentTrainingStatus,
+  getTrainingStatus,
   ML_SERVICE_URL,
 };

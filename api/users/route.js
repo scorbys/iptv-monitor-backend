@@ -179,6 +179,14 @@ router.put('/:userId', verifyToken, async (req, res) => {
       });
     }
 
+    // Validate role value when provided (must be 'admin' or 'guest')
+    if (role !== undefined && !['admin', 'guest'].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid role. Must be admin or guest'
+      });
+    }
+
     // Prepare update data
     const updateData = {};
     if (username) updateData.username = username;
@@ -357,8 +365,15 @@ router.patch('/:userId/role', verifyToken, requireAdmin, async (req, res) => {
       });
     }
 
-    const { users } = await require('../../db').connectDB();
     const { ObjectId } = require('mongodb');
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid user id'
+      });
+    }
+
+    const { users } = await require('../../db').connectDB();
 
     const result = await users.updateOne(
       { _id: new ObjectId(userId) },

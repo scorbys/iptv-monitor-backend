@@ -115,6 +115,8 @@ async function createIndexes(db) {
     await db.collection('auto_fix_logs').createIndex({ status: 1 });
     await db.collection('auto_fix_logs').createIndex({ executedAt: -1 });
     await db.collection('auto_fix_logs').createIndex({ mlPredictionId: 1 });
+    await db.collection('auto_fix_logs').createIndex({ deviceType: 1, deviceId: 1 });
+    await db.collection('auto_fix_logs').createIndex({ category: 1 });
 
     // ML predictions indexes
     await db.collection('ml_predictions').createIndex({ notificationId: 1 });
@@ -284,6 +286,13 @@ async function createAutoFixLog(fixData) {
       fixId: new ObjectId().toString(),
       notificationId: fixData.notificationId,
       mlPredictionId: fixData.mlPredictionId || null,
+      // Device metadata — primary, stable lookup keys for the device-centric UI.
+      // notificationId stays supported but is no longer the only lookup key.
+      deviceType: fixData.deviceType || null, // 'channel' | 'tv' | 'chromecast'
+      deviceId: fixData.deviceId != null ? String(fixData.deviceId) : null, // stable internal id
+      deviceName: fixData.deviceName || null, // channel/device name or "Room xxx"
+      roomNo: fixData.roomNo != null ? fixData.roomNo : null, // TV/Chromecast only
+      source: fixData.source || null, // 'channel'|'hospitality'|'chromecast'|'notification'|'manual'
       fixType: fixData.fixType, // 'automatic', 'manual', 'hybrid'
       category: fixData.category,
       action: fixData.action,

@@ -136,6 +136,14 @@ const getCookieOptions = (req) => {
 const validateRegisterInput = (req, res, next) => {
   const { username, email, password } = req.body;
 
+  // Reject non-string values to prevent NoSQL injection / malformed input
+  if (typeof username !== "string" || typeof email !== "string" || typeof password !== "string") {
+    return res.status(400).json({
+      success: false,
+      error: "All fields must be strings"
+    });
+  }
+
   if (!username || !email || !password) {
     return res.status(400).json({
       success: false,

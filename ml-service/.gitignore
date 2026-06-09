@@ -28,5 +28,6 @@ Thumbs.db
 # data/*.xls
 
 # Environment variables (keep template, ignore actual)
+.env
 .env.local
 .env.production

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { Bot, GrammyError } = require('grammy');
+const { getInternalToken } = require('../../../utils/internalAuth');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -478,7 +479,8 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             const response = await this.fetch(`${baseUrl}/api/internal/channels`, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                    'User-Agent': 'TelegramBot/1.0 node-fetch',
+                    'x-internal-token': getInternalToken()
                 },
                 timeout: 10000 // 10 second timeout
             });
@@ -510,7 +512,8 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             const response = await this.fetch(`${baseUrl}/api/internal/chromecast`, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                    'User-Agent': 'TelegramBot/1.0 node-fetch',
+                    'x-internal-token': getInternalToken()
                 },
                 timeout: 10000
             });
@@ -542,7 +545,8 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             const response = await this.fetch(`${baseUrl}/api/internal/hospitality/tvs`, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                    'User-Agent': 'TelegramBot/1.0 node-fetch',
+                    'x-internal-token': getInternalToken()
                 },
                 timeout: 10000
             });

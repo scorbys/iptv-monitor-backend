@@ -14,6 +14,20 @@ router.post('/', async (req, res) => {
       });
     }
 
+    if (typeof text !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Text must be a string',
+      });
+    }
+
+    if (text.length > 10000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Text too long (max 10000 characters)',
+      });
+    }
+
     const result = await predict(text);
     res.json({
       success: true,
