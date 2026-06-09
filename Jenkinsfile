@@ -5,14 +5,6 @@ pipeline {
     skipDefaultCheckout(true)
   }
 
-  triggers { 
-    githubPush() 
-  }
-
-  parameters {
-    choice(name: 'GIT_BRANCH', choices: ['', 'main', 'dev'], description: 'Leave empty to deploy the branch configured by this Jenkins job')
-  }
-
   environment {
     BACKEND_ENV_FILE = credentials('iptv-backend-env')
     ML_ENV_FILE = credentials('ml-service-env')
@@ -22,19 +14,9 @@ pipeline {
     stage('Prepare') {
       steps {
         script {
-          def configuredBranch = 'main'
-          try {
-            configuredBranch = scm.branches[0].name
-              .replaceFirst(/^origin\//, '')
-              .replaceFirst(/^\*\//, '')
-          } catch (ignored) {
-            configuredBranch = 'main'
-          }
-
-          def deployBranch = env.BRANCH_NAME ?: (params.GIT_BRANCH?.trim() ? params.GIT_BRANCH.trim() : configuredBranch)
-          echo "Deploying branch: ${deployBranch}"
-          git branch: deployBranch, url: 'https://github.com/scorbys/iptv-monitor-backend.git'
+          echo "Deploying branch: ${env.BRANCH_NAME ?: 'configured SCM branch'}"
         }
+        checkout scm
         sh 'rm -f .env && install -m 600 "$BACKEND_ENV_FILE" .env'
         sh 'rm -f ./ml-service/.env && install -m 600 "$ML_ENV_FILE" ./ml-service/.env'
       }
