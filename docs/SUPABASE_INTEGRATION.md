@@ -1,5 +1,9 @@
 # Supabase Integration & Real-time Sync Guide
 
+> Status: optional legacy mirror. Supabase tidak lagi direkomendasikan sebagai
+> backup database production karena free tier dapat inactive saat tidak ada
+> aktivitas. MongoDB Atlas tetap source of truth dan backup utama.
+
 ## 📋 Overview
 
 Setup lengkap untuk backup data MongoDB ke Supabase dengan fitur:

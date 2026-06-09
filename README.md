@@ -10,7 +10,7 @@ Backend Express untuk IPTV Monitoring System. Service ini menjadi gateway utama 
 - Google OAuth
 - Telegram bot integration
 - Gemini AI integration
-- Optional Supabase sync mirror
+- Optional Supabase sync mirror (not a backup source of truth)
 - Nginx reverse proxy for production compose stack
 - FastAPI ML service di `ml-service/`
 
@@ -160,7 +160,18 @@ Command ini menjalankan:
 - Auto-fix trigger, retry, history, dashboard, dan stats.
 - ML gateway untuk model info, train status, train, delete model, dan prediction.
 - Telegram notification bot.
-- Optional Supabase sync untuk mirror data.
+- Optional Supabase sync untuk mirror data legacy. MongoDB tetap source of truth.
+
+## Database dan Backup
+
+MongoDB Atlas adalah database utama dan source of truth untuk data operasional.
+Backup production sebaiknya memakai fitur backup/snapshot MongoDB Atlas atau
+mekanisme backup database MongoDB lain yang memang didesain untuk restore.
+
+Supabase pada project ini hanya integrasi opsional untuk mirror/sync legacy,
+bukan backup database utama. Default `.env.example` mematikan Supabase sync
+karena free tier Supabase bisa inactive jika tidak ada aktivitas, sehingga tidak
+aman dijadikan satu-satunya cadangan production.
 
 ## Auto-Fix Flow
 

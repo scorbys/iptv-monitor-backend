@@ -8,23 +8,28 @@ const {
   clearSyncQueue
 } = require('../../utils/dbSyncWrapper');
 
+// Legacy Supabase mirror endpoints. The route stays /api/backup for backward
+// compatibility, but MongoDB Atlas is the source of truth and backup target.
+
 /**
  * GET /api/backup/status
- * Get backup and sync status
+ * Get optional Supabase mirror and sync status
  */
 router.get('/status', async (req, res) => {
   try {
-    const backupStatus = await getBackupStatus();
+    const mirrorStatus = await getBackupStatus();
     const syncStatus = getSyncStatus();
 
     res.json({
       success: true,
-      backup: backupStatus,
+      mirror: mirrorStatus,
+      backup: mirrorStatus,
       sync: syncStatus,
+      note: 'Supabase is an optional mirror, not the production backup database.',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error getting backup status:', error);
+    console.error('Error getting Supabase mirror status:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -34,7 +39,7 @@ router.get('/status', async (req, res) => {
 
 /**
  * POST /api/backup/force-sync
- * Force sync specific collection or all collections
+ * Force sync specific collection or all collections to the optional mirror
  */
 router.post('/force-sync', async (req, res) => {
   try {
@@ -42,7 +47,7 @@ router.post('/force-sync', async (req, res) => {
 
     if (!collection || collection === 'all') {
       // Sync all collections
-      console.log('🔄 Starting full database sync to Supabase...');
+      console.log('🔄 Starting full database sync to optional Supabase mirror...');
 
       const db = await connectDB();
 
@@ -74,8 +79,9 @@ router.post('/force-sync', async (req, res) => {
 
       return res.json({
         success: true,
-        message: 'Full database sync initiated',
+        message: 'Full optional mirror sync initiated',
         results,
+        note: 'This sync does not replace MongoDB Atlas backups.',
         timestamp: new Date().toISOString()
       });
     }
@@ -123,7 +129,7 @@ router.post('/force-sync', async (req, res) => {
 
 /**
  * POST /api/backup/restore
- * Restore data from Supabase to MongoDB (two-way sync)
+ * Legacy/manual restore placeholder from optional Supabase mirror to MongoDB
  */
 router.post('/restore', async (req, res) => {
   try {
@@ -139,8 +145,8 @@ router.post('/restore', async (req, res) => {
     // This is a placeholder - actual implementation depends on your needs
     res.json({
       success: true,
-      message: `Restore initiated for ${collection}`,
-      info: 'Restore functionality requires two-way sync implementation',
+      message: `Manual mirror restore placeholder for ${collection}`,
+      info: 'Supabase mirror restore is legacy/manual only and is not the production backup strategy.',
       timestamp: new Date().toISOString()
     });
 

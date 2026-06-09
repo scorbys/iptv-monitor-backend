@@ -343,7 +343,8 @@ async function syncDocumentFromSupabase(supabaseDoc, collectionName, mongoCollec
 }
 
 /**
- * Get backup status
+ * Get optional Supabase mirror sync status.
+ * The table name is kept for compatibility with the existing schema.
  */
 async function getBackupStatus() {
   try {
@@ -363,7 +364,7 @@ async function getBackupStatus() {
       lastCheck: new Date().toISOString()
     };
   } catch (error) {
-    return { enabled: false, status: 'Error checking backup status' };
+    return { enabled: false, status: 'Error checking Supabase mirror status' };
   }
 }
 

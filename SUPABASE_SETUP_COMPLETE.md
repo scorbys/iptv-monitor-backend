@@ -1,3 +1,7 @@
+> Status: optional legacy mirror. Dokumen ini dipertahankan untuk referensi
+> integrasi lama. Supabase tidak menjadi backup utama production; gunakan
+> MongoDB Atlas backup/snapshot untuk kebutuhan restore.
+
 ## 🎉 Complete Supabase Sync Setup - SUMMARY
 
 Anda sudah memiliki **Production-Grade Monitoring & Sync System**! Berikut ringkasannya:

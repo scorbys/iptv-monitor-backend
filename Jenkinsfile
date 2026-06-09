@@ -5,6 +5,10 @@ pipeline {
     githubPush() 
   }
 
+  parameters {
+    choice(name: 'GIT_BRANCH', choices: ['main', 'dev'], description: 'Git branch to deploy')
+  }
+
   environment {
     BACKEND_ENV_FILE = credentials('iptv-backend-env')
     ML_ENV_FILE = credentials('ml-service-env')
@@ -13,9 +17,13 @@ pipeline {
   stages {
     stage('Prepare') {
       steps {
-        git branch: 'main', url: 'https://github.com/scorbys/iptv-monitor-backend.git'
-        sh 'cp $BACKEND_ENV_FILE .env'
-        sh 'cp $ML_ENV_FILE ./ml-service/.env'
+        script {
+          def deployBranch = env.BRANCH_NAME ?: params.GIT_BRANCH ?: 'main'
+          echo "Deploying branch: ${deployBranch}"
+          git branch: deployBranch, url: 'https://github.com/scorbys/iptv-monitor-backend.git'
+        }
+        sh 'rm -f .env && install -m 600 "$BACKEND_ENV_FILE" .env'
+        sh 'rm -f ./ml-service/.env && install -m 600 "$ML_ENV_FILE" ./ml-service/.env'
       }
     }
 

@@ -4,7 +4,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.warn('⚠️ Supabase credentials not configured. Backup sync disabled.');
+  console.warn('⚠️ Supabase credentials not configured. Optional mirror sync disabled.');
 }
 
 let supabaseClient = null;
