@@ -254,6 +254,20 @@ const notificationStatusGauge = new promClient.Gauge({
   registers: [metricsRegistry],
 });
 
+const notificationErrorCategoryGauge = new promClient.Gauge({
+  name: 'iptv_notification_errors_by_category',
+  help: 'Active/offline notification count by error category and source',
+  labelNames: ['category', 'source', 'status'],
+  registers: [metricsRegistry],
+});
+
+const notificationErrorDeviceGauge = new promClient.Gauge({
+  name: 'iptv_error_devices',
+  help: 'Active/offline error notifications grouped by affected device or channel',
+  labelNames: ['device', 'room', 'category', 'source', 'status'],
+  registers: [metricsRegistry],
+});
+
 const mlPredictionGauge = new promClient.Gauge({
   name: 'iptv_ml_predictions_total',
   help: 'Total ML prediction records',
@@ -839,6 +853,99 @@ async function updatePrometheusMetrics() {
     notificationCounts.forEach(item => {
       notificationStatusGauge.set(
         { status: item._id.status || 'unknown', source: item._id.source || 'unknown' },
+        item.count
+      );
+    });
+
+    const activeErrorMatch = {
+      currentStatus: 'offline',
+    };
+
+    const notificationErrorCategories = await db.collection('notifications').aggregate([
+      { $match: activeErrorMatch },
+      {
+        $group: {
+          _id: {
+            category: { $ifNull: ['$errorCategory', 'Uncategorized'] },
+            source: { $ifNull: ['$source', 'unknown'] },
+            status: { $ifNull: ['$currentStatus', 'unknown'] },
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]).toArray();
+
+    notificationErrorCategoryGauge.reset();
+    notificationErrorCategories.forEach(item => {
+      notificationErrorCategoryGauge.set(
+        {
+          category: item._id.category || 'Uncategorized',
+          source: item._id.source || 'unknown',
+          status: item._id.status || 'unknown',
+        },
+        item.count
+      );
+    });
+
+    const notificationErrorDevices = await db.collection('notifications').aggregate([
+      { $match: activeErrorMatch },
+      {
+        $project: {
+          source: { $ifNull: ['$source', 'unknown'] },
+          status: { $ifNull: ['$currentStatus', 'unknown'] },
+          category: { $ifNull: ['$errorCategory', 'Uncategorized'] },
+          room: {
+            $cond: [
+              { $ne: ['$roomNo', null] },
+              { $toString: '$roomNo' },
+              'N/A',
+            ],
+          },
+          device: {
+            $ifNull: [
+              '$deviceName',
+              {
+                $ifNull: [
+                  '$channelName',
+                  {
+                    $cond: [
+                      { $ne: ['$roomNo', null] },
+                      { $concat: ['Room ', { $toString: '$roomNo' }] },
+                      'Unknown Device',
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            device: '$device',
+            room: '$room',
+            category: '$category',
+            source: '$source',
+            status: '$status',
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: 100 },
+    ]).toArray();
+
+    notificationErrorDeviceGauge.reset();
+    notificationErrorDevices.forEach(item => {
+      notificationErrorDeviceGauge.set(
+        {
+          device: item._id.device || 'Unknown Device',
+          room: item._id.room || 'N/A',
+          category: item._id.category || 'Uncategorized',
+          source: item._id.source || 'unknown',
+          status: item._id.status || 'unknown',
+        },
         item.count
       );
     });
