@@ -2987,15 +2987,10 @@ app.get("/api/channels/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channel.id) || {
-      status: "offline",
-      responseTime: null,
-      lastChecked: null,
-      error: "Not checked",
-      signalLevel: null,
-      bitrate: null,
-      networkStats: null
-    };
+    const status = channelStatus.get(channel.id) || generateDummyChannelStatus(channel.id);
+    if (!channelStatus.has(channel.id)) {
+      channelStatus.set(channel.id, status);
+    }
 
     const internationalChannels = await getInternationalChannels();
     const channelType = internationalChannels.find(
@@ -3013,6 +3008,9 @@ app.get("/api/channels/:id", authenticateToken, async (req, res) => {
       isOnline: status.status === "online",
       isPingable: status.status === "online",
       statusText: status.status === "online" ? "Online" : "Offline",
+      networkStats: status.networkStats || null,
+      performanceProfile: status.performanceProfile || (status.status === "online" ? "good" : "offline"),
+      errorCategory: status.errorCategory || null,
       metrics: status.networkStats ? {
         packetLoss: status.networkStats.packetLoss || 0,
         latency: status.networkStats.latency || 0,
@@ -3160,10 +3158,10 @@ app.get("/api/channels/:id/metrics", authenticateToken, async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channel.id) || {
-      status: "offline",
-      networkStats: null
-    };
+    const status = channelStatus.get(channel.id) || generateDummyChannelStatus(channel.id);
+    if (!channelStatus.has(channel.id)) {
+      channelStatus.set(channel.id, status);
+    }
 
     if (!status.networkStats) {
       const fallbackMetrics = {
@@ -3602,12 +3600,10 @@ app.get("/api/hospitality/tvs/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const tvStatusData = tvStatus.get(tv.roomNo) || {
-      status: "offline",
-      responseTime: null,
-      error: "Not checked",
-      lastChecked: null,
-    };
+    const tvStatusData = tvStatus.get(tv.roomNo) || generateDummyTVStatus(tv.roomNo);
+    if (!tvStatus.has(tv.roomNo)) {
+      tvStatus.set(tv.roomNo, tvStatusData);
+    }
 
     const enhancedTV = {
       ...tv,
@@ -3622,6 +3618,23 @@ app.get("/api/hospitality/tvs/:id", authenticateToken, async (req, res) => {
       isOnline: tvStatusData.status === "online",
       isPingable: tvStatusData.status === "online",
       statusText: tvStatusData.status === "online" ? "Online" : "Offline",
+      networkStats: tvStatusData.networkStats || null,
+      labeledMetrics: tvStatusData.labeledMetrics || null,
+      performanceProfile: tvStatusData.performanceProfile || (tvStatusData.status === "online" ? "good" : "offline"),
+      errorCategory: tvStatusData.errorCategory || null,
+      metrics: tvStatusData.networkStats ? {
+        packetLoss: tvStatusData.networkStats.packetLoss || 0,
+        latency: tvStatusData.networkStats.latency || 0,
+        jitter: tvStatusData.networkStats.jitter || 0,
+        error: tvStatusData.networkStats.error || 0,
+        recoveryTime: tvStatusData.networkStats.recoveryTime || 0,
+      } : {
+        packetLoss: 0,
+        latency: 0,
+        jitter: 0,
+        error: 0,
+        recoveryTime: 0,
+      },
       lastCheckedFormatted: tvStatusData.lastChecked ?
         new Date(tvStatusData.lastChecked).toLocaleString() : "Never"
     };
@@ -3817,45 +3830,26 @@ app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) 
       });
     }
 
-    const tvStatusData = tvStatus.get(tv.roomNo);
-    const isOnline = tvStatusData?.status === "online";
+    const tvStatusData = tvStatus.get(tv.roomNo) || generateDummyTVStatus(tv.roomNo);
+    if (!tvStatus.has(tv.roomNo)) {
+      tvStatus.set(tv.roomNo, tvStatusData);
+    }
 
-    const generateTVNetworkMetrics = (isOnline) => {
-      if (!isOnline) {
-        return {
-          sent: "0.00",
-          received: "0.00",
-          latency: 0,
-          jitter: 0,
-          ttl: 0,
-          packetLoss: 100,
-          bandwidth: 0,
-          hops: 0,
-          error: 0,
-          recoveryTime: 0
-        };
-      }
-
-      const baseLatency = Math.floor(Math.random() * 35) + 8; // 8-43ms
-      const baseJitter = Math.max(1, Math.floor(baseLatency * 0.15) + Math.floor(Math.random() * 8)); // 15% of latency + variation
-      const baseBandwidth = Math.floor(Math.random() * 70) + 25; // 25-95 Mbps
-      const basePacketLoss = parseFloat((Math.random() * 1.2).toFixed(2)); // 0-1.2%
-
-      return {
-        sent: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
-        received: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
-        latency: baseLatency,
-        jitter: baseJitter,
-        ttl: Math.floor(Math.random() * 8) + 60, // 60-67 (realistic TTL)
-        packetLoss: basePacketLoss,
-        bandwidth: baseBandwidth,
-        hops: Math.floor(Math.random() * 12) + 10, // 10-21 hops
-        error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3% error rate
-        recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s recovery time
-      };
+    const metrics = tvStatusData.networkStats || {
+      sent: "0.00",
+      received: "0.00",
+      latency: 0,
+      jitter: 0,
+      ttl: 0,
+      packetLoss: 100,
+      bandwidth: 0,
+      hops: 0,
+      signalStrength: 0,
+      bitrate: 0,
+      error: 0,
+      recoveryTime: 0,
+      performanceProfile: "offline"
     };
-
-    const metrics = generateTVNetworkMetrics(isOnline);
 
     res.json({
       success: true,
@@ -3863,8 +3857,11 @@ app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) 
         ...metrics,
         timestamp: new Date().toISOString(),
         roomNo: tv.roomNo,
-        isOnline: isOnline,
-        signalLevel: tvStatusData?.signalLevel || null
+        isOnline: tvStatusData.status === "online",
+        signalLevel: tvStatusData.signalLevel || null,
+        labeledMetrics: tvStatusData.labeledMetrics || null,
+        performanceProfile: tvStatusData.performanceProfile || metrics.performanceProfile || "offline",
+        errorCategory: tvStatusData.errorCategory || null
       }
     });
   } catch (error) {
@@ -4418,16 +4415,10 @@ app.get("/api/chromecast/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const deviceStatus = chromecastStatus.get(device.idCast) || {
-      isPingable: false,
-      isOnline: false,
-      signalLevel: null,
-      speed: null,
-      responseTime: null,
-      lastSeen: null,
-      error: "Not checked",
-      lastChecked: null,
-    };
+    const deviceStatus = chromecastStatus.get(device.idCast) || generateDummyChromecastStatus(device.idCast);
+    if (!chromecastStatus.has(device.idCast)) {
+      chromecastStatus.set(device.idCast, deviceStatus);
+    }
 
     const enhancedDevice = {
       ...device,
@@ -4436,6 +4427,23 @@ app.get("/api/chromecast/:id", authenticateToken, async (req, res) => {
       type: device.type || "Chromecast",
       model: device.model || "Google Chromecast",
       statusText: deviceStatus.isOnline ? "Online" : "Offline",
+      networkStats: deviceStatus.networkStats || null,
+      labeledMetrics: deviceStatus.labeledMetrics || null,
+      performanceProfile: deviceStatus.performanceProfile || (deviceStatus.isOnline ? "good" : "offline"),
+      errorCategory: deviceStatus.errorCategory || null,
+      metrics: deviceStatus.networkStats ? {
+        packetLoss: deviceStatus.networkStats.packetLoss || 0,
+        latency: deviceStatus.networkStats.latency || 0,
+        jitter: deviceStatus.networkStats.jitter || 0,
+        error: deviceStatus.networkStats.error || 0,
+        recoveryTime: deviceStatus.networkStats.recoveryTime || 0,
+      } : {
+        packetLoss: 0,
+        latency: 0,
+        jitter: 0,
+        error: 0,
+        recoveryTime: 0,
+      },
       signalQuality: deviceStatus.signalLevel ?
         (deviceStatus.signalLevel > -50 ? "Excellent" :
           deviceStatus.signalLevel > -60 ? "Good" :
@@ -4674,52 +4682,42 @@ app.get("/api/chromecast/:id/metrics", authenticateToken, async (req, res) => {
       });
     }
 
-    // Perform real-time connectivity check
-    const result = await checkChromecastConnectivity(device.ipAddr);
-    const statusInfo = {
-      ...result,
-      lastChecked: new Date().toISOString(),
-    };
-
-    // Update device status in memory
-    chromecastStatus.set(device.idCast, statusInfo);
-
-    // Enhanced response with network stats integration
-    let networkStats = null;
-
-    if (result.isOnline && CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
-      // Generate realistic network stats when device is online
-      networkStats = {
-        sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
-        received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB
-        latency: result.responseTime || Math.floor(Math.random() * 40) + 8, // 8-48ms
-        jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
-        ttl: Math.floor(Math.random() * 8) + 60, // 60-67
-        packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
-        bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
-        hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
-        signalStrength: result.signalLevel || Math.floor(Math.random() * 50) - 70, // -70 to -20 dBm
-        speed: result.speed || Math.max(1, (result.signalLevel || -50) + Math.floor(Math.random() * 20) - 10),
-        error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3% error rate
-        recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s recovery time
-      };
+    const statusInfo = chromecastStatus.get(device.idCast) || generateDummyChromecastStatus(device.idCast);
+    if (!chromecastStatus.has(device.idCast)) {
+      chromecastStatus.set(device.idCast, statusInfo);
     }
 
-    const enhancedResponse = {
-      ...device,
-      ...statusInfo,
-      id: device.idCast,
-      deviceName: device.deviceName,
-      isOnline: result.isOnline,
-      isPingable: result.isPingable,
-      statusText: result.isOnline ? "Online" : "Offline",
-      networkStats: networkStats
+    const networkStats = statusInfo.networkStats || {
+      sent: "0.00",
+      received: "0.00",
+      latency: 0,
+      jitter: 0,
+      ttl: 0,
+      packetLoss: 100,
+      bandwidth: 0,
+      hops: 0,
+      signalStrength: 0,
+      bitrate: 0,
+      error: 0,
+      recoveryTime: 0,
+      performanceProfile: "offline"
     };
 
     res.json({
       success: true,
       message: "Chromecast device metrics retrieved successfully",
-      data: enhancedResponse,
+      data: {
+        ...networkStats,
+        timestamp: new Date().toISOString(),
+        id: device.idCast,
+        deviceName: device.deviceName,
+        isOnline: statusInfo.isOnline,
+        isPingable: statusInfo.isPingable,
+        signalLevel: statusInfo.signalLevel || null,
+        labeledMetrics: statusInfo.labeledMetrics || null,
+        performanceProfile: statusInfo.performanceProfile || networkStats.performanceProfile || "offline",
+        errorCategory: statusInfo.errorCategory || null
+      },
       checkedAt: new Date().toISOString()
     });
 
