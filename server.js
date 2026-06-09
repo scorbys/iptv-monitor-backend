@@ -6221,27 +6221,39 @@ app.use((error, req, res, next) => {
 
 // ==================== PERIODIC TASKS ====================
 const startPeriodicChecks = () => {
+  let statusCheckInProgress = false;
+
   // Status checks with improved logging
   if (typeof checkAllChannelsStatus === 'function' &&
     typeof checkAllTVsStatus === 'function' &&
     typeof checkAllChromecastsStatus === 'function') {
 
-    setInterval(() => {
+    setInterval(async () => {
+      if (statusCheckInProgress) {
+        console.warn("Skipping periodic status check because the previous run is still in progress");
+        return;
+      }
+
       if (CHANNEL_STATUS_CONFIG.USE_DUMMY_STATUS ||
         TV_STATUS_CONFIG.USE_DUMMY_STATUS ||
         CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
 
-        Promise.all([
-          checkAllChannelsStatus().catch(error => {
-            console.error("Error in channel status check:", error)
-          }),
-          checkAllTVsStatus().catch(error => {
-            console.error("Error in TV status check:", error);
-          }),
-          checkAllChromecastsStatus().catch(error => {
-            console.error("Error in Chromecast status check:", error);
-          })
-        ]);
+        statusCheckInProgress = true;
+        try {
+          await Promise.all([
+            checkAllChannelsStatus().catch(error => {
+              console.error("Error in channel status check:", error)
+            }),
+            checkAllTVsStatus().catch(error => {
+              console.error("Error in TV status check:", error);
+            }),
+            checkAllChromecastsStatus().catch(error => {
+              console.error("Error in Chromecast status check:", error);
+            })
+          ]);
+        } finally {
+          statusCheckInProgress = false;
+        }
       }
     }, Math.min(
       CHANNEL_STATUS_CONFIG.UPDATE_INTERVAL,

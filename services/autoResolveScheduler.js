@@ -1,7 +1,7 @@
 /**
  * Auto-resolve scheduler
  * Automatically resolves notifications after a certain time from assignment
- * Runs every 30 seconds to check for notifications that should be resolved
+ * Runs every 5 minutes to check for notifications that should be resolved.
  */
 
 const { connectDB } = require('../autofix-db');
@@ -217,7 +217,7 @@ async function checkAndAutoResolve() {
 // Run immediately on start
 checkAndAutoResolve();
 
-// Then run every 2 minutes
+// Then run every 5 minutes
 const interval = 5 * 60 * 1000; // 5 menit, dari 2 menit
 setInterval(() => {
   checkAndAutoResolve();
