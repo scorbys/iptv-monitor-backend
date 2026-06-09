@@ -6,6 +6,7 @@ const autoFixService = require('../../services/autoFixService');
 const { Logger } = require('../../utils/logger.util');
 
 const logger = new Logger('AutoFixAPI');
+const STALE_PENDING_HOURS = parseInt(process.env.AUTO_FIX_STALE_PENDING_HOURS || '24', 10);
 
 // Parse a legacy synthetic notificationId such as "chromecast-<id>-<ts>",
 // "channel-<id>-<ts>" or "tv-<id>-<ts>" to recover device info for old logs.
@@ -14,6 +15,38 @@ function inferDeviceFromNotificationId(notificationId) {
   const m = notificationId.match(/^(chromecast|channel|tv)-(.+)-\d+$/);
   if (!m) return {};
   return { deviceType: m[1], deviceId: m[2] };
+}
+
+function normalizeCategoryLabel(category) {
+  if (!category) return category;
+  return String(category).replace(/^Katagori-/i, 'Kategori-');
+}
+
+function describePendingState(log, staleCutoff) {
+  const createdAt = log.createdAt ? new Date(log.createdAt) : null;
+  const category = normalizeCategoryLabel(log.category);
+  const reasons = [];
+
+  if (createdAt && createdAt < staleCutoff) {
+    reasons.push(`No progress for more than ${STALE_PENDING_HOURS} hours`);
+  }
+  if (!log.action || log.action === 'analyze') {
+    reasons.push('No executable auto-fix action is attached');
+  }
+  if (!category || category === 'External' || category === 'Unknown' || category === 'Uncategorized') {
+    reasons.push('Category needs manual review');
+  }
+  if (String(log.category || '').match(/^Katagori-/i)) {
+    reasons.push('Legacy misspelled category label');
+  }
+
+  return {
+    ...log,
+    category,
+    isStale: Boolean(createdAt && createdAt < staleCutoff),
+    needsReview: reasons.length > 0,
+    staleReason: reasons.join('; ')
+  };
 }
 
 // Get database instance
@@ -232,6 +265,88 @@ router.get('/history', requireAdmin, async (req, res) => {
 });
 
 /**
+ * POST /api/auto-fix/:fixId/review
+ * Admin review action for stale/manual pending auto-fix queue items.
+ */
+router.post('/:fixId/review', requireAdmin, async (req, res) => {
+  try {
+    const { fixId } = req.params;
+    const { decision, note } = req.body || {};
+
+    if (!['approve', 'reject'].includes(decision)) {
+      return res.status(400).json({
+        success: false,
+        error: 'decision must be approve or reject'
+      });
+    }
+
+    const db = await getDatabase();
+    const existing = await db.autoFixLogs.findOne({ fixId });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: 'Auto-fix log not found'
+      });
+    }
+
+    if (!['pending', 'executing'].includes(existing.status)) {
+      return res.status(409).json({
+        success: false,
+        error: `Auto-fix log is already ${existing.status}`
+      });
+    }
+
+    const now = new Date();
+    const reviewerId = req.user?.id || req.user?._id || req.user?.userId || null;
+    const reviewEntry = {
+      userId: reviewerId,
+      decision,
+      note: typeof note === 'string' ? note.slice(0, 500) : '',
+      timestamp: now
+    };
+
+    const update = decision === 'approve'
+      ? {
+        $set: {
+          status: 'manual_required',
+          approvedBy: reviewerId,
+          updatedAt: now,
+          completedAt: now,
+          errorMessage: 'Approved for manual/on-site review'
+        },
+        $push: { notes: reviewEntry }
+      }
+      : {
+        $set: {
+          status: 'cancelled',
+          updatedAt: now,
+          completedAt: now,
+          errorMessage: 'Rejected by admin review'
+        },
+        $push: { notes: reviewEntry }
+      };
+
+    await db.autoFixLogs.updateOne({ fixId }, update);
+    const updated = await db.autoFixLogs.findOne({ fixId });
+
+    res.json({
+      success: true,
+      data: updated,
+      message: decision === 'approve'
+        ? 'Auto-fix item approved for manual/on-site review'
+        : 'Auto-fix item rejected and cancelled'
+    });
+  } catch (error) {
+    logger.error('Error reviewing auto-fix item:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to review auto-fix item'
+    });
+  }
+});
+
+/**
  * GET /api/auto-fix/stats
  * Get auto fix statistics (with aggregation and period filtering)
  */
@@ -262,7 +377,8 @@ router.get('/stats', requireAdmin, async (req, res) => {
       executing: 0,
       success: 0,
       failed: 0,
-      cancelled: 0
+      cancelled: 0,
+      manual_required: 0
     };
 
     stats.forEach(stat => {
@@ -323,17 +439,18 @@ router.get('/stats', requireAdmin, async (req, res) => {
       { $limit: 20 }
     ]).toArray();
 
-    const pendingDetails = await db.autoFixLogs.find({
+    const pendingRaw = await db.autoFixLogs.find({
       createdAt: { $gte: startDate },
       status: { $in: ['pending', 'executing'] }
     })
       .sort({ createdAt: -1 })
-      .limit(20)
       .project({
         fixId: 1,
         status: 1,
         category: 1,
         action: 1,
+        description: 1,
+        confidence: 1,
         deviceType: 1,
         deviceId: 1,
         deviceName: 1,
@@ -342,6 +459,16 @@ router.get('/stats', requireAdmin, async (req, res) => {
         createdAt: 1
       })
       .toArray();
+
+    const staleCutoff = new Date(Date.now() - STALE_PENDING_HOURS * 60 * 60 * 1000);
+    const pendingDetails = pendingRaw.map(log => describePendingState(log, staleCutoff));
+    const pendingSummary = {
+      totalOpen: pendingDetails.length,
+      active: pendingDetails.filter(item => !item.needsReview).length,
+      needsReview: pendingDetails.filter(item => item.needsReview).length,
+      stale: pendingDetails.filter(item => item.isStale).length,
+      staleAfterHours: STALE_PENDING_HOURS
+    };
 
     // Fix type breakdown
     const fixTypeStats = await db.autoFixLogs.aggregate([
@@ -371,7 +498,8 @@ router.get('/stats', requireAdmin, async (req, res) => {
         byFixType: fixTypeStats,
         byDeviceType: deviceTypeStats,
         byDevice: deviceStats,
-        pendingDetails,
+        pendingDetails: pendingDetails.slice(0, 20),
+        pendingSummary,
         period: `${period} days`
       }
     };

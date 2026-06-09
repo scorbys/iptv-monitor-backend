@@ -16,6 +16,7 @@ async function connectDB() {
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
         staff: db.collection('staff'),
+        telegramSubscribers: db.collection('telegram_subscribers'),
         chromecast: db.collection('chromecast'),
         internationalChannels: db.collection('international_channels'),
         localChannels: db.collection('local_channels'),
@@ -41,6 +42,7 @@ async function connectDB() {
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
         staff: db.collection('staff'),
+        telegramSubscribers: db.collection('telegram_subscribers'),
         chromecast: db.collection('chromecast'),
         internationalChannels: db.collection('international_channels'),
         localChannels: db.collection('local_channels'),
@@ -86,6 +88,7 @@ async function connectDB() {
       autoFixLogs: db.collection('auto_fix_logs'),
       mlPredictions: db.collection('ml_predictions'),
       staff: db.collection('staff'),
+      telegramSubscribers: db.collection('telegram_subscribers'),
       chromecast: db.collection('chromecast'),
       internationalChannels: db.collection('international_channels'),
       localChannels: db.collection('local_channels'),
@@ -117,6 +120,11 @@ async function createIndexes(db) {
     await db.collection('auto_fix_logs').createIndex({ mlPredictionId: 1 });
     await db.collection('auto_fix_logs').createIndex({ deviceType: 1, deviceId: 1 });
     await db.collection('auto_fix_logs').createIndex({ category: 1 });
+
+    // Telegram subscribers collection indexes
+    await db.collection('telegram_subscribers').createIndex({ chatId: 1 }, { unique: true });
+    await db.collection('telegram_subscribers').createIndex({ active: 1 });
+    await db.collection('telegram_subscribers').createIndex({ updatedAt: -1 });
 
     // ML predictions indexes
     await db.collection('ml_predictions').createIndex({ notificationId: 1 });

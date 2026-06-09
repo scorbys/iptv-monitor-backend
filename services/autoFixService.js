@@ -561,7 +561,11 @@ async function processPendingAutoFixes() {
         const action = categoryFixes?.actions.find(a => a.command === fix.action);
 
         if (!action || !action.isAutomatic) {
-          // Skip manual actions
+          results.push({
+            fixId: fix.fixId,
+            status: 'skipped',
+            reason: !action ? 'No matching executable action' : 'Manual action requires on-site review'
+          });
           continue;
         }
 

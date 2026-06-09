@@ -2582,6 +2582,23 @@ app.post("/api/chat/notification-query", authenticateToken, async (req, res) => 
 
 // ==================== GEMINI AI FUNCTIONS ====================
 
+const PROJECT_TECHNICAL_KNOWLEDGE = `
+IPTV Monitoring System technical knowledge:
+- Architecture: Frontend Next.js App Router, Backend Express, and Python FastAPI ML service. Frontend calls the backend with JWT auth; backend calls ML service for prediction/training; MongoDB Atlas is the primary data source.
+- Runtime services: backend exposes REST APIs, ML service exposes /api/predict and /api/model/*, Nginx routes traffic, Jenkins deploys backend branches, Prometheus/Grafana observe container/backend metrics.
+- Authentication: users log in with email/password or Google OAuth. JWT lifetime is intentionally 1 hour. Tokens are used by frontend requests through Authorization Bearer and cookie fallback.
+- Roles: admin can access operational/admin pages such as Channels, Chromecast, Hospitality, ML Dashboard, QoS, Users, Staff, and Auto-Fix APIs. Guest access is limited.
+- Data source: MongoDB collections include channel data, Chromecast devices, hospitality TVs, users, staff, notifications, and auto_fix_logs. Supabase is only an optional mirror/sync target, not the authoritative production database.
+- Monitoring data: current thesis/demo mode uses generated real-looking monitoring metrics. This is intentionally kept as real-time simulation and can later be replaced by real network probing.
+- Menu flow: Dashboard summarizes system health; Channels monitors channel streams; Chromecast monitors casting devices; Hospitality monitors room TVs; Notifications lists incidents; QoS summarizes quality metrics; ML Dashboard shows model/training/prediction and auto-fix analytics.
+- ML service: classifies Indonesian complaint/error text into Kategori-1 to Kategori-14 using trained artifacts. Training uploads Excel data, then the backend polls training status/model info through ML gateway endpoints.
+- Category examples: Chromecast offline/no device found is Kategori-1; TV no TV found is Kategori-2; TV LAN unplug/offline is Kategori-3; weak Chromecast signal is Kategori-4; channel error playing is Kategori-5; player error is Kategori-6; channel connection failure is Kategori-7; Chromecast setup required is Kategori-8; TV weak signal is Kategori-9; Chromecast autoplay disabled is Kategori-10; channel unplayable is Kategori-11; channel weak signal is Kategori-12; socket exception is Kategori-13; TV unable to tune is Kategori-14.
+- Auto-fix flow: notifications or manual detail-page triggers send issue text/category to backend; backend asks ML service, resolves recommended action, writes auto_fix_logs with device metadata, and executes only automatic actions. On-site/manual categories should remain visible as manual review instead of pretending to be auto-fixed.
+- Pending queue: pending/executing auto_fix_logs are shown in ML Dashboard. Old pending logs, External/Unknown categories, or action=analyze generally mean no executable automatic action was attached and the item needs manual review or cleanup.
+- Notifications vs totals: total notifications can include historical/resolved records, while active counts only represent current unresolved/offline/error records.
+- Grafana/Prometheus: infrastructure dashboards show container health, CPU, memory, network, backend metrics, notification error categories, and affected devices/channels. Grafana does not replace the app UI; it is for ops observability.
+`;
+
 function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
   const lowerMsg = userMessage.toLowerCase();
   const isCategoryQuery =
@@ -2604,24 +2621,81 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     (lowerMsg.includes('semua') && lowerMsg.includes('menu')) ||
     lowerMsg === 'halo' ||
     lowerMsg === 'hi';
+  const isTechnicalProjectQuery =
+    lowerMsg.includes('flow') ||
+    lowerMsg.includes('alur') ||
+    lowerMsg.includes('arsitektur') ||
+    lowerMsg.includes('backend') ||
+    lowerMsg.includes('frontend') ||
+    lowerMsg.includes('database') ||
+    lowerMsg.includes('mongodb') ||
+    lowerMsg.includes('supabase') ||
+    lowerMsg.includes('login') ||
+    lowerMsg.includes('jwt') ||
+    lowerMsg.includes('auth') ||
+    lowerMsg.includes('jenkins') ||
+    lowerMsg.includes('grafana') ||
+    lowerMsg.includes('prometheus') ||
+    lowerMsg.includes('qos') ||
+    lowerMsg.includes('notification') ||
+    lowerMsg.includes('notifikasi') ||
+    lowerMsg.includes('pending') ||
+    lowerMsg.includes('queue') ||
+    lowerMsg.includes('training') ||
+    lowerMsg.includes('model') ||
+    lowerMsg.includes('ml service') ||
+    lowerMsg.includes('machine learning') ||
+    lowerMsg.includes('auto fix') ||
+    lowerMsg.includes('auto-fix') ||
+    lowerMsg.includes('autofix') ||
+    lowerMsg.includes('data real') ||
+    lowerMsg.includes('simulasi') ||
+    lowerMsg.includes('math.random');
 
   if (isCategoryQuery) {
     return `Kamu teknisi IPTV yang menjelaskan pertanyaan teknis tentang kategori error di sistem monitoring.
 
     ${userMessage}
 
+    Knowledge base:
+    ${PROJECT_TECHNICAL_KNOWLEDGE}
+
     Jelaskan dengan singkat dan jelas:
     1. Kategori error dalam sistem ini ditentukan oleh jenis issue atau pesan error, bukan oleh jumlah device offline.
-    2. Berikan contoh kategori yang umum untuk channel error: Error Playing biasanya masuk Kategori-5, Error_Player_Error_Err biasanya masuk Kategori-6, Connection_Failure biasanya masuk Kategori-7.
+    2. Gunakan mapping kategori dari knowledge base jika pertanyaan menyebut device atau gejala tertentu.
     3. Jika pesan error tidak spesifik, beri tahu bahwa perlu lihat error log atau pesan error persis untuk menentukan kategori.
 
     Jawab dalam 3-4 kalimat, tanpa format list panjang, fokus ke definisi kategori dan kapan error dapat masuk ke masing-masing kategori.`;
+  }
+
+  if (isTechnicalProjectQuery) {
+    return `Kamu asisten teknikal IPTV Monitoring System. Jawab pertanyaan user berdasarkan knowledge base ini, jangan mengarang detail di luar sistem.
+
+    User bertanya: "${userMessage}"
+
+    Knowledge base:
+    ${PROJECT_TECHNICAL_KNOWLEDGE}
+
+    Current live context:
+    - Channels online/offline: ${systemContext.channelOnline}/${systemContext.channelOffline}
+    - TVs online/offline: ${systemContext.tvOnline}/${systemContext.tvOffline}
+    - Chromecasts online/offline: ${systemContext.chromecastOnline}/${systemContext.chromecastOffline}
+
+    Aturan jawaban:
+    - Jika user bertanya flow, jelaskan urutan dari UI -> backend -> database/ML -> response UI.
+    - Jika user bertanya ML/kategori, sebut kategori yang relevan dan jelaskan bahwa confidence/model menentukan rekomendasi.
+    - Jika user bertanya pending/auto-fix, bedakan automatic fix, manual/on-site fix, dan stale queue.
+    - Jika user bertanya data monitoring, jelaskan bahwa saat ini thesis/demo mode memakai data simulasi real-time yang dibuat realistis.
+    - Jawab ringkas 4-7 kalimat, teknis tapi tetap mudah dipahami.`;
   }
 
   if (isGeneralHelp) {
     return `Kamu asisten virtual IPTV Monitoring System yang ramah dan informatif.
 
     User bertanya: "${userMessage}"
+
+    Knowledge base:
+    ${PROJECT_TECHNICAL_KNOWLEDGE}
 
     Berikan pengenalan sistem dengan struktur:
 
@@ -2740,6 +2814,9 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     return `Kamu asisten IPTV yang menjelaskan fitur AI/ML.
 
   ${userMessage}
+
+  Knowledge base:
+  ${PROJECT_TECHNICAL_KNOWLEDGE}
 
   **🤖 ML DASHBOARD:**
   Dashboard Machine Learning untuk prediksi dan auto-fix:
@@ -2940,6 +3017,9 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
   }
 
   return `Kamu teknisi IPTV yang ngobrol santai tapi informatif.
+
+  Knowledge base:
+  ${PROJECT_TECHNICAL_KNOWLEDGE}
 
   ${knowledgeContext}${historyContext}
 
@@ -6460,9 +6540,9 @@ const startPeriodicChecks = () => {
 
   // Cleanup Telegram bot subscribers every hour
   if (telegramBot) {
-    setInterval(() => {
+    setInterval(async () => {
       try {
-        telegramBot.cleanupSubscribers();
+        await telegramBot.cleanupSubscribers();
       } catch (error) {
         console.error("Error cleaning up Telegram subscribers:", error);
       }
