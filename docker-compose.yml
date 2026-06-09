@@ -74,7 +74,9 @@ services:
 
   grafana:
     container_name: iptv-grafana
-    image: grafana/grafana
+    build:
+      context: .
+      dockerfile: Dockerfile.grafana
     expose: ["3000"]
     environment:
       - GF_SERVER_ROOT_URL=https://be.radissonuluwatu.my.id/grafana/
@@ -82,8 +84,6 @@ services:
       - GF_SERVER_DOMAIN=be.radissonuluwatu.my.id
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     deploy:
       resources:
         limits:

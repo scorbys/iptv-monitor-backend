@@ -77,7 +77,7 @@ pipeline {
         // Update service non-traffic satu per satu untuk hemat RAM
         sh 'docker compose up -d --build --no-deps ml-service'
         sleep 10
-        sh 'docker compose up -d prometheus grafana cadvisor node-exporter'
+        sh 'docker compose up -d --build prometheus grafana cadvisor node-exporter'
         // Supporting services can get new container IPs after recreate.
         // Reload nginx so upstream DNS is resolved again.
         sleep 3
