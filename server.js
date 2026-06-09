@@ -87,6 +87,106 @@ const CHROMECAST_STATUS_CONFIG = {
   UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds (changed from 2 minutes)
 };
 
+const PERFORMANCE_PROFILE_WEIGHTS = {
+  excellent: 0.5,
+  good: 0.25,
+  fair: 0.15,
+  poor: 0.08,
+  critical: 0.02
+};
+
+function pickPerformanceProfile() {
+  const roll = Math.random();
+  let cumulative = 0;
+
+  for (const [profile, weight] of Object.entries(PERFORMANCE_PROFILE_WEIGHTS)) {
+    cumulative += weight;
+    if (roll <= cumulative) return profile;
+  }
+
+  return "good";
+}
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomFloat(min, max, decimals = 2) {
+  return parseFloat((Math.random() * (max - min) + min).toFixed(decimals));
+}
+
+function buildPerformanceMetrics(profile = pickPerformanceProfile()) {
+  const ranges = {
+    excellent: {
+      packetLoss: [0, 0.8],
+      latency: [12, 45],
+      jitter: [1, 24],
+      error: [0, 1.8],
+      recoveryTime: [1, 4.5],
+      bandwidth: [80, 140],
+      signalStrength: [82, 98],
+      bitrate: [6000, 9000],
+    },
+    good: {
+      packetLoss: [1, 2],
+      latency: [50, 100],
+      jitter: [30, 50],
+      error: [2.1, 5],
+      recoveryTime: [5, 10],
+      bandwidth: [45, 90],
+      signalStrength: [70, 86],
+      bitrate: [4000, 7000],
+    },
+    fair: {
+      packetLoss: [2.1, 5],
+      latency: [101, 200],
+      jitter: [51, 100],
+      error: [5.1, 10],
+      recoveryTime: [10.1, 20],
+      bandwidth: [20, 55],
+      signalStrength: [55, 74],
+      bitrate: [2200, 4500],
+    },
+    poor: {
+      packetLoss: [5.1, 10],
+      latency: [201, 500],
+      jitter: [101, 200],
+      error: [10.1, 20],
+      recoveryTime: [20.1, 30],
+      bandwidth: [8, 25],
+      signalStrength: [35, 58],
+      bitrate: [900, 2600],
+    },
+    critical: {
+      packetLoss: [10.1, 18],
+      latency: [501, 900],
+      jitter: [201, 320],
+      error: [20.1, 35],
+      recoveryTime: [30.1, 45],
+      bandwidth: [1, 10],
+      signalStrength: [15, 40],
+      bitrate: [300, 1200],
+    },
+  };
+
+  const range = ranges[profile] || ranges.good;
+  const metrics = {
+    packetLoss: randomFloat(range.packetLoss[0], range.packetLoss[1]),
+    latency: randomInt(range.latency[0], range.latency[1]),
+    jitter: randomInt(range.jitter[0], range.jitter[1]),
+    error: randomFloat(range.error[0], range.error[1]),
+    recoveryTime: randomFloat(range.recoveryTime[0], range.recoveryTime[1], 1),
+  };
+
+  return {
+    profile,
+    metrics,
+    bandwidth: randomInt(range.bandwidth[0], range.bandwidth[1]),
+    signalStrength: randomInt(range.signalStrength[0], range.signalStrength[1]),
+    bitrate: randomInt(range.bitrate[0], range.bitrate[1]),
+  };
+}
+
 // ==================== IN-MEMORY STORAGE ====================
 const channelStatus = new Map();
 const tvStatus = new Map();
@@ -1200,41 +1300,32 @@ function generateDummyChannelStatus(deviceId) {
       errorCategory: "Kategori-7" // Connection Failure for offline devices
     };
   } else {
-    const signalLevel = Math.floor(Math.random() *
-      (CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max - CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min + 1))
-      + CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min;
+    const performance = buildPerformanceMetrics();
+    const signalLevel = performance.signalStrength;
 
     const responseTime = Math.floor(Math.random() *
       (CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1))
       + CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min;
 
-    const bitrate = Math.floor(Math.random() *
-      (CHANNEL_STATUS_CONFIG.BITRATE_RANGE.max - CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min + 1))
-      + CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min;
+    const bitrate = performance.bitrate;
 
     const networkStats = {
       sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
       received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
-      latency: Math.floor(Math.random() * 30) + 10, // 10-40ms
-      jitter: Math.floor(Math.random() * 12) + 2, // 2-14ms
+      latency: performance.metrics.latency,
+      jitter: performance.metrics.jitter,
       ttl: Math.floor(Math.random() * 10) + 58, // 58-67
-      packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)), // 0-0.8%
-      bandwidth: Math.floor(Math.random() * 80) + 40, // 40-120 Mbps
+      packetLoss: performance.metrics.packetLoss,
+      bandwidth: performance.bandwidth,
       hops: Math.floor(Math.random() * 18) + 8, // 8-25 hops
       signalStrength: signalLevel,
       bitrate: bitrate,
-      error: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
-      recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1)) // 1-7s
+      error: performance.metrics.error,
+      recoveryTime: performance.metrics.recoveryTime,
+      performanceProfile: performance.profile
     };
 
-    // Generate labeled metrics using metricCalculator
-    const metrics = {
-      packetLoss: networkStats.packetLoss,
-      latency: networkStats.latency,
-      jitter: networkStats.jitter,
-      error: networkStats.error,
-      recoveryTime: networkStats.recoveryTime
-    };
+    const metrics = performance.metrics;
 
     // Device is online, so generate labeled metrics normally
     const labeledMetrics = generateLabeledMetrics(metrics, false);
@@ -1248,6 +1339,7 @@ function generateDummyChannelStatus(deviceId) {
       bitrate: bitrate,
       networkStats: networkStats,
       labeledMetrics: labeledMetrics,
+      performanceProfile: performance.profile,
       errorCategory: errorCategory
     };
   }
@@ -1276,7 +1368,8 @@ function generateDummyTVStatus(deviceId = 'default') {
     ) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
 
-  const signalLevel = isOnline ? Math.floor(Math.random() * 30) + 70 : null; // 70-100%
+  const performance = isOnline ? buildPerformanceMetrics() : null;
+  const signalLevel = isOnline ? performance.signalStrength : null;
   const model = ["Samsung Hospitality"][Math.floor(Math.random() * 3)];
 
   let networkStats = null;
@@ -1287,26 +1380,20 @@ function generateDummyTVStatus(deviceId = 'default') {
     networkStats = {
       sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
       received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB
-      latency: Math.floor(Math.random() * 40) + 8, // 8-48ms
-      jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
+      latency: performance.metrics.latency,
+      jitter: performance.metrics.jitter,
       ttl: Math.floor(Math.random() * 8) + 60, // 60-67
-      packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
-      bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
+      packetLoss: performance.metrics.packetLoss,
+      bandwidth: performance.bandwidth,
       hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
-      signalStrength: Math.floor(Math.random() * 30) + 70, // 70-100%
-      bitrate: Math.floor(Math.random() * 5000) + 3000, // 3000-8000 kbps
-      error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3%
-      recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s
+      signalStrength: performance.signalStrength,
+      bitrate: performance.bitrate,
+      error: performance.metrics.error,
+      recoveryTime: performance.metrics.recoveryTime,
+      performanceProfile: performance.profile
     };
 
-    // Generate labeled metrics using metricCalculator
-    const metrics = {
-      packetLoss: networkStats.packetLoss,
-      latency: networkStats.latency,
-      jitter: networkStats.jitter,
-      error: networkStats.error,
-      recoveryTime: networkStats.recoveryTime
-    };
+    const metrics = performance.metrics;
 
     labeledMetrics = generateLabeledMetrics(metrics, false); // isOffline = false
     errorCategory = getErrorCategory(metrics);
@@ -1332,6 +1419,7 @@ function generateDummyTVStatus(deviceId = 'default') {
     lastChecked: new Date().toISOString(),
     networkStats: networkStats,
     labeledMetrics: labeledMetrics,
+    performanceProfile: performance?.profile || "offline",
     errorCategory: errorCategory
   };
 
@@ -1352,6 +1440,13 @@ function generateDummyChromecastStatus(deviceId = 'default') {
   let returnValue;
 
   if (!isOnline) {
+    const offlineMetrics = {
+      packetLoss: 0,
+      latency: 0,
+      jitter: 0,
+      error: 0,
+      recoveryTime: 0
+    };
     returnValue = {
       isPingable: false,
       isOnline: false,
@@ -1360,12 +1455,32 @@ function generateDummyChromecastStatus(deviceId = 'default') {
       responseTime: null,
       lastSeen: null,
       error: ["Device unreachable", "Network timeout", "Connection refused"][Math.floor(Math.random() * 3)],
+      networkStats: null,
+      labeledMetrics: generateLabeledMetrics(offlineMetrics, true),
+      performanceProfile: "offline",
+      errorCategory: "Kategori-1",
     };
   } else {
-    const signalLevel = Math.floor(Math.random() * 50) - 70;
-    const baseSpeed = Math.max(10, 100 + signalLevel);
-    const speed = baseSpeed + Math.floor(Math.random() * 20) - 10;
-    const responseTime = Math.max(5, Math.abs(signalLevel) - 20 + Math.floor(Math.random() * 50));
+    const performance = buildPerformanceMetrics();
+    const signalLevel = -1 * Math.max(25, Math.min(85, 100 - performance.signalStrength));
+    const speed = performance.bandwidth;
+    const responseTime = performance.metrics.latency;
+    const networkStats = {
+      sent: randomFloat(1, 10),
+      received: randomFloat(1, 8),
+      latency: performance.metrics.latency,
+      jitter: performance.metrics.jitter,
+      ttl: randomInt(58, 67),
+      packetLoss: performance.metrics.packetLoss,
+      bandwidth: performance.bandwidth,
+      hops: randomInt(8, 26),
+      signalStrength: signalLevel,
+      bitrate: performance.bitrate,
+      error: performance.metrics.error,
+      recoveryTime: performance.metrics.recoveryTime,
+      performanceProfile: performance.profile
+    };
+    const labeledMetrics = generateLabeledMetrics(performance.metrics, false);
     returnValue = {
       isPingable: true,
       isOnline: true,
@@ -1374,6 +1489,10 @@ function generateDummyChromecastStatus(deviceId = 'default') {
       responseTime: Math.max(1, responseTime),
       lastSeen: new Date().toISOString(),
       error: null,
+      networkStats,
+      labeledMetrics,
+      performanceProfile: performance.profile,
+      errorCategory: getErrorCategory(performance.metrics),
     };
   }
 
