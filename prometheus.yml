@@ -2,6 +2,13 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
+  - job_name: 'iptv-backend'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'backend-v1:3001'
+          - 'backend-v2:3001'
+
   - job_name: 'cadvisor'
     static_configs:
       - targets: ['iptv-cadvisor:8080']

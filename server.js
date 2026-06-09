@@ -9,6 +9,7 @@ const path = require("path");
 const axios = require('axios');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const promClient = require('prom-client');
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -24,6 +25,12 @@ const {
 // ==================== APP CONFIGURATION ====================
 const app = express();
 const port = process.env.PORT || 3001;
+
+const metricsRegistry = new promClient.Registry();
+promClient.collectDefaultMetrics({
+  register: metricsRegistry,
+  prefix: 'iptv_backend_',
+});
 
 // Trust the first proxy hop (Railway/NGINX) so rate-limit & req.ip use the real client IP
 app.set('trust proxy', 1);
@@ -204,6 +211,60 @@ function buildPerformanceMetrics(profile = pickPerformanceProfile()) {
 const channelStatus = new Map();
 const tvStatus = new Map();
 const chromecastStatus = new Map();
+
+const backendInfoGauge = new promClient.Gauge({
+  name: 'iptv_backend_info',
+  help: 'IPTV backend build/runtime metadata',
+  labelNames: ['service', 'node_env'],
+  registers: [metricsRegistry],
+});
+
+const deviceTotalGauge = new promClient.Gauge({
+  name: 'iptv_devices_total',
+  help: 'Total IPTV monitored devices by type',
+  labelNames: ['type'],
+  registers: [metricsRegistry],
+});
+
+const deviceOnlineGauge = new promClient.Gauge({
+  name: 'iptv_devices_online',
+  help: 'Online IPTV monitored devices by type',
+  labelNames: ['type'],
+  registers: [metricsRegistry],
+});
+
+const deviceOfflineGauge = new promClient.Gauge({
+  name: 'iptv_devices_offline',
+  help: 'Offline IPTV monitored devices by type',
+  labelNames: ['type'],
+  registers: [metricsRegistry],
+});
+
+const autoFixStatusGauge = new promClient.Gauge({
+  name: 'iptv_auto_fix_total',
+  help: 'Auto-fix log count by status',
+  labelNames: ['status'],
+  registers: [metricsRegistry],
+});
+
+const notificationStatusGauge = new promClient.Gauge({
+  name: 'iptv_notifications_total',
+  help: 'Notification count by status and source',
+  labelNames: ['status', 'source'],
+  registers: [metricsRegistry],
+});
+
+const mlPredictionGauge = new promClient.Gauge({
+  name: 'iptv_ml_predictions_total',
+  help: 'Total ML prediction records',
+  registers: [metricsRegistry],
+});
+
+const mlServiceHealthGauge = new promClient.Gauge({
+  name: 'iptv_ml_service_up',
+  help: 'ML service reachability from backend, 1 means reachable',
+  registers: [metricsRegistry],
+});
 
 // ==================== AUTO-NOTIFICATION SYSTEM CACHE ====================
 // Separate caches for tracking device status changes and creating notifications
@@ -708,6 +769,92 @@ async function getSystemContext() {
   } catch (error) {
     console.error('Error getting system context:', error);
     return null;
+  }
+}
+
+async function updatePrometheusMetrics() {
+  backendInfoGauge.set(
+    { service: 'iptv-backend', node_env: process.env.NODE_ENV || 'development' },
+    1
+  );
+
+  const [channels, tvs, chromecasts] = await Promise.all([
+    getAllChannelsFromDB(),
+    getHospitalityTVs(),
+    getChromecastDevices()
+  ]);
+
+  const channelOnline = channels.filter(c => channelStatus.get(c.id)?.status === 'online').length;
+  const tvOnline = tvs.filter(tv => tvStatus.get(tv.roomNo)?.status === 'online').length;
+  const chromecastOnline = chromecasts.filter(device => chromecastStatus.get(device.idCast)?.isOnline).length;
+
+  const deviceStats = [
+    { type: 'channel', total: channels.length, online: channelOnline },
+    { type: 'tv', total: tvs.length, online: tvOnline },
+    { type: 'chromecast', total: chromecasts.length, online: chromecastOnline },
+  ];
+
+  deviceTotalGauge.reset();
+  deviceOnlineGauge.reset();
+  deviceOfflineGauge.reset();
+  deviceStats.forEach(({ type, total, online }) => {
+    deviceTotalGauge.set({ type }, total);
+    deviceOnlineGauge.set({ type }, online);
+    deviceOfflineGauge.set({ type }, Math.max(total - online, 0));
+  });
+
+  try {
+    const { client } = await connectDB();
+    const db = client.db('iptv');
+
+    const autoFixStatuses = ['pending', 'executing', 'success', 'failed', 'cancelled'];
+    const autoFixCounts = await db.collection('auto_fix_logs').aggregate([
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]).toArray();
+    const autoFixByStatus = Object.fromEntries(autoFixCounts.map(item => [item._id || 'unknown', item.count]));
+
+    autoFixStatusGauge.reset();
+    autoFixStatuses.forEach(status => {
+      autoFixStatusGauge.set({ status }, autoFixByStatus[status] || 0);
+    });
+    Object.entries(autoFixByStatus).forEach(([status, count]) => {
+      if (!autoFixStatuses.includes(status)) {
+        autoFixStatusGauge.set({ status }, count);
+      }
+    });
+
+    const notificationCounts = await db.collection('notifications').aggregate([
+      {
+        $group: {
+          _id: {
+            status: { $ifNull: ['$currentStatus', 'unknown'] },
+            source: { $ifNull: ['$source', 'unknown'] }
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    notificationStatusGauge.reset();
+    notificationCounts.forEach(item => {
+      notificationStatusGauge.set(
+        { status: item._id.status || 'unknown', source: item._id.source || 'unknown' },
+        item.count
+      );
+    });
+
+    const mlPredictionCount = await db.collection('ml_predictions').countDocuments();
+    mlPredictionGauge.set(mlPredictionCount);
+  } catch (error) {
+    console.warn('[Prometheus] Failed to collect MongoDB-backed metrics:', error.message);
+  }
+
+  try {
+    const mlBaseUrl = process.env.ML_SERVICE_URL || 'http://ml-service:8080';
+    await axios.get(`${mlBaseUrl.replace(/\/$/, '')}/health`, { timeout: 2500 });
+    mlServiceHealthGauge.set(1);
+  } catch (error) {
+    mlServiceHealthGauge.set(0);
   }
 }
 
@@ -6065,6 +6212,17 @@ app.get("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, as
 });
 
 // ==================== HEALTH & DEBUG ENDPOINTS ====================
+app.get("/metrics", async (req, res) => {
+  try {
+    await updatePrometheusMetrics();
+    res.set("Content-Type", metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
+  } catch (error) {
+    console.error("Prometheus metrics error:", error);
+    res.status(500).send("# Failed to collect metrics\n");
+  }
+});
+
 app.get("/api/health", authenticateToken, async (req, res) => {
   try {
     res.json({
