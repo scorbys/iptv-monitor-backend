@@ -196,7 +196,7 @@ async function getAllStaff(filters = {}) {
   try {
     const { staff } = await connectDB();
 
-    const query = { isActive: { $ne: false } };
+    const query = {};
 
     // Apply filters
     if (filters.department) {
@@ -319,6 +319,7 @@ async function updateStaff(staffId, updateData) {
     if (updateData.department !== undefined) updateDoc.department = updateData.department;
     if (updateData.position !== undefined) updateDoc.position = updateData.position;
     if (updateData.userId !== undefined) updateDoc.userId = updateData.userId;
+    if (updateData.isActive !== undefined) updateDoc.isActive = updateData.isActive;
     if (updateData.updatedBy) updateDoc.updatedBy = updateData.updatedBy;
 
     const result = await staff.updateOne(

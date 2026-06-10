@@ -2,8 +2,6 @@ const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
 const { getUserByIdComplete, updateUserAvatar } = require("../../../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -84,13 +82,21 @@ router.post("/", upload.single("avatar"), async (req, res) => {
     }
 
     try {
+      const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
+      if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+        return res.status(503).json({
+          success: false,
+          error: "Avatar upload storage is not configured",
+        });
+      }
+
       const cloudinary = require('cloudinary').v2;
 
       // Configure cloudinary
       cloudinary.config({
-        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-        api_key: process.env.CLOUDINARY_API_KEY,
-        api_secret: process.env.CLOUDINARY_API_SECRET
+        cloud_name: CLOUDINARY_CLOUD_NAME,
+        api_key: CLOUDINARY_API_KEY,
+        api_secret: CLOUDINARY_API_SECRET
       });
 
       // Upload to Cloudinary
@@ -111,7 +117,13 @@ router.post("/", upload.single("avatar"), async (req, res) => {
         ).end(req.file.buffer);
       });
 
-      const avatarUrl = uploadResult.secure_url;
+      const avatarUrl = uploadResult?.secure_url;
+      if (!avatarUrl) {
+        return res.status(502).json({
+          success: false,
+          error: "Avatar storage did not return a secure URL",
+        });
+      }
 
       // Delete old avatar from Cloudinary if exists
       if (currentUser.avatar && currentUser.avatar.includes('cloudinary')) {
@@ -132,6 +144,9 @@ router.post("/", upload.single("avatar"), async (req, res) => {
         res.json({
           success: true,
           avatar: avatarUrl,
+          user: {
+            avatar: avatarUrl,
+          },
           message: "Avatar updated successfully",
         });
       } else {

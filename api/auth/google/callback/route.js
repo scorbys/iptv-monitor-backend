@@ -168,11 +168,9 @@ router.get("/", async (req, res) => {
       iat: Math.floor(Date.now() / 1000),
     };
 
-    console.log("Enhanced token payload:", {
+    console.log("Enhanced Google OAuth token payload prepared:", {
       userId: tokenPayload.userId,
       username: tokenPayload.username,
-      name: tokenPayload.name,
-      email: tokenPayload.email,
       role: tokenPayload.role,  // ✅ LOG ROLE
       provider: tokenPayload.provider,
       hasGoogleId: !!tokenPayload.googleId,
@@ -263,7 +261,7 @@ router.get("/", async (req, res) => {
       domain: dynamicDomain,
     };
 
-    console.log("Setting auth cookie with options:", baseCookieOptions);
+    console.log("Setting Google OAuth auth cookies");
 
     // CRITICAL FIX: Set cookie dengan multiple methods untuk ensure compatibility
     res.cookie("token", token, baseCookieOptions);

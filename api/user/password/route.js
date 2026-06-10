@@ -78,9 +78,12 @@ router.put("/", async (req, res) => {
       });
     }
 
-    // Better logic untuk determine provider dan password status
-    const isGoogleUser = currentUser.provider === "google";
-    const isLocalUser = !currentUser.provider || currentUser.provider === "local";
+    if (currentUser.provider === "google" && currentUser.googleId) {
+      return res.status(400).json({
+        success: false,
+        error: "Password is managed by Google and cannot be changed here",
+      });
+    }
 
     // More robust password existence check
     const hasExistingPassword = currentUser.password &&
@@ -90,19 +93,8 @@ router.put("/", async (req, res) => {
       currentUser.password !== "undefined" &&
       currentUser.password.length > 10; // bcrypt hash minimal length
 
-    console.log("Password update attempt:", {
-      userId,
-      isGoogleUser,
-      isLocalUser,
-      hasExistingPassword,
-      currentPasswordProvided: !!currentPassword,
-      passwordLength: currentUser.password ? currentUser.password.length : 0,
-      passwordType: typeof currentUser.password,
-    });
-
-    // Validation rules
-    if (isLocalUser && hasExistingPassword) {
-      // Local user dengan existing password - WAJIB current password
+    // Any local account that already has a password must prove the current password.
+    if (hasExistingPassword) {
       if (!currentPassword) {
         return res.status(400).json({
           success: false,
@@ -129,44 +121,12 @@ router.put("/", async (req, res) => {
           error: "Error validating current password",
         });
       }
-    } else if (isGoogleUser && hasExistingPassword && currentPassword) {
-      // Google user dengan existing password yang mau validate current password
-      try {
-        const isValidPassword = await comparePassword(
-          currentPassword,
-          currentUser.password
-        );
-        if (!isValidPassword) {
-          return res.status(400).json({
-            success: false,
-            error: "Current password is incorrect",
-          });
-        }
-      } catch (compareError) {
-        console.error("Password comparison error:", compareError);
-        return res.status(400).json({
-          success: false,
-          error: "Error validating current password",
-        });
-      }
     }
-
-    // Cases yang tidak perlu current password:
-    // 1. Google user setting password pertama kali (!hasExistingPassword)
-    // 2. Local user setting password pertama kali (!hasExistingPassword) - rare case
-    // 3. Google user dengan existing password tapi tidak provide current password
 
     // Update password
     const result = await updateUserPassword(userId, newPassword);
 
     if (result.success) {
-      // Log successful password update
-      console.log("Password updated successfully for user:", {
-        userId,
-        wasFirstTime: !hasExistingPassword,
-        provider: currentUser.provider || 'local'
-      });
-
       res.json({
         success: true,
         message: !hasExistingPassword

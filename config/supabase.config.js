@@ -34,11 +34,17 @@ async function initSupabase() {
       }
     });
 
-    // Test connection
-    const { error } = await supabaseClient
-      .from('_health_check')
-      .select('count()', { count: 'exact', head: true })
-      .catch(() => ({ error: null })); // Ignore if table doesn't exist
+    // Test connection. Ignore missing health-check table; Supabase is an
+    // optional mirror and should not block the primary MongoDB-backed app.
+    let error = null;
+    try {
+      const result = await supabaseClient
+        .from('_health_check')
+        .select('count()', { count: 'exact', head: true });
+      error = result.error;
+    } catch (_) {
+      error = null;
+    }
 
     if (!error) {
       console.log('✅ Connected to Supabase');

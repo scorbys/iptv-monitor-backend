@@ -1126,6 +1126,489 @@ function findRelevantFAQs(query, limit = 3) {
     .slice(0, limit);
 }
 
+function extractRequestedCategoryNumber(message) {
+  const match = String(message || '')
+    .toLowerCase()
+    .match(/(?:kategori|katagori|category)\s*-?\s*(\d{1,2})/i);
+
+  if (!match) return null;
+
+  const categoryNumber = Number(match[1]);
+  if (!Number.isInteger(categoryNumber) || categoryNumber < 1 || categoryNumber > 14) {
+    return null;
+  }
+
+  return categoryNumber;
+}
+
+function isCategoryCountQuery(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const hasCategoryIntent =
+    lowerMsg.includes('kategori') ||
+    lowerMsg.includes('katagori') ||
+    lowerMsg.includes('category');
+  const hasCountIntent =
+    lowerMsg.includes('berapa') ||
+    lowerMsg.includes('jumlah') ||
+    lowerMsg.includes('total') ||
+    lowerMsg.includes('ada') ||
+    lowerMsg.includes('count');
+  const hasErrorIntent =
+    lowerMsg.includes('error') ||
+    lowerMsg.includes('eror') ||
+    lowerMsg.includes('notifikasi') ||
+    lowerMsg.includes('notification') ||
+    lowerMsg.includes('active') ||
+    lowerMsg.includes('aktif');
+
+  return hasCategoryIntent && hasCountIntent && (hasErrorIntent || extractRequestedCategoryNumber(message) !== null);
+}
+
+async function buildCategoryCountResponse(message) {
+  if (!isCategoryCountQuery(message)) return null;
+
+  const categoryNumber = extractRequestedCategoryNumber(message);
+  const { client } = await connectDB();
+  const db = client.db('iptv');
+  const notifications = db.collection('notifications');
+
+  if (!categoryNumber) {
+    const categoryCounts = await notifications.aggregate([
+      {
+        $match: {
+          errorCategory: { $exists: true, $ne: null, $ne: '' },
+        },
+      },
+      {
+        $group: {
+          _id: '$errorCategory',
+          total: { $sum: 1 },
+          active: {
+            $sum: {
+              $cond: [
+                { $in: ['$reportStatus', ['resolved', 'closed']] },
+                0,
+                1,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { active: -1, total: -1 } },
+      { $limit: 8 },
+    ]).toArray();
+
+    if (categoryCounts.length === 0) {
+      return 'Belum ada notifikasi yang memiliki kategori error di database.';
+    }
+
+    const summary = categoryCounts
+      .map((item) => `${normalizePrometheusCategory(item._id)}: ${item.active} aktif dari ${item.total} total`)
+      .join('; ');
+
+    return `Ringkasan kategori error saat ini: ${summary}. Angka aktif menghitung notifikasi yang belum berstatus resolved atau closed.`;
+  }
+
+  const categoryLabel = `Kategori-${categoryNumber}`;
+  const categoryRegex = new RegExp(`^(Kategori|Katagori)-${categoryNumber}$`, 'i');
+  const categoryMatch = { errorCategory: categoryRegex };
+  const activeCategoryMatch = {
+    ...categoryMatch,
+    reportStatus: { $nin: ['resolved', 'closed'] },
+  };
+
+  const [total, active, bySource, byStatus, topDevices] = await Promise.all([
+    notifications.countDocuments(categoryMatch),
+    notifications.countDocuments(activeCategoryMatch),
+    notifications.aggregate([
+      { $match: categoryMatch },
+      {
+        $group: {
+          _id: { $ifNull: ['$source', 'unknown'] },
+          total: { $sum: 1 },
+          active: {
+            $sum: {
+              $cond: [
+                { $in: ['$reportStatus', ['resolved', 'closed']] },
+                0,
+                1,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { active: -1, total: -1 } },
+    ]).toArray(),
+    notifications.aggregate([
+      { $match: categoryMatch },
+      {
+        $group: {
+          _id: { $ifNull: ['$reportStatus', 'unknown'] },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+    notifications.aggregate([
+      { $match: categoryMatch },
+      {
+        $project: {
+          deviceName: {
+            $ifNull: [
+              '$deviceName',
+              {
+                $ifNull: [
+                  '$channelName',
+                  {
+                    $cond: [
+                      { $ne: ['$roomNo', null] },
+                      { $concat: ['Room ', { $toString: '$roomNo' }] },
+                      'Unknown Device',
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          roomNo: '$roomNo',
+          source: { $ifNull: ['$source', 'unknown'] },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            deviceName: '$deviceName',
+            roomNo: '$roomNo',
+            source: '$source',
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: 3 },
+    ]).toArray(),
+  ]);
+
+  const sourceSummary = bySource.length
+    ? bySource.map((item) => `${item._id}: ${item.active} aktif/${item.total} total`).join(', ')
+    : 'belum ada sumber perangkat';
+  const statusSummary = byStatus.length
+    ? byStatus.map((item) => `${item._id}: ${item.count}`).join(', ')
+    : 'belum ada status';
+  const deviceSummary = topDevices.length
+    ? topDevices.map((item) => {
+        const room = item._id.roomNo ? ` room ${item._id.roomNo}` : '';
+        return `${item._id.deviceName}${room} (${item.count}x)`;
+      }).join(', ')
+    : 'belum ada device yang tercatat';
+
+  return `Saat ini ada ${active} notifikasi ${categoryLabel} yang masih aktif dari ${total} total notifikasi ${categoryLabel}. Breakdown source: ${sourceSummary}. Status: ${statusSummary}. Device/channel terbanyak: ${deviceSummary}.`;
+}
+
+function getRecentConversationText(conversationHistory = []) {
+  if (!Array.isArray(conversationHistory)) return '';
+  return conversationHistory
+    .slice(-4)
+    .map((item) => String(item?.content || ''))
+    .join(' ')
+    .toLowerCase();
+}
+
+function detectDeviceType(message, conversationHistory = []) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const recentText = getRecentConversationText(conversationHistory);
+  const text = `${lowerMsg} ${recentText}`;
+
+  if (lowerMsg.includes('channel') || (!lowerMsg.includes('tv') && !lowerMsg.includes('chromecast') && recentText.includes('channel'))) {
+    return 'channel';
+  }
+  if (
+    lowerMsg.includes('chromecast') ||
+    lowerMsg.includes('cast') ||
+    (!lowerMsg.includes('channel') && !lowerMsg.includes('tv') && recentText.includes('chromecast'))
+  ) {
+    return 'chromecast';
+  }
+  if (
+    lowerMsg.includes('hospitality') ||
+    lowerMsg.includes('kamar') ||
+    lowerMsg.includes('room') ||
+    /\btv\b/.test(lowerMsg) ||
+    (!lowerMsg.includes('channel') && !lowerMsg.includes('chromecast') && (recentText.includes(' tv ') || recentText.includes('kamar')))
+  ) {
+    return 'tv';
+  }
+
+  if (text.includes('device') || text.includes('perangkat')) return 'all';
+  return null;
+}
+
+function hasListIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('apa saja') ||
+    lowerMsg.includes('mana saja') ||
+    lowerMsg.includes('daftar') ||
+    lowerMsg.includes('list') ||
+    lowerMsg.includes('sebutkan') ||
+    lowerMsg.includes('tampilkan') ||
+    lowerMsg.includes('yang mana')
+  );
+}
+
+function hasCountIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('berapa') ||
+    lowerMsg.includes('jumlah') ||
+    lowerMsg.includes('total') ||
+    lowerMsg.includes('count')
+  );
+}
+
+function hasOfflineIntent(message, conversationHistory = []) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const recentText = getRecentConversationText(conversationHistory);
+  const text = `${lowerMsg} ${recentText}`;
+  return (
+    text.includes('offline') ||
+    text.includes('offlien') ||
+    text.includes('mati') ||
+    text.includes('down') ||
+    text.includes('tidak aktif') ||
+    text.includes('error') ||
+    text.includes('eror')
+  );
+}
+
+function hasOnlineIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('online') ||
+    lowerMsg.includes('hidup') ||
+    lowerMsg.includes('aktif') ||
+    lowerMsg.includes('healthy')
+  );
+}
+
+function formatLimitedList(items, limit = 10) {
+  if (!items.length) return 'tidak ada data';
+  const shown = items.slice(0, limit);
+  const suffix = items.length > limit ? `, dan ${items.length - limit} lainnya` : '';
+  return `${shown.join(', ')}${suffix}`;
+}
+
+async function ensureStatusCacheForChat(deviceType) {
+  const tasks = [];
+
+  if ((deviceType === 'channel' || deviceType === 'all') && channelStatus.size === 0) {
+    tasks.push(checkAllChannelsStatus(true));
+  }
+  if ((deviceType === 'tv' || deviceType === 'all') && tvStatus.size === 0) {
+    tasks.push(checkAllTVStatus(true));
+  }
+  if ((deviceType === 'chromecast' || deviceType === 'all') && chromecastStatus.size === 0) {
+    tasks.push(checkAllChromecastsStatus(true));
+  }
+
+  if (tasks.length > 0) {
+    await Promise.allSettled(tasks);
+  }
+}
+
+async function buildDeviceStatusChatResponse(message, conversationHistory = [], systemContext = null) {
+  const deviceType = detectDeviceType(message, conversationHistory);
+  const asksList = hasListIntent(message);
+  const asksCount = hasCountIntent(message);
+  const asksOffline = hasOfflineIntent(message, conversationHistory);
+  const asksOnline = hasOnlineIntent(message);
+  const asksStatus =
+    asksList ||
+    asksCount ||
+    asksOffline ||
+    asksOnline ||
+    String(message || '').toLowerCase().includes('status');
+
+  if (!deviceType || !asksStatus) return null;
+
+  await ensureStatusCacheForChat(deviceType);
+
+  const rows = [];
+
+  if (deviceType === 'channel' || deviceType === 'all') {
+    const channels = await getAllChannelsFromDB();
+    const offline = channels
+      .filter((channel) => (channelStatus.get(channel.id)?.status || 'offline') !== 'online')
+      .map((channel) => `${channel.channelName || `Channel ${channel.channelNumber || channel.id}`}${channel.channelNumber ? ` (#${channel.channelNumber})` : ''}`);
+    const online = channels
+      .filter((channel) => (channelStatus.get(channel.id)?.status || 'offline') === 'online')
+      .map((channel) => `${channel.channelName || `Channel ${channel.channelNumber || channel.id}`}${channel.channelNumber ? ` (#${channel.channelNumber})` : ''}`);
+    rows.push({ label: 'Channel', total: channels.length, online: online.length, offline: offline.length, onlineItems: online, offlineItems: offline });
+  }
+
+  if (deviceType === 'tv' || deviceType === 'all') {
+    const tvs = await getHospitalityTVs();
+    const offline = tvs
+      .filter((tv) => (tvStatus.get(tv.roomNo)?.status || 'offline') !== 'online')
+      .map((tv) => `Room ${tv.roomNo}${tv.tvName ? ` (${tv.tvName})` : ''}`);
+    const online = tvs
+      .filter((tv) => (tvStatus.get(tv.roomNo)?.status || 'offline') === 'online')
+      .map((tv) => `Room ${tv.roomNo}${tv.tvName ? ` (${tv.tvName})` : ''}`);
+    rows.push({ label: 'TV Hospitality', total: tvs.length, online: online.length, offline: offline.length, onlineItems: online, offlineItems: offline });
+  }
+
+  if (deviceType === 'chromecast' || deviceType === 'all') {
+    const chromecasts = await getChromecastDevices();
+    const offline = chromecasts
+      .filter((device) => !chromecastStatus.get(device.idCast)?.isOnline)
+      .map((device) => `${device.deviceName || `Chromecast ${device.idCast}`}${device.roomNo ? ` room ${device.roomNo}` : ''}`);
+    const online = chromecasts
+      .filter((device) => !!chromecastStatus.get(device.idCast)?.isOnline)
+      .map((device) => `${device.deviceName || `Chromecast ${device.idCast}`}${device.roomNo ? ` room ${device.roomNo}` : ''}`);
+    rows.push({ label: 'Chromecast', total: chromecasts.length, online: online.length, offline: offline.length, onlineItems: online, offlineItems: offline });
+  }
+
+  if (rows.length === 0) return null;
+
+  if (asksList) {
+    const targetOffline = asksOffline || !asksOnline;
+    return rows
+      .map((row) => {
+        const items = targetOffline ? row.offlineItems : row.onlineItems;
+        const statusText = targetOffline ? 'offline/mati' : 'online/aktif';
+        return `${row.label} ${statusText}: ${items.length} dari ${row.total}. ${formatLimitedList(items)}.`;
+      })
+      .join(' ');
+  }
+
+  if (asksCount || asksOffline || asksOnline) {
+    return rows
+      .map((row) => {
+        if (asksOnline && !asksOffline) {
+          return `${row.label}: ${row.online} online dari ${row.total}.`;
+        }
+        return `${row.label}: ${row.offline} offline/mati dari ${row.total}.`;
+      })
+      .join(' ');
+  }
+
+  const contextSummary = systemContext
+    ? `Status umum: Channel ${systemContext.channelOnline}/${systemContext.totalChannels} online, TV ${systemContext.tvOnline}/${systemContext.totalTVs} online, Chromecast ${systemContext.chromecastOnline}/${systemContext.totalChromecasts} online.`
+    : '';
+  return contextSummary || null;
+}
+
+async function buildStaffChatResponse(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const isStaffQuery =
+    lowerMsg.includes('staff') ||
+    lowerMsg.includes('teknisi') ||
+    lowerMsg.includes('petugas') ||
+    lowerMsg.includes('bertugas') ||
+    lowerMsg.includes('assignment') ||
+    lowerMsg.includes('assigned');
+
+  if (!isStaffQuery) return null;
+
+  const { client } = await connectDB();
+  const db = client.db('iptv');
+  const staff = await db.collection('staff').find({}).sort({ isActive: -1, 'stats.successRate': -1, name: 1 }).limit(100).toArray();
+
+  if (staff.length === 0) {
+    return 'Belum ada data staff yang tercatat di database. Admin bisa menambah dan mengelola staff melalui menu Staff.';
+  }
+
+  const active = staff.filter((member) => member.isActive !== false);
+  const inactive = staff.length - active.length;
+  const topStaff = active
+    .slice(0, 5)
+    .map((member) => {
+      const stats = member.stats || {};
+      const assigned = stats.totalAssigned ?? 0;
+      const resolved = stats.totalResolved ?? 0;
+      const successRate = Number(stats.successRate ?? 0).toFixed(1);
+      return `${member.name || 'Unnamed'} (${member.department || 'No dept'}, assigned ${assigned}, resolved ${resolved}, success ${successRate}%)`;
+    })
+    .join('; ');
+
+  return `Saat ini ada ${active.length} staff aktif dan ${inactive} inactive. Staff aktif teratas: ${topStaff || 'belum ada staff aktif'}. Detail lengkap, edit status, dan performa ada di menu Staff.`;
+}
+
+async function buildNotificationChatResponse(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const isNotificationQuery =
+    lowerMsg.includes('notification') ||
+    lowerMsg.includes('notifikasi') ||
+    lowerMsg.includes('alert') ||
+    lowerMsg.includes('insiden') ||
+    lowerMsg.includes('active') ||
+    lowerMsg.includes('aktif');
+
+  if (!isNotificationQuery || lowerMsg.includes('kategori')) return null;
+
+  const { client } = await connectDB();
+  const db = client.db('iptv');
+  const notifications = db.collection('notifications');
+  const [total, byStatus, bySource] = await Promise.all([
+    notifications.countDocuments(),
+    notifications.aggregate([
+      { $group: { _id: { $ifNull: ['$reportStatus', 'unknown'] }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+    notifications.aggregate([
+      { $group: { _id: { $ifNull: ['$source', 'unknown'] }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+  ]);
+
+  const active = byStatus
+    .filter((item) => !['resolved', 'closed'].includes(item._id))
+    .reduce((sum, item) => sum + item.count, 0);
+  const statusSummary = byStatus.map((item) => `${item._id}: ${item.count}`).join(', ');
+  const sourceSummary = bySource.map((item) => `${item._id}: ${item.count}`).join(', ');
+
+  return `Total notifikasi adalah ${total}, dengan ${active} yang masih aktif/belum resolved atau closed. Breakdown status: ${statusSummary || 'belum ada status'}. Breakdown source: ${sourceSummary || 'belum ada source'}.`;
+}
+
+function buildAccountHelpResponse(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const isAccountQuery =
+    lowerMsg.includes('account') ||
+    lowerMsg.includes('akun') ||
+    lowerMsg.includes('profile') ||
+    lowerMsg.includes('profil') ||
+    lowerMsg.includes('password') ||
+    lowerMsg.includes('avatar');
+
+  if (!isAccountQuery) return null;
+
+  if (lowerMsg.includes('password') || lowerMsg.includes('sandi')) {
+    return 'Untuk ganti password, buka menu Account, masuk ke bagian Password/Security, isi password lama dan password baru, lalu simpan. Jika login Google OAuth, password lokal mungkin tidak tersedia dan perubahan password dilakukan lewat akun Google.';
+  }
+
+  if (lowerMsg.includes('avatar') || lowerMsg.includes('foto')) {
+    return 'Untuk mengganti avatar, buka menu Account lalu upload gambar profil baru. Backend akan menyimpan file avatar melalui endpoint profile/avatar, lalu Topbar menampilkan avatar terbaru.';
+  }
+
+  return 'Menu Account dipakai untuk melihat profil user, memperbarui data akun, mengganti password, dan mengganti avatar. Sesi login JWT sengaja berlaku 1 jam demi keamanan.';
+}
+
+async function buildOperationalChatResponse(message, conversationHistory = [], systemContext = null) {
+  const resolvers = [
+    () => buildDeviceStatusChatResponse(message, conversationHistory, systemContext),
+    () => buildStaffChatResponse(message),
+    () => buildNotificationChatResponse(message),
+    () => buildAccountHelpResponse(message),
+  ];
+
+  for (const resolver of resolvers) {
+    const response = await resolver();
+    if (response) return response;
+  }
+
+  return null;
+}
+
 // ==================== FAQ DATA CATEGORY ====================
 
 const FAQ_DATA = [
@@ -1354,7 +1837,7 @@ const FAQ_DATA = [
     issue: "Reset Configuration",
     solutions: [
       "Restart Chromecast",
-      "Reset Chromecast dibawa ke ruang server pencet tombol poer 10 Detik",
+      "Reset Chromecast dibawa ke ruang server pencet tombol power 10 detik",
       "Factory reset melalui aplikasi Google Home",
       "Cabut kabel power selama 30 detik lalu hubungkan kembali",
     ],
@@ -2408,6 +2891,30 @@ app.post("/api/chat/query", authenticateToken, async (req, res) => {
     );
 
     const systemContext = await getSystemContext();
+
+    const categoryCountResponse = await buildCategoryCountResponse(message);
+    if (categoryCountResponse) {
+      return res.json({
+        success: true,
+        response: categoryCountResponse,
+        detailedInfo: null,
+        relatedFAQs: [],
+        systemContext: systemContext,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const operationalResponse = await buildOperationalChatResponse(message, conversationHistory, systemContext);
+    if (operationalResponse) {
+      return res.json({
+        success: true,
+        response: operationalResponse,
+        detailedInfo: null,
+        relatedFAQs: [],
+        systemContext: systemContext,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     if (isSimpleStatusQuery) {
       let quickResponse = '';

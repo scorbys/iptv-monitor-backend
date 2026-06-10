@@ -83,11 +83,9 @@ router.get("/", async (req, res) => {
     if (decoded.userId) {
       try {
         user = await getUserById(decoded.userId);
-        if (user) {
-          // Remove sensitive data
-          const { password, ...userWithoutPassword } = user;
-          user = userWithoutPassword;
-        }
+        // getUserById already replaces the password hash with a safe
+        // "exists" sentinel so the account page can decide whether the
+        // current-password field is required.
       } catch (dbError) {
         console.error("Error fetching user from database:", dbError);
         // Fallback to token data if database fails

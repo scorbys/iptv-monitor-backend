@@ -221,10 +221,10 @@ router.post("/", validateLoginInput, async (req, res) => {
       message: "Login successful"
     };
 
-    console.log("📤 [LOGIN RESPONSE] Sending response with token:", {
-      hasToken: !!responseData.token,
-      tokenLength: responseData.token?.length,
-      userKeys: Object.keys(responseData.user)
+    console.log("📤 [LOGIN RESPONSE] Sending successful login response:", {
+      userId: responseData.user.id,
+      username: responseData.user.username,
+      role: responseData.user.role
     });
 
     res.json(responseData);

@@ -1,7 +1,7 @@
 const { MongoClient } = require('mongodb');
 
 // MongoDB connection string
-const mongoUri = 'mongodb+srv://mekd1bro:727PlayingCards@cluster0.wnmnw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+const mongoUri = process.env.MONGO_URL;
 const dbName = 'iptv';
 const collectionName = 'tv_hospitality';
 
@@ -137,6 +137,10 @@ const tvHospitalityData = [
 
 async function connectDB() {
   try {
+    if (!mongoUri) {
+      throw new Error('MONGO_URL is required to run seedTV.js');
+    }
+
     const client = new MongoClient(mongoUri);
     await client.connect();
     console.log('Connected to MongoDB Atlas');

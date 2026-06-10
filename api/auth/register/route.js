@@ -223,10 +223,10 @@ router.post("/", validateRegisterInput, async (req, res) => {
       message: "Registration successful"
     };
 
-    console.log("📤 [REGISTER RESPONSE] Sending response with token:", {
-      hasToken: !!responseData.token,
-      tokenLength: responseData.token?.length,
-      userKeys: Object.keys(responseData.user)
+    console.log("📤 [REGISTER RESPONSE] Sending successful registration response:", {
+      userId: responseData.user.id,
+      username: responseData.user.username,
+      role: responseData.user.role
     });
 
     res.json(responseData);
