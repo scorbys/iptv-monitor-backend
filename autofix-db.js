@@ -15,6 +15,7 @@ async function connectDB() {
         notifications: db.collection('notifications'),
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
+        mlFeedback: db.collection('ml_feedback'),
         staff: db.collection('staff'),
         telegramSubscribers: db.collection('telegram_subscribers'),
         chromecast: db.collection('chromecast'),
@@ -41,6 +42,7 @@ async function connectDB() {
         notifications: db.collection('notifications'),
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
+        mlFeedback: db.collection('ml_feedback'),
         staff: db.collection('staff'),
         telegramSubscribers: db.collection('telegram_subscribers'),
         chromecast: db.collection('chromecast'),
@@ -87,6 +89,7 @@ async function connectDB() {
       notifications: db.collection('notifications'),
       autoFixLogs: db.collection('auto_fix_logs'),
       mlPredictions: db.collection('ml_predictions'),
+      mlFeedback: db.collection('ml_feedback'),
       staff: db.collection('staff'),
       telegramSubscribers: db.collection('telegram_subscribers'),
       chromecast: db.collection('chromecast'),
@@ -131,6 +134,13 @@ async function createIndexes(db) {
     await db.collection('ml_predictions').createIndex({ predictedCategory: 1 });
     await db.collection('ml_predictions').createIndex({ confidence: -1 });
     await db.collection('ml_predictions').createIndex({ createdAt: -1 });
+
+    // ML feedback indexes
+    await db.collection('ml_feedback').createIndex({ feedbackId: 1 }, { unique: true });
+    await db.collection('ml_feedback').createIndex({ status: 1 });
+    await db.collection('ml_feedback').createIndex({ correctedCategory: 1 });
+    await db.collection('ml_feedback').createIndex({ createdAt: -1 });
+    await db.collection('ml_feedback').createIndex({ source: 1, sourceId: 1 });
 
     console.log('Database indexes created successfully');
   } catch (error) {

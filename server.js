@@ -493,6 +493,7 @@ app.use('/api/staff', require('./api/staff/route'));
 app.use('/api/ml/health', require('./api/ml/health/route'));
 app.use('/api/ml/model', require('./api/ml/model/route'));
 app.use('/api/ml/predict', require('./api/ml/predict/route'));
+app.use('/api/ml/feedback', require('./api/ml/feedback/route'));
 
 // Notifications routes
 app.use('/api/notifications/stats', require('./api/notifications/stats/route'));
@@ -769,6 +770,40 @@ async function getSystemContext() {
     const tvOnline = Array.from(tvStatus.values()).filter(s => s.status === 'online').length;
     const chromecastOnline = Array.from(chromecastStatus.values()).filter(s => s.isOnline).length;
 
+    let mlFeedback = {
+      total: 0,
+      approved: 0,
+      pendingReview: 0,
+      readyForRetrain: false,
+      topCorrectedCategories: []
+    };
+
+    try {
+      const { client } = await connectDB();
+      const db = client.db('iptv');
+      const [totalFeedback, approvedFeedback, pendingFeedback, topCorrectedCategories] = await Promise.all([
+        db.collection('ml_feedback').countDocuments(),
+        db.collection('ml_feedback').countDocuments({ status: 'approved' }),
+        db.collection('ml_feedback').countDocuments({ status: 'pending_review' }),
+        db.collection('ml_feedback').aggregate([
+          { $match: { correctedCategory: { $exists: true, $ne: null } } },
+          { $group: { _id: '$correctedCategory', count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 5 }
+        ]).toArray()
+      ]);
+
+      mlFeedback = {
+        total: totalFeedback,
+        approved: approvedFeedback,
+        pendingReview: pendingFeedback,
+        readyForRetrain: approvedFeedback >= 50,
+        topCorrectedCategories
+      };
+    } catch (feedbackError) {
+      console.warn('Error getting ML feedback context:', feedbackError.message);
+    }
+
     return {
       totalChannels: channels.length,
       channelOnline,
@@ -779,6 +814,7 @@ async function getSystemContext() {
       totalChromecasts: chromecasts.length,
       chromecastOnline,
       chromecastOffline: chromecasts.length - chromecastOnline,
+      mlFeedback,
     };
   } catch (error) {
     console.error('Error getting system context:', error);
@@ -2595,6 +2631,7 @@ IPTV Monitoring System technical knowledge:
 - Category examples: Chromecast offline/no device found is Kategori-1; TV no TV found is Kategori-2; TV LAN unplug/offline is Kategori-3; weak Chromecast signal is Kategori-4; channel error playing is Kategori-5; player error is Kategori-6; channel connection failure is Kategori-7; Chromecast setup required is Kategori-8; TV weak signal is Kategori-9; Chromecast autoplay disabled is Kategori-10; channel unplayable is Kategori-11; channel weak signal is Kategori-12; socket exception is Kategori-13; TV unable to tune is Kategori-14.
 - Auto-fix flow: notifications or manual detail-page triggers send issue text/category to backend; backend asks ML service, resolves recommended action, writes auto_fix_logs with device metadata, and executes only automatic actions. On-site/manual categories should remain visible as manual review instead of pretending to be auto-fixed.
 - Pending queue: pending/executing auto_fix_logs are shown in ML Dashboard. Old pending logs, External/Unknown categories, or action=analyze generally mean no executable automatic action was attached and the item needs manual review or cleanup.
+- Adaptive learning: admin feedback is collected in ml_feedback. Approved feedback is the source for future retraining together with the original Excel dataset. The model should only be promoted when evaluation improves or admin approves it.
 - Notifications vs totals: total notifications can include historical/resolved records, while active counts only represent current unresolved/offline/error records.
 - Grafana/Prometheus: infrastructure dashboards show container health, CPU, memory, network, backend metrics, notification error categories, and affected devices/channels. Grafana does not replace the app UI; it is for ops observability.
 `;
@@ -2680,11 +2717,14 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     - Channels online/offline: ${systemContext.channelOnline}/${systemContext.channelOffline}
     - TVs online/offline: ${systemContext.tvOnline}/${systemContext.tvOffline}
     - Chromecasts online/offline: ${systemContext.chromecastOnline}/${systemContext.chromecastOffline}
+    - ML feedback total/approved/pending: ${systemContext.mlFeedback?.total ?? 0}/${systemContext.mlFeedback?.approved ?? 0}/${systemContext.mlFeedback?.pendingReview ?? 0}
+    - Feedback ready for retrain: ${systemContext.mlFeedback?.readyForRetrain ? 'yes' : 'no'}
 
     Aturan jawaban:
     - Jika user bertanya flow, jelaskan urutan dari UI -> backend -> database/ML -> response UI.
     - Jika user bertanya ML/kategori, sebut kategori yang relevan dan jelaskan bahwa confidence/model menentukan rekomendasi.
     - Jika user bertanya pending/auto-fix, bedakan automatic fix, manual/on-site fix, dan stale queue.
+    - Jika user bertanya ML belajar sendiri, jelaskan feedback admin -> ml_feedback -> approved dataset -> retraining/evaluation -> model promotion.
     - Jika user bertanya data monitoring, jelaskan bahwa saat ini thesis/demo mode memakai data simulasi real-time yang dibuat realistis.
     - Jawab ringkas 4-7 kalimat, teknis tapi tetap mudah dipahami.`;
   }
