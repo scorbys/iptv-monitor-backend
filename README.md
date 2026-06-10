@@ -159,8 +159,46 @@ Command ini menjalankan:
 - Notification lifecycle dan stats.
 - Auto-fix trigger, retry, history, dashboard, dan stats.
 - ML gateway untuk model info, train status, train, delete model, dan prediction.
+- ML feedback dataset untuk koreksi admin dan retraining dataset.
 - Telegram notification bot.
 - Optional Supabase sync untuk mirror data legacy. MongoDB tetap source of truth.
+
+## Endpoint dan Akses
+
+Endpoint utama yang wajib login:
+
+- `/api/channels/*`
+- `/api/chromecast/*`
+- `/api/hospitality/*`
+- `/api/notifications/*`
+- `/api/network/*`
+- `/api/config`
+- `/api/chat/*`
+
+Endpoint admin-only:
+
+- `/api/users/*`
+- `/api/staff/*`
+- `/api/ml/model/*`
+- `/api/ml/predict/*`
+- `/api/ml/feedback/*`
+- `/api/auto-fix/history`, `/api/auto-fix/stats`, `/api/auto-fix/dashboard`
+- `/api/auto-fix/trigger`, `/api/auto-fix/process-*`
+- `/api/backup/*`
+- `/api/monitoring/*`
+- `/api/debug/routes`
+- device manual auto-fix endpoints
+
+Endpoint yang sengaja tetap terbuka atau digunakan oleh infrastructure:
+
+- `/health`
+- `/api/status`
+- `/metrics`
+- `/api/ml/health`
+- auth login/register/OAuth callback
+
+`/api/internal/*` hanya boleh diakses dengan JWT valid atau `x-internal-token`
+yang dibuat oleh backend untuk server-to-server integration seperti Telegram bot.
 
 ## Database dan Backup
 
@@ -180,6 +218,24 @@ aman dijadikan satu-satunya cadangan production.
 3. Auto-fix service menentukan action yang sesuai.
 4. Hasil auto-fix disimpan ke `auto_fix_history` dengan metadata device.
 5. Frontend menampilkan riwayat ini di ML dashboard dan halaman detail Channel/TV/Chromecast.
+
+Pending auto-fix yang tidak executable atau butuh onsite handling akan muncul
+sebagai item review di ML Dashboard. Admin bisa approve menjadi manual required
+atau reject/cancel jika item tersebut stale/tidak valid.
+
+## ML Feedback Flow
+
+Admin dapat menambahkan koreksi dataset dari ML Dashboard:
+
+1. Masukkan teks keluhan atau hasil prediksi yang keliru.
+2. Pilih kategori yang benar dan outcome fix.
+3. Feedback masuk status `pending_review`.
+4. Admin approve/reject feedback.
+5. Feedback approved dapat diekspor sebagai dataset tambahan untuk retraining.
+
+Flow ini membuat ML service bisa berkembang tanpa LLM, tetapi retraining tetap
+harus dilakukan dengan dataset yang sudah dikurasi agar kualitas model tidak
+turun karena label noise.
 
 ## Docker/Production
 
@@ -215,11 +271,36 @@ Nginx mengatur akses ke service production, termasuk:
 
 Jika Grafana atau Jenkins gagal login di subpath, cek kombinasi `nginx.conf`, environment `root_url`/prefix service, dan cookie path service terkait.
 
+## Cloudflare Tunnel di VPS
+
+Production web diakses melalui Cloudflare Tunnel ke Nginx pada port internal.
+Untuk mengurangi insiden `Error 1033`, VPS memakai:
+
+- `cloudflared.service` dengan `Restart=always`.
+- `cloudflared-watchdog.timer` untuk cek metrics lokal tunnel.
+- `cloudflared-refresh.timer` untuk refresh connector berkala.
+
+Jika 1033 masih bertahan lebih dari 1-2 menit, cek:
+
+```bash
+systemctl status cloudflared --no-pager -l
+systemctl list-timers 'cloudflared-*' --no-pager
+journalctl -u cloudflared -n 100 --no-pager
+journalctl -t cloudflared-watchdog -n 50 --no-pager
+```
+
+SSH via Cloudflare Access bergantung pada fitur/plan Cloudflare. Untuk opsi
+free yang lebih stabil, gunakan akses admin alternatif seperti Tailscale/ZeroTier
+atau remote host Windows/VMware.
+
 ## Validasi Sebelum Deploy
 
 ```bash
 node --check server.js
 node --check api/auto-fix/route.js
+node --check api/backup/route.js
+node --check api/monitoring/route.js
+node --check api/ml/predict/route.js
 node --check services/autoFixService.js
 ```
 

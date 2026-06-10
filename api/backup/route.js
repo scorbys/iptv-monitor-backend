@@ -7,9 +7,11 @@ const {
   getSyncStatus,
   clearSyncQueue
 } = require('../../utils/dbSyncWrapper');
+const { verifyToken, requireAdmin } = require('../../middleware/authMiddleware');
 
 // Legacy Supabase mirror endpoints. The route stays /api/backup for backward
 // compatibility, but MongoDB Atlas is the source of truth and backup target.
+router.use(verifyToken, requireAdmin);
 
 /**
  * GET /api/backup/status

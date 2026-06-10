@@ -6493,7 +6493,7 @@ app.get("/api/status", (req, res) => {
   });
 });
 
-app.get("/api/debug/routes", (req, res) => {
+app.get("/api/debug/routes", authenticateToken, requireAdmin, (req, res) => {
   const routes = [];
   app._router.stack.forEach((middleware) => {
     if (middleware.route) {

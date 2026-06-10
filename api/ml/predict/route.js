@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { predict, batchPredict } = require('../../../utils/mlService.util');
+const { verifyToken, requireAdmin } = require('../../../middleware/authMiddleware');
+
+router.use(verifyToken, requireAdmin);
 
 // Predict single text
 router.post('/', async (req, res) => {
