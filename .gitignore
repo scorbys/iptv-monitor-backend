@@ -72,6 +72,9 @@ desktop.ini
 # Claude
 .claude/
 
+# Local Codex/OMX session state
+.omc/
+
 # ==================== ML MODELS ====================
 # Model files yang terlalu besar untuk GitHub
 *.pkl
