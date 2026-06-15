@@ -45,7 +45,7 @@ if (!JWT_SECRET) {
 // Gemini API
 const GEMINI_CONFIG = {
   apiKey: process.env.GEMINI_API_KEY,
-  endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+  endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 };
 
 // ==================== IMPORTS ====================
@@ -211,6 +211,31 @@ function buildPerformanceMetrics(profile = pickPerformanceProfile()) {
 const channelStatus = new Map();
 const tvStatus = new Map();
 const chromecastStatus = new Map();
+
+// Opsi A: setelah Auto-Fix sukses, device ditahan "online" sementara supaya
+// simulasi monitoring (Math.random) tidak langsung membaliknya jadi offline.
+// Override per-device & sementara — simulasi normal lanjut setelah window habis.
+const autoFixedUntil = new Map(); // key: `${type}:${id}` -> expiry epoch ms
+const AUTO_FIX_ONLINE_MINUTES = 10;
+function markDeviceAutoFixed(type, id) {
+  if (id == null) return;
+  autoFixedUntil.set(`${type}:${id}`, Date.now() + AUTO_FIX_ONLINE_MINUTES * 60 * 1000);
+}
+function applyAutoFixOverride(type, id, result) {
+  const key = `${type}:${id}`;
+  const exp = autoFixedUntil.get(key);
+  if (!exp) return result;
+  if (exp > Date.now()) {
+    if (result && typeof result === 'object') {
+      result.status = 'online';
+      result.isOnline = true;
+      result.error = null;
+    }
+  } else {
+    autoFixedUntil.delete(key); // window habis -> kembali ke simulasi
+  }
+  return result;
+}
 
 const backendInfoGauge = new promClient.Gauge({
   name: 'iptv_backend_info',
@@ -2407,7 +2432,7 @@ function generateHistoricalNetworkData(timeRange, isOnline, baseMetrics = {}) {
 async function checkMulticastConnectivity(ipAddress, timeout = 5000, deviceId = ipAddress) {
   if (CHANNEL_STATUS_CONFIG.USE_DUMMY_STATUS) {
     await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 200));
-    return generateDummyChannelStatus(deviceId); // ← teruskan deviceId
+    return applyAutoFixOverride('channel', deviceId, generateDummyChannelStatus(deviceId)); // ← teruskan deviceId
   }
 
   return new Promise((resolve) => {
@@ -2499,7 +2524,7 @@ async function checkMulticastConnectivity(ipAddress, timeout = 5000, deviceId = 
 async function checkTVConnectivity(ipAddress, timeout = 5000, deviceId = ipAddress) {
   if (TV_STATUS_CONFIG.USE_DUMMY_STATUS) {
     await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 200));
-    return generateDummyTVStatus(deviceId); // ← teruskan deviceId
+    return applyAutoFixOverride('tv', deviceId, generateDummyTVStatus(deviceId)); // ← teruskan deviceId
   }
 
   return new Promise((resolve) => {
@@ -2552,7 +2577,7 @@ async function checkTVConnectivity(ipAddress, timeout = 5000, deviceId = ipAddre
 async function checkChromecastConnectivity(ipAddr, timeout = 5000, deviceId = ipAddr) {
   if (CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
     await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
-    return generateDummyChromecastStatus(deviceId);
+    return applyAutoFixOverride('chromecast', deviceId, generateDummyChromecastStatus(deviceId));
   }
 
   return new Promise((resolve) => {
@@ -6395,6 +6420,16 @@ app.post("/api/chromecast/:id/auto-fix", authenticateToken, requireAdmin, async 
         result: fixResult
       });
 
+      // Opsi A: tahan device "online" sementara setelah fix sukses
+      if (fixResult.success) {
+        markDeviceAutoFixed('chromecast', device.idCast);
+        chromecastStatus.set(device.idCast, {
+          ...(chromecastStatus.get(device.idCast) || {}),
+          isOnline: true, status: 'online', error: null,
+          lastChecked: new Date().toISOString(),
+        });
+      }
+
     } catch (fixError) {
       await completeAutoFix(fixLog.fixId, {
         success: false,
@@ -6620,6 +6655,16 @@ app.post("/api/channels/:id/auto-fix", authenticateToken, requireAdmin, async (r
         success: fixResult.success,
         result: fixResult
       });
+
+      // Opsi A: tahan channel "online" sementara setelah fix sukses
+      if (fixResult.success) {
+        markDeviceAutoFixed('channel', channel.id);
+        channelStatus.set(channel.id, {
+          ...(channelStatus.get(channel.id) || {}),
+          status: 'online', isOnline: true, error: null,
+          lastChecked: new Date().toISOString(),
+        });
+      }
 
     } catch (fixError) {
       await completeAutoFix(fixLog.fixId, {
@@ -6848,6 +6893,16 @@ app.post("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, a
         success: fixResult.success,
         result: fixResult
       });
+
+      // Opsi A: tahan TV "online" sementara setelah fix sukses
+      if (fixResult.success) {
+        markDeviceAutoFixed('tv', tv.roomNo);
+        tvStatus.set(tv.roomNo, {
+          ...(tvStatus.get(tv.roomNo) || {}),
+          status: 'online', isOnline: true, error: null,
+          lastChecked: new Date().toISOString(),
+        });
+      }
 
     } catch (fixError) {
       await completeAutoFix(fixLog.fixId, {

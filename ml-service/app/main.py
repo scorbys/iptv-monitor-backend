@@ -70,6 +70,7 @@ class PredictResponse(BaseModel):
     predicted_label: str
     probabilities: Optional[list] = None
     features: dict
+    recommended_fix: Optional[dict] = None
 
 class ModelInfoResponse(BaseModel):
     is_trained: bool
