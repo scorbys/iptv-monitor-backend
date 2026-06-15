@@ -5,6 +5,7 @@ __pycache__/
 *.so
 
 # Virtual Environment
+.venv/
 venv/
 env/
 ENV/
@@ -28,5 +29,6 @@ Thumbs.db
 # data/*.xls
 
 # Environment variables (keep template, ignore actual)
+.env
 .env.local
 .env.production

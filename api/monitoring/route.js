@@ -16,6 +16,9 @@ const {
   checkAllConsistency,
   generateSyncReport
 } = require('../../utils/syncMonitor');
+const { verifyToken, requireAdmin } = require('../../middleware/authMiddleware');
+
+router.use(verifyToken, requireAdmin);
 
 /**
  * GET /api/monitoring/sync-metrics

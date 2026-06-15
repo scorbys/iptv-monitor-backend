@@ -49,16 +49,10 @@ router.put("/", async (req, res) => {
       });
     }
 
-    // Check if user is Google user and trying to change username
-    if (
-      currentUser.provider === "google" &&
-      currentUser.googleId &&
-      username &&
-      username !== currentUser.username
-    ) {
+    if (currentUser.provider === "google" && currentUser.googleId) {
       return res.status(400).json({
         success: false,
-        error: "Username cannot be changed for Google accounts",
+        error: "Profile data is managed by Google and cannot be changed here",
       });
     }
 
@@ -115,21 +109,10 @@ router.put("/", async (req, res) => {
       });
     }
 
-    console.log("Profile update:", {
-      userId,
-      updateData,
-      currentUser: {
-        username: currentUser.username,
-        name: currentUser.name,
-        provider: currentUser.provider
-      }
-    });
-
     // Update user profile
     const result = await updateUserProfile(userId, updateData);
 
     if (result.success) {
-      console.log("Profile updated successfully for user:", userId);
       res.json({
         success: true,
         message: "Profile updated successfully",

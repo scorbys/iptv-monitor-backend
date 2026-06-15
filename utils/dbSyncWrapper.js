@@ -55,8 +55,10 @@ async function processSyncQueue() {
   }
 }
 
-// Start processing queue every 1 second
-setInterval(processSyncQueue, 1000);
+// Start processing queue only when Supabase sync is enabled.
+if (ENABLE_SYNC) {
+  setInterval(processSyncQueue, 1000);
+}
 
 /**
  * Add document to sync queue

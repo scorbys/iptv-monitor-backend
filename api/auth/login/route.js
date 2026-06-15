@@ -134,6 +134,14 @@ const getCookieOptions = (req) => {
 const validateLoginInput = (req, res, next) => {
   const { identifier, password } = req.body;
 
+  // Reject non-string values to prevent NoSQL injection (e.g. { $ne: null })
+  if (typeof identifier !== "string" || typeof password !== "string") {
+    return res.status(400).json({
+      success: false,
+      error: "Email/username and password must be strings"
+    });
+  }
+
   if (!identifier || !password) {
     return res.status(400).json({
       success: false,
@@ -213,10 +221,10 @@ router.post("/", validateLoginInput, async (req, res) => {
       message: "Login successful"
     };
 
-    console.log("📤 [LOGIN RESPONSE] Sending response with token:", {
-      hasToken: !!responseData.token,
-      tokenLength: responseData.token?.length,
-      userKeys: Object.keys(responseData.user)
+    console.log("📤 [LOGIN RESPONSE] Sending successful login response:", {
+      userId: responseData.user.id,
+      username: responseData.user.username,
+      role: responseData.user.role
     });
 
     res.json(responseData);

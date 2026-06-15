@@ -5,17 +5,24 @@ const jwt = require('jsonwebtoken');
  */
 const verifyToken = (req, res, next) => {
   try {
-    // Get token from header
+    // Get token from the Authorization header, falling back to the auth cookie.
+    // Same-origin frontend fetches proxied through Next.js forward the cookie
+    // (not a Bearer header), so we accept both sources.
     const authHeader = req.headers.authorization;
+    let token = null;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    } else if (req.cookies && req.cookies.token) {
+      token = req.cookies.token;
+    }
+
+    if (!token) {
       return res.status(401).json({
         success: false,
         error: 'No token provided'
       });
     }
-
-    const token = authHeader.substring(7);
 
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);

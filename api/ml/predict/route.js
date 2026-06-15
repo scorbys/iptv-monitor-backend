@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { predict, batchPredict } = require('../../../utils/mlService.util');
+const { verifyToken, requireAdmin } = require('../../../middleware/authMiddleware');
+
+router.use(verifyToken, requireAdmin);
 
 // Predict single text
 router.post('/', async (req, res) => {
@@ -11,6 +14,20 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Text is required',
+      });
+    }
+
+    if (typeof text !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Text must be a string',
+      });
+    }
+
+    if (text.length > 10000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Text too long (max 10000 characters)',
       });
     }
 

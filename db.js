@@ -609,7 +609,7 @@ async function updateUserPassword(userId, newPassword) {
 // Update user avatar
 async function updateUserAvatar(userId, avatarUrl) {
   try {
-    console.log('Updating user avatar:', { userId, avatarUrl });
+    console.log('Updating user avatar:', { userId, hasAvatarUrl: Boolean(avatarUrl) });
 
     const { users } = await connectDB();
 

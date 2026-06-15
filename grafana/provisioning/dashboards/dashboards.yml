@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: IPTV Monitoring
+    orgId: 1
+    folder: IPTV Monitoring
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards

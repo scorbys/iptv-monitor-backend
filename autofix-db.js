@@ -15,7 +15,9 @@ async function connectDB() {
         notifications: db.collection('notifications'),
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
+        mlFeedback: db.collection('ml_feedback'),
         staff: db.collection('staff'),
+        telegramSubscribers: db.collection('telegram_subscribers'),
         chromecast: db.collection('chromecast'),
         internationalChannels: db.collection('international_channels'),
         localChannels: db.collection('local_channels'),
@@ -40,7 +42,9 @@ async function connectDB() {
         notifications: db.collection('notifications'),
         autoFixLogs: db.collection('auto_fix_logs'),
         mlPredictions: db.collection('ml_predictions'),
+        mlFeedback: db.collection('ml_feedback'),
         staff: db.collection('staff'),
+        telegramSubscribers: db.collection('telegram_subscribers'),
         chromecast: db.collection('chromecast'),
         internationalChannels: db.collection('international_channels'),
         localChannels: db.collection('local_channels'),
@@ -85,7 +89,9 @@ async function connectDB() {
       notifications: db.collection('notifications'),
       autoFixLogs: db.collection('auto_fix_logs'),
       mlPredictions: db.collection('ml_predictions'),
+      mlFeedback: db.collection('ml_feedback'),
       staff: db.collection('staff'),
+      telegramSubscribers: db.collection('telegram_subscribers'),
       chromecast: db.collection('chromecast'),
       internationalChannels: db.collection('international_channels'),
       localChannels: db.collection('local_channels'),
@@ -115,12 +121,26 @@ async function createIndexes(db) {
     await db.collection('auto_fix_logs').createIndex({ status: 1 });
     await db.collection('auto_fix_logs').createIndex({ executedAt: -1 });
     await db.collection('auto_fix_logs').createIndex({ mlPredictionId: 1 });
+    await db.collection('auto_fix_logs').createIndex({ deviceType: 1, deviceId: 1 });
+    await db.collection('auto_fix_logs').createIndex({ category: 1 });
+
+    // Telegram subscribers collection indexes
+    await db.collection('telegram_subscribers').createIndex({ chatId: 1 }, { unique: true });
+    await db.collection('telegram_subscribers').createIndex({ active: 1 });
+    await db.collection('telegram_subscribers').createIndex({ updatedAt: -1 });
 
     // ML predictions indexes
     await db.collection('ml_predictions').createIndex({ notificationId: 1 });
     await db.collection('ml_predictions').createIndex({ predictedCategory: 1 });
     await db.collection('ml_predictions').createIndex({ confidence: -1 });
     await db.collection('ml_predictions').createIndex({ createdAt: -1 });
+
+    // ML feedback indexes
+    await db.collection('ml_feedback').createIndex({ feedbackId: 1 }, { unique: true });
+    await db.collection('ml_feedback').createIndex({ status: 1 });
+    await db.collection('ml_feedback').createIndex({ correctedCategory: 1 });
+    await db.collection('ml_feedback').createIndex({ createdAt: -1 });
+    await db.collection('ml_feedback').createIndex({ source: 1, sourceId: 1 });
 
     console.log('Database indexes created successfully');
   } catch (error) {
@@ -284,6 +304,13 @@ async function createAutoFixLog(fixData) {
       fixId: new ObjectId().toString(),
       notificationId: fixData.notificationId,
       mlPredictionId: fixData.mlPredictionId || null,
+      // Device metadata — primary, stable lookup keys for the device-centric UI.
+      // notificationId stays supported but is no longer the only lookup key.
+      deviceType: fixData.deviceType || null, // 'channel' | 'tv' | 'chromecast'
+      deviceId: fixData.deviceId != null ? String(fixData.deviceId) : null, // stable internal id
+      deviceName: fixData.deviceName || null, // channel/device name or "Room xxx"
+      roomNo: fixData.roomNo != null ? fixData.roomNo : null, // TV/Chromecast only
+      source: fixData.source || null, // 'channel'|'hospitality'|'chromecast'|'notification'|'manual'
       fixType: fixData.fixType, // 'automatic', 'manual', 'hybrid'
       category: fixData.category,
       action: fixData.action,

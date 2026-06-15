@@ -1,8 +1,12 @@
 pipeline {
   agent any
 
-  triggers { 
-    githubPush() 
+  options {
+    skipDefaultCheckout(true)
+  }
+
+  triggers {
+    githubPush()
   }
 
   environment {
@@ -13,9 +17,12 @@ pipeline {
   stages {
     stage('Prepare') {
       steps {
-        git branch: 'main', url: 'https://github.com/scorbys/iptv-monitor-backend.git'
-        sh 'cp $BACKEND_ENV_FILE .env'
-        sh 'cp $ML_ENV_FILE ./ml-service/.env'
+        script {
+          echo "Deploying branch: ${env.BRANCH_NAME ?: 'configured SCM branch'}"
+        }
+        checkout scm
+        sh 'rm -f .env && install -m 600 "$BACKEND_ENV_FILE" .env'
+        sh 'rm -f ./ml-service/.env && install -m 600 "$ML_ENV_FILE" ./ml-service/.env'
       }
     }
 
@@ -70,9 +77,11 @@ pipeline {
         // Update service non-traffic satu per satu untuk hemat RAM
         sh 'docker compose up -d --build --no-deps ml-service'
         sleep 10
-        sh 'docker compose up -d prometheus grafana cadvisor node-exporter'
-        // Jangan rebuild nginx kecuali ada perubahan config!
-        // nginx -s reload sudah cukup untuk config changes
+        sh 'docker compose up -d --build prometheus grafana cadvisor node-exporter'
+        // Supporting services can get new container IPs after recreate.
+        // Reload nginx so upstream DNS is resolved again.
+        sleep 3
+        sh 'docker exec iptv-nginx nginx -s reload'
       }
     }
 

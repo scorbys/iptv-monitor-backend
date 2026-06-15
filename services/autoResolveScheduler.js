@@ -1,13 +1,14 @@
 /**
  * Auto-resolve scheduler
  * Automatically resolves notifications after a certain time from assignment
- * Runs every 30 seconds to check for notifications that should be resolved
+ * Runs every 5 minutes to check for notifications that should be resolved.
  */
 
 const { connectDB } = require('../autofix-db');
 const { ObjectId } = require('mongodb');
 const { updateStaffStatsOnResolution } = require('../utils/notificationUtil');
 const { evaluateAndPerformHandoff } = require('../utils/staffHandoffUtil');
+const { deviceMetaFromNotification, normalizeCategory } = require('../utils/deviceMeta.util');
 
 // Configuration: How long to wait before auto-resolving (in seconds)
 const AUTO_RESOLVE_TIME = {
@@ -160,7 +161,10 @@ async function checkAndAutoResolve() {
           await db.collection('auto_fix_logs').insertOne({
             fixId: `fix-auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             notificationId: notification.notificationId,
-            category: notification.errorCategory || 'Auto-Resolved',
+            // Auto-resolution is expressed via action/status/result — NOT the category.
+            // Category stays the real issue category (or Uncategorized), never "Auto-Resolved".
+            ...deviceMetaFromNotification(notification),
+            category: normalizeCategory(notification.errorCategory) || 'Uncategorized',
             action: 'auto-resolve',
             description: `Automatically resolved ${notification.errorCategory || 'issue'} after ${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`,
             status: 'success',
@@ -213,7 +217,7 @@ async function checkAndAutoResolve() {
 // Run immediately on start
 checkAndAutoResolve();
 
-// Then run every 2 minutes
+// Then run every 5 minutes
 const interval = 5 * 60 * 1000; // 5 menit, dari 2 menit
 setInterval(() => {
   checkAndAutoResolve();

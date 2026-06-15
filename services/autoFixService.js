@@ -18,6 +18,8 @@ const {
   updateStaffStats
 } = require('../staff-db');
 
+const { deviceMetaFromNotification } = require('../utils/deviceMeta.util');
+
 /**
  * Auto-Fix Service for ML-based notification remediation
  * Integrates with ML model to predict and automatically fix issues
@@ -329,6 +331,7 @@ async function processNotificationWithML(notification, mlPrediction) {
     for (const action of categoryFixes.actions) {
       const fixLog = await createAutoFixLog({
         notificationId: notification.id,
+        ...deviceMetaFromNotification(notification),
         mlPredictionId: predictionDoc.predictionId,
         fixType: action.isAutomatic ? 'automatic' : 'manual',
         category: category,
@@ -558,7 +561,11 @@ async function processPendingAutoFixes() {
         const action = categoryFixes?.actions.find(a => a.command === fix.action);
 
         if (!action || !action.isAutomatic) {
-          // Skip manual actions
+          results.push({
+            fixId: fix.fixId,
+            status: 'skipped',
+            reason: !action ? 'No matching executable action' : 'Manual action requires on-site review'
+          });
           continue;
         }
 
@@ -660,6 +667,7 @@ async function manualTriggerAutoFix(notificationId, actionOverride = null) {
 
       const fixLog = await createAutoFixLog({
         notificationId: notificationId,
+        ...deviceMetaFromNotification(notification),
         mlPredictionId: mlPrediction.predictionId,
         fixType: 'manual',
         category: category,

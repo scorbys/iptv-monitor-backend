@@ -6,8 +6,12 @@ const { updateStaffStatsOnResolution } = require('../utils/notificationUtil');
 const { connectDB } = require('../autofix-db');
 const { ObjectId } = require('mongodb');
 
+const APPLY = process.argv.includes('--apply');
+
 async function testFullStaffStats() {
   console.log('=== Testing Full Staff Stats Update ===\n');
+  console.log(`Mode: ${APPLY ? 'APPLY (will write to MongoDB)' : 'DRY-RUN (no writes)'}`);
+  console.log('Use --apply only in a controlled test database or after taking a backup.\n');
 
   try {
     const connection = await connectDB();
@@ -21,6 +25,11 @@ async function testFullStaffStats() {
     });
 
     if (!notification) {
+      if (!APPLY) {
+        console.log('No suitable notification found. DRY-RUN stopped before creating test data.');
+        return;
+      }
+
       console.log('No suitable notification found. Creating one...');
 
       // Create a test notification
@@ -60,6 +69,11 @@ async function testFullStaffStats() {
       console.log(`  Total Resolved: ${staffBefore.stats?.totalResolved || 0}`);
       console.log(`  Success Rate: ${(staffBefore.stats?.successRate || 0).toFixed(1)}%`);
       console.log(`  Avg Resolution Time: ${staffBefore.stats?.avgResolutionTime || 0} minutes\n`);
+
+      if (!APPLY) {
+        console.log('DRY-RUN complete. Re-run with --apply to resolve this notification and update staff stats.');
+        return;
+      }
 
       // Resolve notification
       await db.collection('notifications').updateOne(
@@ -108,6 +122,11 @@ async function testFullStaffStats() {
       console.log(`  Success Rate: ${(staffBefore.stats?.successRate || 0).toFixed(1)}%`);
       console.log(`  Avg Resolution Time: ${staffBefore.stats?.avgResolutionTime || 0} minutes\n`);
 
+      if (!APPLY) {
+        console.log('DRY-RUN complete. Re-run with --apply to resolve this notification and update staff stats.');
+        return;
+      }
+
       // Resolve notification
       await db.collection('notifications').updateOne(
         { notificationId: notification.notificationId },
@@ -145,4 +164,9 @@ async function testFullStaffStats() {
   }
 
   process.exit(0);
-})();
+}
+
+testFullStaffStats().catch((error) => {
+  console.error('\n❌ Unhandled error:', error);
+  process.exit(1);
+});

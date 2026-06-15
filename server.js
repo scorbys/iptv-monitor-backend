@@ -7,6 +7,9 @@ const dgram = require("dgram");
 const net = require("net");
 const path = require("path");
 const axios = require('axios');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const promClient = require('prom-client');
 const {
   getInternationalChannels,
   getLocalChannels,
@@ -22,6 +25,15 @@ const {
 // ==================== APP CONFIGURATION ====================
 const app = express();
 const port = process.env.PORT || 3001;
+
+const metricsRegistry = new promClient.Registry();
+promClient.collectDefaultMetrics({
+  register: metricsRegistry,
+  prefix: 'iptv_backend_',
+});
+
+// Trust the first proxy hop (Railway/NGINX) so rate-limit & req.ip use the real client IP
+app.set('trust proxy', 1);
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -48,6 +60,8 @@ const userProfileRoute = require("./api/user/profile/route");
 const userPasswordRoute = require("./api/user/password/route");
 const userAvatarRoute = require("./api/user/avatar/route");
 const { initSupabase } = require('./config/supabase.config');
+const { getInternalToken } = require('./utils/internalAuth');
+const { resolveLogCategory } = require('./utils/deviceMeta.util');
 const {
   generateLabeledMetrics,
   getErrorCategory,
@@ -80,10 +94,191 @@ const CHROMECAST_STATUS_CONFIG = {
   UPDATE_INTERVAL: 1800000, // 30 minutes in milliseconds (changed from 2 minutes)
 };
 
+const PERFORMANCE_PROFILE_WEIGHTS = {
+  excellent: 0.5,
+  good: 0.25,
+  fair: 0.15,
+  poor: 0.08,
+  critical: 0.02
+};
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomFloat(min, max, decimals = 2) {
+  return parseFloat((Math.random() * (max - min) + min).toFixed(decimals));
+}
+
+function hashToPercent(value, salt = "") {
+  const input = `${salt}:${value ?? "unknown"}`;
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 100;
+}
+
+function pickPerformanceProfile(deviceId = "default", deviceType = "device") {
+  const roll = hashToPercent(deviceId, `${deviceType}:performance`) / 100;
+  let cumulative = 0;
+
+  for (const [profile, weight] of Object.entries(PERFORMANCE_PROFILE_WEIGHTS)) {
+    cumulative += weight;
+    if (roll <= cumulative) return profile;
+  }
+
+  return "good";
+}
+
+function isSeededOnline(deviceId, deviceType, onlineProbability) {
+  return hashToPercent(deviceId, `${deviceType}:online`) < onlineProbability * 100;
+}
+
+function buildPerformanceMetrics(profile = pickPerformanceProfile()) {
+  const ranges = {
+    excellent: {
+      packetLoss: [0, 0.8],
+      latency: [12, 45],
+      jitter: [1, 24],
+      error: [0, 1.8],
+      recoveryTime: [1, 4.5],
+      bandwidth: [80, 140],
+      signalStrength: [82, 98],
+      bitrate: [6000, 9000],
+    },
+    good: {
+      packetLoss: [1, 2],
+      latency: [50, 100],
+      jitter: [30, 50],
+      error: [2.1, 5],
+      recoveryTime: [5, 10],
+      bandwidth: [45, 90],
+      signalStrength: [70, 86],
+      bitrate: [4000, 7000],
+    },
+    fair: {
+      packetLoss: [2.1, 5],
+      latency: [101, 200],
+      jitter: [51, 100],
+      error: [5.1, 10],
+      recoveryTime: [10.1, 20],
+      bandwidth: [20, 55],
+      signalStrength: [55, 74],
+      bitrate: [2200, 4500],
+    },
+    poor: {
+      packetLoss: [5.1, 10],
+      latency: [201, 500],
+      jitter: [101, 200],
+      error: [10.1, 20],
+      recoveryTime: [20.1, 30],
+      bandwidth: [8, 25],
+      signalStrength: [35, 58],
+      bitrate: [900, 2600],
+    },
+    critical: {
+      packetLoss: [10.1, 18],
+      latency: [501, 900],
+      jitter: [201, 320],
+      error: [20.1, 35],
+      recoveryTime: [30.1, 45],
+      bandwidth: [1, 10],
+      signalStrength: [15, 40],
+      bitrate: [300, 1200],
+    },
+  };
+
+  const range = ranges[profile] || ranges.good;
+  const metrics = {
+    packetLoss: randomFloat(range.packetLoss[0], range.packetLoss[1]),
+    latency: randomInt(range.latency[0], range.latency[1]),
+    jitter: randomInt(range.jitter[0], range.jitter[1]),
+    error: randomFloat(range.error[0], range.error[1]),
+    recoveryTime: randomFloat(range.recoveryTime[0], range.recoveryTime[1], 1),
+  };
+
+  return {
+    profile,
+    metrics,
+    bandwidth: randomInt(range.bandwidth[0], range.bandwidth[1]),
+    signalStrength: randomInt(range.signalStrength[0], range.signalStrength[1]),
+    bitrate: randomInt(range.bitrate[0], range.bitrate[1]),
+  };
+}
+
 // ==================== IN-MEMORY STORAGE ====================
 const channelStatus = new Map();
 const tvStatus = new Map();
 const chromecastStatus = new Map();
+
+const backendInfoGauge = new promClient.Gauge({
+  name: 'iptv_backend_info',
+  help: 'IPTV backend build/runtime metadata',
+  labelNames: ['service', 'node_env'],
+  registers: [metricsRegistry],
+});
+
+const deviceTotalGauge = new promClient.Gauge({
+  name: 'iptv_devices_total',
+  help: 'Total IPTV monitored devices by type',
+  labelNames: ['type'],
+  registers: [metricsRegistry],
+});
+
+const deviceOnlineGauge = new promClient.Gauge({
+  name: 'iptv_devices_online',
+  help: 'Online IPTV monitored devices by type',
+  labelNames: ['type'],
+  registers: [metricsRegistry],
+});
+
+const deviceOfflineGauge = new promClient.Gauge({
+  name: 'iptv_devices_offline',
+  help: 'Offline IPTV monitored devices by type',
+  labelNames: ['type'],
+  registers: [metricsRegistry],
+});
+
+const autoFixStatusGauge = new promClient.Gauge({
+  name: 'iptv_auto_fix_total',
+  help: 'Auto-fix log count by status',
+  labelNames: ['status'],
+  registers: [metricsRegistry],
+});
+
+const notificationStatusGauge = new promClient.Gauge({
+  name: 'iptv_notifications_total',
+  help: 'Notification count by status and source',
+  labelNames: ['status', 'source'],
+  registers: [metricsRegistry],
+});
+
+const notificationErrorCategoryGauge = new promClient.Gauge({
+  name: 'iptv_notification_errors_by_category',
+  help: 'Offline/error notification count by error category and source',
+  labelNames: ['category', 'source', 'status'],
+  registers: [metricsRegistry],
+});
+
+const notificationErrorDeviceGauge = new promClient.Gauge({
+  name: 'iptv_error_devices',
+  help: 'Offline/error notifications grouped by affected device or channel',
+  labelNames: ['device', 'room', 'category', 'source', 'status'],
+  registers: [metricsRegistry],
+});
+
+const mlPredictionGauge = new promClient.Gauge({
+  name: 'iptv_ml_predictions_total',
+  help: 'Total ML prediction records',
+  registers: [metricsRegistry],
+});
+
+const mlServiceHealthGauge = new promClient.Gauge({
+  name: 'iptv_ml_service_up',
+  help: 'ML service reachability from backend, 1 means reachable',
+  registers: [metricsRegistry],
+});
 
 // ==================== AUTO-NOTIFICATION SYSTEM CACHE ====================
 // Separate caches for tracking device status changes and creating notifications
@@ -189,6 +384,37 @@ const corsOptions = {
   preflightContinue: false,
 };
 
+// ==================== SECURITY MIDDLEWARE ====================
+// Helmet with a conservative config so it does NOT break the existing
+// cross-domain (Vercel <-> Railway) CORS/OAuth setup. CSP and the
+// cross-origin policies are intentionally disabled here because the
+// CORS headers and COOP/COEP are managed manually below.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+}));
+
+// Strict limiter for auth endpoints (anti brute-force on login/register/oauth)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many authentication attempts. Please try again later." },
+});
+
+// Loose global limiter for the whole API surface (anti abuse / light DoS).
+// Generous max so normal dashboard polling is never throttled.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many requests. Please slow down." },
+});
+
 // ==================== MIDDLEWARE SETUP ====================
 // Preflight CORS must use corsOptions to avoid wildcard
 app.options(/.*/, cors(corsOptions));
@@ -240,12 +466,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(cors(corsOptions));
 
+// Loose global rate limit across the whole API surface
+app.use('/api', apiLimiter);
+
 // Route middleware
-app.use("/api/auth/login", loginRoute);
-app.use("/api/auth/register", registerRoute);
+// Strict auth limiter only on credential endpoints. The Google OAuth *callback*
+// is mounted before the initiation route so it is NOT subject to authLimiter
+// (avoids breaking the redirect-back step under repeated logins).
+app.use("/api/auth/login", authLimiter, loginRoute);
+app.use("/api/auth/register", authLimiter, registerRoute);
 app.use("/api/auth/verify", verifyRoute);
-app.use("/api/auth/google", googleAuthRoute);
 app.use("/api/auth/google/callback", googleCallbackRoute);
+app.use("/api/auth/google", authLimiter, googleAuthRoute);
 app.use("/api/user/profile", userProfileRoute);
 app.use("/api/user/password", userPasswordRoute);
 app.use("/api/user/avatar", userAvatarRoute);
@@ -261,6 +493,7 @@ app.use('/api/staff', require('./api/staff/route'));
 app.use('/api/ml/health', require('./api/ml/health/route'));
 app.use('/api/ml/model', require('./api/ml/model/route'));
 app.use('/api/ml/predict', require('./api/ml/predict/route'));
+app.use('/api/ml/feedback', require('./api/ml/feedback/route'));
 
 // Notifications routes
 app.use('/api/notifications/stats', require('./api/notifications/stats/route'));
@@ -275,16 +508,17 @@ app.use('/api/backup', require('./api/backup/route'));
 // Monitoring & Sync Status (for production verification)
 app.use('/api/monitoring', require('./api/monitoring/route'));
 
-// Channel-specific Auto Fix route
-app.use('/api/channels', require('./api/channels/route'));
+// Channel-specific Auto Fix route — DISABLED to unify channel auto-fix on the
+// single working implementation below (app.get/app.post "/api/channels/:id/auto-fix").
+// The modular router shadowed those handlers and its POST path was broken (it built
+// an unsaved temp notification then called manualTriggerAutoFix, which requires a
+// persisted ML prediction and always threw). The server.js handlers below are
+// admin-protected and write device-tagged auto_fix_logs.
+// app.use('/api/channels', require('./api/channels/route'));
 
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-
-  if (req.path.includes('/auth/')) {
-    console.log("Cookies:", req.cookies);
-  }
 
   next();
 });
@@ -375,6 +609,31 @@ const authenticateToken = (req, res, next) => {
       authenticated: false
     });
   }
+};
+
+// Requires an authenticated ADMIN user. Must run AFTER authenticateToken.
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      error: "Admin privileges required.",
+      authenticated: !!req.user
+    });
+  }
+  next();
+};
+
+// Guard for /api/internal/* endpoints: allow trusted server-to-server callers
+// (e.g. the Telegram bot) that present the shared internal token, otherwise
+// fall back to normal user authentication. Prevents these data endpoints from
+// being world-readable while keeping the in-process bot working.
+const requireInternalOrAuth = (req, res, next) => {
+  const internalToken = req.headers['x-internal-token'];
+  if (internalToken && internalToken === getInternalToken()) {
+    req.internal = true;
+    return next();
+  }
+  return authenticateToken(req, res, next);
 };
 
 const trackRequestMetrics = (serviceType) => {
@@ -482,7 +741,17 @@ async function getAllChannelsFromDB() {
       return hasRequiredFields;
     });
 
-    return validChannels;
+    // DB channel docs don't store a slug, but slug-based lookups (auto-fix
+    // history/trigger, detail pages) rely on it. Attach the SAME slug the list
+    // endpoint exposes so c.slug matching works consistently.
+    return validChannels.map((c) => ({
+      ...c,
+      slug:
+        c.slug ||
+        (c.channelName
+          ? c.channelName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
+          : null),
+    }));
   } catch (error) {
     console.error("Error fetching channels from database:", error);
     return [];
@@ -501,6 +770,40 @@ async function getSystemContext() {
     const tvOnline = Array.from(tvStatus.values()).filter(s => s.status === 'online').length;
     const chromecastOnline = Array.from(chromecastStatus.values()).filter(s => s.isOnline).length;
 
+    let mlFeedback = {
+      total: 0,
+      approved: 0,
+      pendingReview: 0,
+      readyForRetrain: false,
+      topCorrectedCategories: []
+    };
+
+    try {
+      const { client } = await connectDB();
+      const db = client.db('iptv');
+      const [totalFeedback, approvedFeedback, pendingFeedback, topCorrectedCategories] = await Promise.all([
+        db.collection('ml_feedback').countDocuments(),
+        db.collection('ml_feedback').countDocuments({ status: 'approved' }),
+        db.collection('ml_feedback').countDocuments({ status: 'pending_review' }),
+        db.collection('ml_feedback').aggregate([
+          { $match: { correctedCategory: { $exists: true, $ne: null } } },
+          { $group: { _id: '$correctedCategory', count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 5 }
+        ]).toArray()
+      ]);
+
+      mlFeedback = {
+        total: totalFeedback,
+        approved: approvedFeedback,
+        pendingReview: pendingFeedback,
+        readyForRetrain: approvedFeedback >= 50,
+        topCorrectedCategories
+      };
+    } catch (feedbackError) {
+      console.warn('Error getting ML feedback context:', feedbackError.message);
+    }
+
     return {
       totalChannels: channels.length,
       channelOnline,
@@ -511,10 +814,195 @@ async function getSystemContext() {
       totalChromecasts: chromecasts.length,
       chromecastOnline,
       chromecastOffline: chromecasts.length - chromecastOnline,
+      mlFeedback,
     };
   } catch (error) {
     console.error('Error getting system context:', error);
     return null;
+  }
+}
+
+function normalizePrometheusCategory(category) {
+  if (!category) return 'Uncategorized';
+  return String(category).replace(/^Katagori-/i, 'Kategori-');
+}
+
+async function updatePrometheusMetrics() {
+  backendInfoGauge.set(
+    { service: 'iptv-backend', node_env: process.env.NODE_ENV || 'development' },
+    1
+  );
+
+  const [channels, tvs, chromecasts] = await Promise.all([
+    getAllChannelsFromDB(),
+    getHospitalityTVs(),
+    getChromecastDevices()
+  ]);
+
+  const channelOnline = channels.filter(c => channelStatus.get(c.id)?.status === 'online').length;
+  const tvOnline = tvs.filter(tv => tvStatus.get(tv.roomNo)?.status === 'online').length;
+  const chromecastOnline = chromecasts.filter(device => chromecastStatus.get(device.idCast)?.isOnline).length;
+
+  const deviceStats = [
+    { type: 'channel', total: channels.length, online: channelOnline },
+    { type: 'tv', total: tvs.length, online: tvOnline },
+    { type: 'chromecast', total: chromecasts.length, online: chromecastOnline },
+  ];
+
+  deviceTotalGauge.reset();
+  deviceOnlineGauge.reset();
+  deviceOfflineGauge.reset();
+  deviceStats.forEach(({ type, total, online }) => {
+    deviceTotalGauge.set({ type }, total);
+    deviceOnlineGauge.set({ type }, online);
+    deviceOfflineGauge.set({ type }, Math.max(total - online, 0));
+  });
+
+  try {
+    const { client } = await connectDB();
+    const db = client.db('iptv');
+
+    const autoFixStatuses = ['pending', 'executing', 'success', 'failed', 'cancelled'];
+    const autoFixCounts = await db.collection('auto_fix_logs').aggregate([
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]).toArray();
+    const autoFixByStatus = Object.fromEntries(autoFixCounts.map(item => [item._id || 'unknown', item.count]));
+
+    autoFixStatusGauge.reset();
+    autoFixStatuses.forEach(status => {
+      autoFixStatusGauge.set({ status }, autoFixByStatus[status] || 0);
+    });
+    Object.entries(autoFixByStatus).forEach(([status, count]) => {
+      if (!autoFixStatuses.includes(status)) {
+        autoFixStatusGauge.set({ status }, count);
+      }
+    });
+
+    const notificationCounts = await db.collection('notifications').aggregate([
+      {
+        $group: {
+          _id: {
+            status: { $ifNull: ['$currentStatus', 'unknown'] },
+            source: { $ifNull: ['$source', 'unknown'] }
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    notificationStatusGauge.reset();
+    notificationCounts.forEach(item => {
+      notificationStatusGauge.set(
+        { status: item._id.status || 'unknown', source: item._id.source || 'unknown' },
+        item.count
+      );
+    });
+
+    const errorNotificationMatch = {
+      type: 'offline',
+    };
+
+    const notificationErrorCategories = await db.collection('notifications').aggregate([
+      { $match: errorNotificationMatch },
+      {
+        $group: {
+          _id: {
+            category: { $ifNull: ['$errorCategory', 'Uncategorized'] },
+            source: { $ifNull: ['$source', 'unknown'] },
+            status: { $ifNull: ['$reportStatus', { $ifNull: ['$currentStatus', 'unknown'] }] },
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]).toArray();
+
+    notificationErrorCategoryGauge.reset();
+    notificationErrorCategories.forEach(item => {
+      notificationErrorCategoryGauge.set(
+        {
+          category: normalizePrometheusCategory(item._id.category),
+          source: item._id.source || 'unknown',
+          status: item._id.status || 'unknown',
+        },
+        item.count
+      );
+    });
+
+    const notificationErrorDevices = await db.collection('notifications').aggregate([
+      { $match: errorNotificationMatch },
+      {
+        $project: {
+          source: { $ifNull: ['$source', 'unknown'] },
+          status: { $ifNull: ['$reportStatus', { $ifNull: ['$currentStatus', 'unknown'] }] },
+          category: { $ifNull: ['$errorCategory', 'Uncategorized'] },
+          room: {
+            $cond: [
+              { $ne: ['$roomNo', null] },
+              { $toString: '$roomNo' },
+              'N/A',
+            ],
+          },
+          device: {
+            $ifNull: [
+              '$deviceName',
+              {
+                $ifNull: [
+                  '$channelName',
+                  {
+                    $cond: [
+                      { $ne: ['$roomNo', null] },
+                      { $concat: ['Room ', { $toString: '$roomNo' }] },
+                      'Unknown Device',
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            device: '$device',
+            room: '$room',
+            category: '$category',
+            source: '$source',
+            status: '$status',
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: 100 },
+    ]).toArray();
+
+    notificationErrorDeviceGauge.reset();
+    notificationErrorDevices.forEach(item => {
+      notificationErrorDeviceGauge.set(
+        {
+          device: item._id.device || 'Unknown Device',
+          room: item._id.room || 'N/A',
+          category: normalizePrometheusCategory(item._id.category),
+          source: item._id.source || 'unknown',
+          status: item._id.status || 'unknown',
+        },
+        item.count
+      );
+    });
+
+    const mlPredictionCount = await db.collection('ml_predictions').countDocuments();
+    mlPredictionGauge.set(mlPredictionCount);
+  } catch (error) {
+    console.warn('[Prometheus] Failed to collect MongoDB-backed metrics:', error.message);
+  }
+
+  try {
+    const mlBaseUrl = process.env.ML_SERVICE_URL || 'http://ml-service:8080';
+    await axios.get(`${mlBaseUrl.replace(/\/$/, '')}/health`, { timeout: 2500 });
+    mlServiceHealthGauge.set(1);
+  } catch (error) {
+    mlServiceHealthGauge.set(0);
   }
 }
 
@@ -636,6 +1124,489 @@ function findRelevantFAQs(query, limit = 3) {
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+}
+
+function extractRequestedCategoryNumber(message) {
+  const match = String(message || '')
+    .toLowerCase()
+    .match(/(?:kategori|katagori|category)\s*-?\s*(\d{1,2})/i);
+
+  if (!match) return null;
+
+  const categoryNumber = Number(match[1]);
+  if (!Number.isInteger(categoryNumber) || categoryNumber < 1 || categoryNumber > 14) {
+    return null;
+  }
+
+  return categoryNumber;
+}
+
+function isCategoryCountQuery(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const hasCategoryIntent =
+    lowerMsg.includes('kategori') ||
+    lowerMsg.includes('katagori') ||
+    lowerMsg.includes('category');
+  const hasCountIntent =
+    lowerMsg.includes('berapa') ||
+    lowerMsg.includes('jumlah') ||
+    lowerMsg.includes('total') ||
+    lowerMsg.includes('ada') ||
+    lowerMsg.includes('count');
+  const hasErrorIntent =
+    lowerMsg.includes('error') ||
+    lowerMsg.includes('eror') ||
+    lowerMsg.includes('notifikasi') ||
+    lowerMsg.includes('notification') ||
+    lowerMsg.includes('active') ||
+    lowerMsg.includes('aktif');
+
+  return hasCategoryIntent && hasCountIntent && (hasErrorIntent || extractRequestedCategoryNumber(message) !== null);
+}
+
+async function buildCategoryCountResponse(message) {
+  if (!isCategoryCountQuery(message)) return null;
+
+  const categoryNumber = extractRequestedCategoryNumber(message);
+  const { client } = await connectDB();
+  const db = client.db('iptv');
+  const notifications = db.collection('notifications');
+
+  if (!categoryNumber) {
+    const categoryCounts = await notifications.aggregate([
+      {
+        $match: {
+          errorCategory: { $exists: true, $ne: null, $ne: '' },
+        },
+      },
+      {
+        $group: {
+          _id: '$errorCategory',
+          total: { $sum: 1 },
+          active: {
+            $sum: {
+              $cond: [
+                { $in: ['$reportStatus', ['resolved', 'closed']] },
+                0,
+                1,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { active: -1, total: -1 } },
+      { $limit: 8 },
+    ]).toArray();
+
+    if (categoryCounts.length === 0) {
+      return 'Belum ada notifikasi yang memiliki kategori error di database.';
+    }
+
+    const summary = categoryCounts
+      .map((item) => `${normalizePrometheusCategory(item._id)}: ${item.active} aktif dari ${item.total} total`)
+      .join('; ');
+
+    return `Ringkasan kategori error saat ini: ${summary}. Angka aktif menghitung notifikasi yang belum berstatus resolved atau closed.`;
+  }
+
+  const categoryLabel = `Kategori-${categoryNumber}`;
+  const categoryRegex = new RegExp(`^(Kategori|Katagori)-${categoryNumber}$`, 'i');
+  const categoryMatch = { errorCategory: categoryRegex };
+  const activeCategoryMatch = {
+    ...categoryMatch,
+    reportStatus: { $nin: ['resolved', 'closed'] },
+  };
+
+  const [total, active, bySource, byStatus, topDevices] = await Promise.all([
+    notifications.countDocuments(categoryMatch),
+    notifications.countDocuments(activeCategoryMatch),
+    notifications.aggregate([
+      { $match: categoryMatch },
+      {
+        $group: {
+          _id: { $ifNull: ['$source', 'unknown'] },
+          total: { $sum: 1 },
+          active: {
+            $sum: {
+              $cond: [
+                { $in: ['$reportStatus', ['resolved', 'closed']] },
+                0,
+                1,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { active: -1, total: -1 } },
+    ]).toArray(),
+    notifications.aggregate([
+      { $match: categoryMatch },
+      {
+        $group: {
+          _id: { $ifNull: ['$reportStatus', 'unknown'] },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+    notifications.aggregate([
+      { $match: categoryMatch },
+      {
+        $project: {
+          deviceName: {
+            $ifNull: [
+              '$deviceName',
+              {
+                $ifNull: [
+                  '$channelName',
+                  {
+                    $cond: [
+                      { $ne: ['$roomNo', null] },
+                      { $concat: ['Room ', { $toString: '$roomNo' }] },
+                      'Unknown Device',
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          roomNo: '$roomNo',
+          source: { $ifNull: ['$source', 'unknown'] },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            deviceName: '$deviceName',
+            roomNo: '$roomNo',
+            source: '$source',
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: 3 },
+    ]).toArray(),
+  ]);
+
+  const sourceSummary = bySource.length
+    ? bySource.map((item) => `${item._id}: ${item.active} aktif/${item.total} total`).join(', ')
+    : 'belum ada sumber perangkat';
+  const statusSummary = byStatus.length
+    ? byStatus.map((item) => `${item._id}: ${item.count}`).join(', ')
+    : 'belum ada status';
+  const deviceSummary = topDevices.length
+    ? topDevices.map((item) => {
+        const room = item._id.roomNo ? ` room ${item._id.roomNo}` : '';
+        return `${item._id.deviceName}${room} (${item.count}x)`;
+      }).join(', ')
+    : 'belum ada device yang tercatat';
+
+  return `Saat ini ada ${active} notifikasi ${categoryLabel} yang masih aktif dari ${total} total notifikasi ${categoryLabel}. Breakdown source: ${sourceSummary}. Status: ${statusSummary}. Device/channel terbanyak: ${deviceSummary}.`;
+}
+
+function getRecentConversationText(conversationHistory = []) {
+  if (!Array.isArray(conversationHistory)) return '';
+  return conversationHistory
+    .slice(-4)
+    .map((item) => String(item?.content || ''))
+    .join(' ')
+    .toLowerCase();
+}
+
+function detectDeviceType(message, conversationHistory = []) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const recentText = getRecentConversationText(conversationHistory);
+  const text = `${lowerMsg} ${recentText}`;
+
+  if (lowerMsg.includes('channel') || (!lowerMsg.includes('tv') && !lowerMsg.includes('chromecast') && recentText.includes('channel'))) {
+    return 'channel';
+  }
+  if (
+    lowerMsg.includes('chromecast') ||
+    lowerMsg.includes('cast') ||
+    (!lowerMsg.includes('channel') && !lowerMsg.includes('tv') && recentText.includes('chromecast'))
+  ) {
+    return 'chromecast';
+  }
+  if (
+    lowerMsg.includes('hospitality') ||
+    lowerMsg.includes('kamar') ||
+    lowerMsg.includes('room') ||
+    /\btv\b/.test(lowerMsg) ||
+    (!lowerMsg.includes('channel') && !lowerMsg.includes('chromecast') && (recentText.includes(' tv ') || recentText.includes('kamar')))
+  ) {
+    return 'tv';
+  }
+
+  if (text.includes('device') || text.includes('perangkat')) return 'all';
+  return null;
+}
+
+function hasListIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('apa saja') ||
+    lowerMsg.includes('mana saja') ||
+    lowerMsg.includes('daftar') ||
+    lowerMsg.includes('list') ||
+    lowerMsg.includes('sebutkan') ||
+    lowerMsg.includes('tampilkan') ||
+    lowerMsg.includes('yang mana')
+  );
+}
+
+function hasCountIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('berapa') ||
+    lowerMsg.includes('jumlah') ||
+    lowerMsg.includes('total') ||
+    lowerMsg.includes('count')
+  );
+}
+
+function hasOfflineIntent(message, conversationHistory = []) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const recentText = getRecentConversationText(conversationHistory);
+  const text = `${lowerMsg} ${recentText}`;
+  return (
+    text.includes('offline') ||
+    text.includes('offlien') ||
+    text.includes('mati') ||
+    text.includes('down') ||
+    text.includes('tidak aktif') ||
+    text.includes('error') ||
+    text.includes('eror')
+  );
+}
+
+function hasOnlineIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('online') ||
+    lowerMsg.includes('hidup') ||
+    lowerMsg.includes('aktif') ||
+    lowerMsg.includes('healthy')
+  );
+}
+
+function formatLimitedList(items, limit = 10) {
+  if (!items.length) return 'tidak ada data';
+  const shown = items.slice(0, limit);
+  const suffix = items.length > limit ? `, dan ${items.length - limit} lainnya` : '';
+  return `${shown.join(', ')}${suffix}`;
+}
+
+async function ensureStatusCacheForChat(deviceType) {
+  const tasks = [];
+
+  if ((deviceType === 'channel' || deviceType === 'all') && channelStatus.size === 0) {
+    tasks.push(checkAllChannelsStatus(true));
+  }
+  if ((deviceType === 'tv' || deviceType === 'all') && tvStatus.size === 0) {
+    tasks.push(checkAllTVStatus(true));
+  }
+  if ((deviceType === 'chromecast' || deviceType === 'all') && chromecastStatus.size === 0) {
+    tasks.push(checkAllChromecastsStatus(true));
+  }
+
+  if (tasks.length > 0) {
+    await Promise.allSettled(tasks);
+  }
+}
+
+async function buildDeviceStatusChatResponse(message, conversationHistory = [], systemContext = null) {
+  const deviceType = detectDeviceType(message, conversationHistory);
+  const asksList = hasListIntent(message);
+  const asksCount = hasCountIntent(message);
+  const asksOffline = hasOfflineIntent(message, conversationHistory);
+  const asksOnline = hasOnlineIntent(message);
+  const asksStatus =
+    asksList ||
+    asksCount ||
+    asksOffline ||
+    asksOnline ||
+    String(message || '').toLowerCase().includes('status');
+
+  if (!deviceType || !asksStatus) return null;
+
+  await ensureStatusCacheForChat(deviceType);
+
+  const rows = [];
+
+  if (deviceType === 'channel' || deviceType === 'all') {
+    const channels = await getAllChannelsFromDB();
+    const offline = channels
+      .filter((channel) => (channelStatus.get(channel.id)?.status || 'offline') !== 'online')
+      .map((channel) => `${channel.channelName || `Channel ${channel.channelNumber || channel.id}`}${channel.channelNumber ? ` (#${channel.channelNumber})` : ''}`);
+    const online = channels
+      .filter((channel) => (channelStatus.get(channel.id)?.status || 'offline') === 'online')
+      .map((channel) => `${channel.channelName || `Channel ${channel.channelNumber || channel.id}`}${channel.channelNumber ? ` (#${channel.channelNumber})` : ''}`);
+    rows.push({ label: 'Channel', total: channels.length, online: online.length, offline: offline.length, onlineItems: online, offlineItems: offline });
+  }
+
+  if (deviceType === 'tv' || deviceType === 'all') {
+    const tvs = await getHospitalityTVs();
+    const offline = tvs
+      .filter((tv) => (tvStatus.get(tv.roomNo)?.status || 'offline') !== 'online')
+      .map((tv) => `Room ${tv.roomNo}${tv.tvName ? ` (${tv.tvName})` : ''}`);
+    const online = tvs
+      .filter((tv) => (tvStatus.get(tv.roomNo)?.status || 'offline') === 'online')
+      .map((tv) => `Room ${tv.roomNo}${tv.tvName ? ` (${tv.tvName})` : ''}`);
+    rows.push({ label: 'TV Hospitality', total: tvs.length, online: online.length, offline: offline.length, onlineItems: online, offlineItems: offline });
+  }
+
+  if (deviceType === 'chromecast' || deviceType === 'all') {
+    const chromecasts = await getChromecastDevices();
+    const offline = chromecasts
+      .filter((device) => !chromecastStatus.get(device.idCast)?.isOnline)
+      .map((device) => `${device.deviceName || `Chromecast ${device.idCast}`}${device.roomNo ? ` room ${device.roomNo}` : ''}`);
+    const online = chromecasts
+      .filter((device) => !!chromecastStatus.get(device.idCast)?.isOnline)
+      .map((device) => `${device.deviceName || `Chromecast ${device.idCast}`}${device.roomNo ? ` room ${device.roomNo}` : ''}`);
+    rows.push({ label: 'Chromecast', total: chromecasts.length, online: online.length, offline: offline.length, onlineItems: online, offlineItems: offline });
+  }
+
+  if (rows.length === 0) return null;
+
+  if (asksList) {
+    const targetOffline = asksOffline || !asksOnline;
+    return rows
+      .map((row) => {
+        const items = targetOffline ? row.offlineItems : row.onlineItems;
+        const statusText = targetOffline ? 'offline/mati' : 'online/aktif';
+        return `${row.label} ${statusText}: ${items.length} dari ${row.total}. ${formatLimitedList(items)}.`;
+      })
+      .join(' ');
+  }
+
+  if (asksCount || asksOffline || asksOnline) {
+    return rows
+      .map((row) => {
+        if (asksOnline && !asksOffline) {
+          return `${row.label}: ${row.online} online dari ${row.total}.`;
+        }
+        return `${row.label}: ${row.offline} offline/mati dari ${row.total}.`;
+      })
+      .join(' ');
+  }
+
+  const contextSummary = systemContext
+    ? `Status umum: Channel ${systemContext.channelOnline}/${systemContext.totalChannels} online, TV ${systemContext.tvOnline}/${systemContext.totalTVs} online, Chromecast ${systemContext.chromecastOnline}/${systemContext.totalChromecasts} online.`
+    : '';
+  return contextSummary || null;
+}
+
+async function buildStaffChatResponse(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const isStaffQuery =
+    lowerMsg.includes('staff') ||
+    lowerMsg.includes('teknisi') ||
+    lowerMsg.includes('petugas') ||
+    lowerMsg.includes('bertugas') ||
+    lowerMsg.includes('assignment') ||
+    lowerMsg.includes('assigned');
+
+  if (!isStaffQuery) return null;
+
+  const { client } = await connectDB();
+  const db = client.db('iptv');
+  const staff = await db.collection('staff').find({}).sort({ isActive: -1, 'stats.successRate': -1, name: 1 }).limit(100).toArray();
+
+  if (staff.length === 0) {
+    return 'Belum ada data staff yang tercatat di database. Admin bisa menambah dan mengelola staff melalui menu Staff.';
+  }
+
+  const active = staff.filter((member) => member.isActive !== false);
+  const inactive = staff.length - active.length;
+  const topStaff = active
+    .slice(0, 5)
+    .map((member) => {
+      const stats = member.stats || {};
+      const assigned = stats.totalAssigned ?? 0;
+      const resolved = stats.totalResolved ?? 0;
+      const successRate = Number(stats.successRate ?? 0).toFixed(1);
+      return `${member.name || 'Unnamed'} (${member.department || 'No dept'}, assigned ${assigned}, resolved ${resolved}, success ${successRate}%)`;
+    })
+    .join('; ');
+
+  return `Saat ini ada ${active.length} staff aktif dan ${inactive} inactive. Staff aktif teratas: ${topStaff || 'belum ada staff aktif'}. Detail lengkap, edit status, dan performa ada di menu Staff.`;
+}
+
+async function buildNotificationChatResponse(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const isNotificationQuery =
+    lowerMsg.includes('notification') ||
+    lowerMsg.includes('notifikasi') ||
+    lowerMsg.includes('alert') ||
+    lowerMsg.includes('insiden') ||
+    lowerMsg.includes('active') ||
+    lowerMsg.includes('aktif');
+
+  if (!isNotificationQuery || lowerMsg.includes('kategori')) return null;
+
+  const { client } = await connectDB();
+  const db = client.db('iptv');
+  const notifications = db.collection('notifications');
+  const [total, byStatus, bySource] = await Promise.all([
+    notifications.countDocuments(),
+    notifications.aggregate([
+      { $group: { _id: { $ifNull: ['$reportStatus', 'unknown'] }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+    notifications.aggregate([
+      { $group: { _id: { $ifNull: ['$source', 'unknown'] }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]).toArray(),
+  ]);
+
+  const active = byStatus
+    .filter((item) => !['resolved', 'closed'].includes(item._id))
+    .reduce((sum, item) => sum + item.count, 0);
+  const statusSummary = byStatus.map((item) => `${item._id}: ${item.count}`).join(', ');
+  const sourceSummary = bySource.map((item) => `${item._id}: ${item.count}`).join(', ');
+
+  return `Total notifikasi adalah ${total}, dengan ${active} yang masih aktif/belum resolved atau closed. Breakdown status: ${statusSummary || 'belum ada status'}. Breakdown source: ${sourceSummary || 'belum ada source'}.`;
+}
+
+function buildAccountHelpResponse(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  const isAccountQuery =
+    lowerMsg.includes('account') ||
+    lowerMsg.includes('akun') ||
+    lowerMsg.includes('profile') ||
+    lowerMsg.includes('profil') ||
+    lowerMsg.includes('password') ||
+    lowerMsg.includes('avatar');
+
+  if (!isAccountQuery) return null;
+
+  if (lowerMsg.includes('password') || lowerMsg.includes('sandi')) {
+    return 'Untuk ganti password, buka menu Account, masuk ke bagian Password/Security, isi password lama dan password baru, lalu simpan. Jika login Google OAuth, password lokal mungkin tidak tersedia dan perubahan password dilakukan lewat akun Google.';
+  }
+
+  if (lowerMsg.includes('avatar') || lowerMsg.includes('foto')) {
+    return 'Untuk mengganti avatar, buka menu Account lalu upload gambar profil baru. Backend akan menyimpan file avatar melalui endpoint profile/avatar, lalu Topbar menampilkan avatar terbaru.';
+  }
+
+  return 'Menu Account dipakai untuk melihat profil user, memperbarui data akun, mengganti password, dan mengganti avatar. Sesi login JWT sengaja berlaku 1 jam demi keamanan.';
+}
+
+async function buildOperationalChatResponse(message, conversationHistory = [], systemContext = null) {
+  const resolvers = [
+    () => buildDeviceStatusChatResponse(message, conversationHistory, systemContext),
+    () => buildStaffChatResponse(message),
+    () => buildNotificationChatResponse(message),
+    () => buildAccountHelpResponse(message),
+  ];
+
+  for (const resolver of resolvers) {
+    const response = await resolver();
+    if (response) return response;
+  }
+
+  return null;
 }
 
 // ==================== FAQ DATA CATEGORY ====================
@@ -866,7 +1837,7 @@ const FAQ_DATA = [
     issue: "Reset Configuration",
     solutions: [
       "Restart Chromecast",
-      "Reset Chromecast dibawa ke ruang server pencet tombol poer 10 Detik",
+      "Reset Chromecast dibawa ke ruang server pencet tombol power 10 detik",
       "Factory reset melalui aplikasi Google Home",
       "Cabut kabel power selama 30 detik lalu hubungkan kembali",
     ],
@@ -1095,7 +2066,7 @@ function generateDummyChannelStatus(deviceId) {
     return cached.status;
   }
 
-  const isOnline = Math.random() < CHANNEL_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const isOnline = isSeededOnline(deviceId, "channel", CHANNEL_STATUS_CONFIG.ONLINE_PROBABILITY);
   let status;
 
   if (!isOnline) {
@@ -1120,41 +2091,32 @@ function generateDummyChannelStatus(deviceId) {
       errorCategory: "Kategori-7" // Connection Failure for offline devices
     };
   } else {
-    const signalLevel = Math.floor(Math.random() *
-      (CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.max - CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min + 1))
-      + CHANNEL_STATUS_CONFIG.SIGNAL_LEVEL_RANGE.min;
+    const performance = buildPerformanceMetrics(pickPerformanceProfile(deviceId, "channel"));
+    const signalLevel = performance.signalStrength;
 
     const responseTime = Math.floor(Math.random() *
       (CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.max - CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min + 1))
       + CHANNEL_STATUS_CONFIG.RESPONSE_TIME_RANGE.min;
 
-    const bitrate = Math.floor(Math.random() *
-      (CHANNEL_STATUS_CONFIG.BITRATE_RANGE.max - CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min + 1))
-      + CHANNEL_STATUS_CONFIG.BITRATE_RANGE.min;
+    const bitrate = performance.bitrate;
 
     const networkStats = {
       sent: (Math.random() * 15 + 5).toFixed(2), // 5-20 GB
       received: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
-      latency: Math.floor(Math.random() * 30) + 10, // 10-40ms
-      jitter: Math.floor(Math.random() * 12) + 2, // 2-14ms
+      latency: performance.metrics.latency,
+      jitter: performance.metrics.jitter,
       ttl: Math.floor(Math.random() * 10) + 58, // 58-67
-      packetLoss: parseFloat((Math.random() * 0.8).toFixed(2)), // 0-0.8%
-      bandwidth: Math.floor(Math.random() * 80) + 40, // 40-120 Mbps
+      packetLoss: performance.metrics.packetLoss,
+      bandwidth: performance.bandwidth,
       hops: Math.floor(Math.random() * 18) + 8, // 8-25 hops
       signalStrength: signalLevel,
       bitrate: bitrate,
-      error: parseFloat((Math.random() * 2).toFixed(2)), // 0-2%
-      recoveryTime: parseFloat((Math.random() * 6 + 1).toFixed(1)) // 1-7s
+      error: performance.metrics.error,
+      recoveryTime: performance.metrics.recoveryTime,
+      performanceProfile: performance.profile
     };
 
-    // Generate labeled metrics using metricCalculator
-    const metrics = {
-      packetLoss: networkStats.packetLoss,
-      latency: networkStats.latency,
-      jitter: networkStats.jitter,
-      error: networkStats.error,
-      recoveryTime: networkStats.recoveryTime
-    };
+    const metrics = performance.metrics;
 
     // Device is online, so generate labeled metrics normally
     const labeledMetrics = generateLabeledMetrics(metrics, false);
@@ -1168,6 +2130,7 @@ function generateDummyChannelStatus(deviceId) {
       bitrate: bitrate,
       networkStats: networkStats,
       labeledMetrics: labeledMetrics,
+      performanceProfile: performance.profile,
       errorCategory: errorCategory
     };
   }
@@ -1186,7 +2149,7 @@ function generateDummyTVStatus(deviceId = 'default') {
     return cached.status;
   }
 
-  const isOnline = Math.random() < TV_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const isOnline = isSeededOnline(deviceId, "tv", TV_STATUS_CONFIG.ONLINE_PROBABILITY);
   const responseTime = isOnline
     ? Math.floor(
       Math.random() *
@@ -1196,7 +2159,8 @@ function generateDummyTVStatus(deviceId = 'default') {
     ) + TV_STATUS_CONFIG.RESPONSE_TIME_RANGE.min
     : null;
 
-  const signalLevel = isOnline ? Math.floor(Math.random() * 30) + 70 : null; // 70-100%
+  const performance = isOnline ? buildPerformanceMetrics(pickPerformanceProfile(deviceId, "tv")) : null;
+  const signalLevel = isOnline ? performance.signalStrength : null;
   const model = ["Samsung Hospitality"][Math.floor(Math.random() * 3)];
 
   let networkStats = null;
@@ -1207,26 +2171,20 @@ function generateDummyTVStatus(deviceId = 'default') {
     networkStats = {
       sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
       received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB
-      latency: Math.floor(Math.random() * 40) + 8, // 8-48ms
-      jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
+      latency: performance.metrics.latency,
+      jitter: performance.metrics.jitter,
       ttl: Math.floor(Math.random() * 8) + 60, // 60-67
-      packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
-      bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
+      packetLoss: performance.metrics.packetLoss,
+      bandwidth: performance.bandwidth,
       hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
-      signalStrength: Math.floor(Math.random() * 30) + 70, // 70-100%
-      bitrate: Math.floor(Math.random() * 5000) + 3000, // 3000-8000 kbps
-      error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3%
-      recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s
+      signalStrength: performance.signalStrength,
+      bitrate: performance.bitrate,
+      error: performance.metrics.error,
+      recoveryTime: performance.metrics.recoveryTime,
+      performanceProfile: performance.profile
     };
 
-    // Generate labeled metrics using metricCalculator
-    const metrics = {
-      packetLoss: networkStats.packetLoss,
-      latency: networkStats.latency,
-      jitter: networkStats.jitter,
-      error: networkStats.error,
-      recoveryTime: networkStats.recoveryTime
-    };
+    const metrics = performance.metrics;
 
     labeledMetrics = generateLabeledMetrics(metrics, false); // isOffline = false
     errorCategory = getErrorCategory(metrics);
@@ -1252,6 +2210,7 @@ function generateDummyTVStatus(deviceId = 'default') {
     lastChecked: new Date().toISOString(),
     networkStats: networkStats,
     labeledMetrics: labeledMetrics,
+    performanceProfile: performance?.profile || "offline",
     errorCategory: errorCategory
   };
 
@@ -1268,10 +2227,17 @@ function generateDummyChromecastStatus(deviceId = 'default') {
     return cached.status;
   }
 
-  const isOnline = Math.random() < CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY;
+  const isOnline = isSeededOnline(deviceId, "chromecast", CHROMECAST_STATUS_CONFIG.ONLINE_PROBABILITY);
   let returnValue;
 
   if (!isOnline) {
+    const offlineMetrics = {
+      packetLoss: 0,
+      latency: 0,
+      jitter: 0,
+      error: 0,
+      recoveryTime: 0
+    };
     returnValue = {
       isPingable: false,
       isOnline: false,
@@ -1280,12 +2246,32 @@ function generateDummyChromecastStatus(deviceId = 'default') {
       responseTime: null,
       lastSeen: null,
       error: ["Device unreachable", "Network timeout", "Connection refused"][Math.floor(Math.random() * 3)],
+      networkStats: null,
+      labeledMetrics: generateLabeledMetrics(offlineMetrics, true),
+      performanceProfile: "offline",
+      errorCategory: "Kategori-1",
     };
   } else {
-    const signalLevel = Math.floor(Math.random() * 50) - 70;
-    const baseSpeed = Math.max(10, 100 + signalLevel);
-    const speed = baseSpeed + Math.floor(Math.random() * 20) - 10;
-    const responseTime = Math.max(5, Math.abs(signalLevel) - 20 + Math.floor(Math.random() * 50));
+    const performance = buildPerformanceMetrics(pickPerformanceProfile(deviceId, "chromecast"));
+    const signalLevel = -1 * Math.max(25, Math.min(85, 100 - performance.signalStrength));
+    const speed = performance.bandwidth;
+    const responseTime = performance.metrics.latency;
+    const networkStats = {
+      sent: randomFloat(1, 10),
+      received: randomFloat(1, 8),
+      latency: performance.metrics.latency,
+      jitter: performance.metrics.jitter,
+      ttl: randomInt(58, 67),
+      packetLoss: performance.metrics.packetLoss,
+      bandwidth: performance.bandwidth,
+      hops: randomInt(8, 26),
+      signalStrength: signalLevel,
+      bitrate: performance.bitrate,
+      error: performance.metrics.error,
+      recoveryTime: performance.metrics.recoveryTime,
+      performanceProfile: performance.profile
+    };
+    const labeledMetrics = generateLabeledMetrics(performance.metrics, false);
     returnValue = {
       isPingable: true,
       isOnline: true,
@@ -1294,6 +2280,10 @@ function generateDummyChromecastStatus(deviceId = 'default') {
       responseTime: Math.max(1, responseTime),
       lastSeen: new Date().toISOString(),
       error: null,
+      networkStats,
+      labeledMetrics,
+      performanceProfile: performance.profile,
+      errorCategory: getErrorCategory(performance.metrics),
     };
   }
 
@@ -1301,7 +2291,19 @@ function generateDummyChromecastStatus(deviceId = 'default') {
   return returnValue;
 }
 
-function generateHistoricalNetworkData(timeRange, isOnline) {
+function varyMetric(baseValue, variation = 0.2, decimals = 0) {
+  const numericBase = Number(baseValue) || 0;
+  if (numericBase <= 0) return 0;
+
+  const varied = numericBase + (Math.random() - 0.5) * numericBase * variation;
+  const safeValue = Math.max(0, varied);
+
+  return decimals > 0
+    ? parseFloat(safeValue.toFixed(decimals))
+    : Math.floor(safeValue);
+}
+
+function generateHistoricalNetworkData(timeRange, isOnline, baseMetrics = {}) {
   const now = new Date();
   const data = [];
 
@@ -1326,6 +2328,20 @@ function generateHistoricalNetworkData(timeRange, isOnline) {
       intervalMs = 3600000;
   }
 
+  const metrics = {
+    latency: baseMetrics.latency ?? 25,
+    bandwidth: baseMetrics.bandwidth ?? 75,
+    jitter: baseMetrics.jitter ?? 8,
+    packetLoss: baseMetrics.packetLoss ?? 0.5,
+    sent: baseMetrics.sent ?? 4.5,
+    received: baseMetrics.received ?? 2.8,
+    hops: baseMetrics.hops ?? 14,
+    signalStrength: baseMetrics.signalStrength ?? 80,
+    bitrate: baseMetrics.bitrate ?? 5000,
+    error: baseMetrics.error ?? 0,
+    recoveryTime: baseMetrics.recoveryTime ?? 0,
+  };
+
   for (let i = points - 1; i >= 0; i--) {
     const time = new Date(now.getTime() - i * intervalMs);
     const timeStr =
@@ -1339,15 +2355,18 @@ function generateHistoricalNetworkData(timeRange, isOnline) {
 
     data.push({
       time: timeStr,
-      latency: isOnline ? Math.floor(Math.random() * 20) + 10 : 0,
-      bandwidth: isOnline ? Math.floor(Math.random() * 80) + 40 : 0,
-      jitter: isOnline ? Math.floor(Math.random() * 8) + 1 : 0,
-      packetLoss: isOnline ? parseFloat((Math.random() * 0.6).toFixed(2)) : 0,
-      sent: isOnline ? parseFloat((Math.random() * 6 + 2).toFixed(2)) : 0,
-      received: isOnline ? parseFloat((Math.random() * 5 + 1).toFixed(2)) : 0,
-      hops: isOnline ? Math.floor(Math.random() * 10) + 8 : 0,
-      signalStrength: isOnline ? Math.floor(Math.random() * 25) + 75 : 0,
-      bitrate: isOnline ? Math.floor(Math.random() * 4000) + 3500 : 0,
+      timestamp: time.toISOString(),
+      latency: isOnline ? varyMetric(metrics.latency, 0.22) : 0,
+      bandwidth: isOnline ? varyMetric(metrics.bandwidth, 0.22) : 0,
+      jitter: isOnline ? varyMetric(metrics.jitter, 0.22) : 0,
+      packetLoss: isOnline ? varyMetric(metrics.packetLoss, 0.22, 2) : 0,
+      sent: isOnline ? varyMetric(metrics.sent, 0.22, 2) : 0,
+      received: isOnline ? varyMetric(metrics.received, 0.22, 2) : 0,
+      hops: isOnline ? varyMetric(metrics.hops, 0.18) : 0,
+      signalStrength: isOnline ? varyMetric(metrics.signalStrength, 0.12) : 0,
+      bitrate: isOnline ? varyMetric(metrics.bitrate, 0.18) : 0,
+      error: isOnline ? varyMetric(metrics.error, 0.22, 2) : 0,
+      recoveryTime: isOnline ? varyMetric(metrics.recoveryTime, 0.22, 1) : 0,
     });
   }
 
@@ -1787,7 +2806,6 @@ async function checkAllChromecastsStatus(skipNotifications = false) {
 app.post("/api/auth/logout", (req, res) => {
   try {
     console.log("=== LOGOUT REQUEST START ===");
-    console.log("Current cookies:", req.cookies);
 
     const cookieConfigs = [
       {
@@ -1873,6 +2891,30 @@ app.post("/api/chat/query", authenticateToken, async (req, res) => {
     );
 
     const systemContext = await getSystemContext();
+
+    const categoryCountResponse = await buildCategoryCountResponse(message);
+    if (categoryCountResponse) {
+      return res.json({
+        success: true,
+        response: categoryCountResponse,
+        detailedInfo: null,
+        relatedFAQs: [],
+        systemContext: systemContext,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const operationalResponse = await buildOperationalChatResponse(message, conversationHistory, systemContext);
+    if (operationalResponse) {
+      return res.json({
+        success: true,
+        response: operationalResponse,
+        detailedInfo: null,
+        relatedFAQs: [],
+        systemContext: systemContext,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     if (isSimpleStatusQuery) {
       let quickResponse = '';
@@ -2083,6 +3125,24 @@ app.post("/api/chat/notification-query", authenticateToken, async (req, res) => 
 
 // ==================== GEMINI AI FUNCTIONS ====================
 
+const PROJECT_TECHNICAL_KNOWLEDGE = `
+IPTV Monitoring System technical knowledge:
+- Architecture: Frontend Next.js App Router, Backend Express, and Python FastAPI ML service. Frontend calls the backend with JWT auth; backend calls ML service for prediction/training; MongoDB Atlas is the primary data source.
+- Runtime services: backend exposes REST APIs, ML service exposes /api/predict and /api/model/*, Nginx routes traffic, Jenkins deploys backend branches, Prometheus/Grafana observe container/backend metrics.
+- Authentication: users log in with email/password or Google OAuth. JWT lifetime is intentionally 1 hour. Tokens are used by frontend requests through Authorization Bearer and cookie fallback.
+- Roles: admin can access operational/admin pages such as Channels, Chromecast, Hospitality, ML Dashboard, QoS, Users, Staff, and Auto-Fix APIs. Guest access is limited.
+- Data source: MongoDB collections include channel data, Chromecast devices, hospitality TVs, users, staff, notifications, and auto_fix_logs. Supabase is only an optional mirror/sync target, not the authoritative production database.
+- Monitoring data: current thesis/demo mode uses generated real-looking monitoring metrics. This is intentionally kept as real-time simulation and can later be replaced by real network probing.
+- Menu flow: Dashboard summarizes system health; Channels monitors channel streams; Chromecast monitors casting devices; Hospitality monitors room TVs; Notifications lists incidents; QoS summarizes quality metrics; ML Dashboard shows model/training/prediction and auto-fix analytics.
+- ML service: classifies Indonesian complaint/error text into Kategori-1 to Kategori-14 using trained artifacts. Training uploads Excel data, then the backend polls training status/model info through ML gateway endpoints.
+- Category examples: Chromecast offline/no device found is Kategori-1; TV no TV found is Kategori-2; TV LAN unplug/offline is Kategori-3; weak Chromecast signal is Kategori-4; channel error playing is Kategori-5; player error is Kategori-6; channel connection failure is Kategori-7; Chromecast setup required is Kategori-8; TV weak signal is Kategori-9; Chromecast autoplay disabled is Kategori-10; channel unplayable is Kategori-11; channel weak signal is Kategori-12; socket exception is Kategori-13; TV unable to tune is Kategori-14.
+- Auto-fix flow: notifications or manual detail-page triggers send issue text/category to backend; backend asks ML service, resolves recommended action, writes auto_fix_logs with device metadata, and executes only automatic actions. On-site/manual categories should remain visible as manual review instead of pretending to be auto-fixed.
+- Pending queue: pending/executing auto_fix_logs are shown in ML Dashboard. Old pending logs, External/Unknown categories, or action=analyze generally mean no executable automatic action was attached and the item needs manual review or cleanup.
+- Adaptive learning: admin feedback is collected in ml_feedback. Approved feedback is the source for future retraining together with the original Excel dataset. The model should only be promoted when evaluation improves or admin approves it.
+- Notifications vs totals: total notifications can include historical/resolved records, while active counts only represent current unresolved/offline/error records.
+- Grafana/Prometheus: infrastructure dashboards show container health, CPU, memory, network, backend metrics, notification error categories, and affected devices/channels. Grafana does not replace the app UI; it is for ops observability.
+`;
+
 function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
   const lowerMsg = userMessage.toLowerCase();
   const isCategoryQuery =
@@ -2105,24 +3165,84 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     (lowerMsg.includes('semua') && lowerMsg.includes('menu')) ||
     lowerMsg === 'halo' ||
     lowerMsg === 'hi';
+  const isTechnicalProjectQuery =
+    lowerMsg.includes('flow') ||
+    lowerMsg.includes('alur') ||
+    lowerMsg.includes('arsitektur') ||
+    lowerMsg.includes('backend') ||
+    lowerMsg.includes('frontend') ||
+    lowerMsg.includes('database') ||
+    lowerMsg.includes('mongodb') ||
+    lowerMsg.includes('supabase') ||
+    lowerMsg.includes('login') ||
+    lowerMsg.includes('jwt') ||
+    lowerMsg.includes('auth') ||
+    lowerMsg.includes('jenkins') ||
+    lowerMsg.includes('grafana') ||
+    lowerMsg.includes('prometheus') ||
+    lowerMsg.includes('qos') ||
+    lowerMsg.includes('notification') ||
+    lowerMsg.includes('notifikasi') ||
+    lowerMsg.includes('pending') ||
+    lowerMsg.includes('queue') ||
+    lowerMsg.includes('training') ||
+    lowerMsg.includes('model') ||
+    lowerMsg.includes('ml service') ||
+    lowerMsg.includes('machine learning') ||
+    lowerMsg.includes('auto fix') ||
+    lowerMsg.includes('auto-fix') ||
+    lowerMsg.includes('autofix') ||
+    lowerMsg.includes('data real') ||
+    lowerMsg.includes('simulasi') ||
+    lowerMsg.includes('math.random');
 
   if (isCategoryQuery) {
     return `Kamu teknisi IPTV yang menjelaskan pertanyaan teknis tentang kategori error di sistem monitoring.
 
     ${userMessage}
 
+    Knowledge base:
+    ${PROJECT_TECHNICAL_KNOWLEDGE}
+
     Jelaskan dengan singkat dan jelas:
     1. Kategori error dalam sistem ini ditentukan oleh jenis issue atau pesan error, bukan oleh jumlah device offline.
-    2. Berikan contoh kategori yang umum untuk channel error: Error Playing biasanya masuk Kategori-5, Error_Player_Error_Err biasanya masuk Kategori-6, Connection_Failure biasanya masuk Kategori-7.
+    2. Gunakan mapping kategori dari knowledge base jika pertanyaan menyebut device atau gejala tertentu.
     3. Jika pesan error tidak spesifik, beri tahu bahwa perlu lihat error log atau pesan error persis untuk menentukan kategori.
 
     Jawab dalam 3-4 kalimat, tanpa format list panjang, fokus ke definisi kategori dan kapan error dapat masuk ke masing-masing kategori.`;
+  }
+
+  if (isTechnicalProjectQuery) {
+    return `Kamu asisten teknikal IPTV Monitoring System. Jawab pertanyaan user berdasarkan knowledge base ini, jangan mengarang detail di luar sistem.
+
+    User bertanya: "${userMessage}"
+
+    Knowledge base:
+    ${PROJECT_TECHNICAL_KNOWLEDGE}
+
+    Current live context:
+    - Channels online/offline: ${systemContext.channelOnline}/${systemContext.channelOffline}
+    - TVs online/offline: ${systemContext.tvOnline}/${systemContext.tvOffline}
+    - Chromecasts online/offline: ${systemContext.chromecastOnline}/${systemContext.chromecastOffline}
+    - ML feedback total/approved/pending: ${systemContext.mlFeedback?.total ?? 0}/${systemContext.mlFeedback?.approved ?? 0}/${systemContext.mlFeedback?.pendingReview ?? 0}
+    - Feedback ready for retrain: ${systemContext.mlFeedback?.readyForRetrain ? 'yes' : 'no'}
+
+    Aturan jawaban:
+    - Jika user bertanya flow, jelaskan urutan dari UI -> backend -> database/ML -> response UI.
+    - Jika user bertanya ML/kategori, sebut kategori yang relevan dan jelaskan bahwa confidence/model menentukan rekomendasi.
+    - Jika user bertanya pending/auto-fix, bedakan automatic fix, manual/on-site fix, dan stale queue.
+    - Jika user bertanya ML belajar sendiri, jelaskan feedback admin -> ml_feedback -> approved dataset -> retraining/evaluation -> model promotion.
+    - Jika user bertanya data monitoring, jelaskan bahwa saat ini thesis/demo mode memakai data simulasi real-time yang dibuat realistis.
+    - Jawab ringkas 4-7 kalimat, teknis tapi tetap mudah dipahami.`;
   }
 
   if (isGeneralHelp) {
     return `Kamu asisten virtual IPTV Monitoring System yang ramah dan informatif.
 
     User bertanya: "${userMessage}"
+
+    Knowledge base:
+    ${PROJECT_TECHNICAL_KNOWLEDGE}
 
     Berikan pengenalan sistem dengan struktur:
 
@@ -2241,6 +3361,9 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
     return `Kamu asisten IPTV yang menjelaskan fitur AI/ML.
 
   ${userMessage}
+
+  Knowledge base:
+  ${PROJECT_TECHNICAL_KNOWLEDGE}
 
   **🤖 ML DASHBOARD:**
   Dashboard Machine Learning untuk prediksi dan auto-fix:
@@ -2441,6 +3564,9 @@ function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversation
   }
 
   return `Kamu teknisi IPTV yang ngobrol santai tapi informatif.
+
+  Knowledge base:
+  ${PROJECT_TECHNICAL_KNOWLEDGE}
 
   ${knowledgeContext}${historyContext}
 
@@ -2776,15 +3902,10 @@ app.get("/api/channels/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channel.id) || {
-      status: "offline",
-      responseTime: null,
-      lastChecked: null,
-      error: "Not checked",
-      signalLevel: null,
-      bitrate: null,
-      networkStats: null
-    };
+    const status = channelStatus.get(channel.id) || generateDummyChannelStatus(channel.id);
+    if (!channelStatus.has(channel.id)) {
+      channelStatus.set(channel.id, status);
+    }
 
     const internationalChannels = await getInternationalChannels();
     const channelType = internationalChannels.find(
@@ -2802,6 +3923,9 @@ app.get("/api/channels/:id", authenticateToken, async (req, res) => {
       isOnline: status.status === "online",
       isPingable: status.status === "online",
       statusText: status.status === "online" ? "Online" : "Offline",
+      networkStats: status.networkStats || null,
+      performanceProfile: status.performanceProfile || (status.status === "online" ? "good" : "offline"),
+      errorCategory: status.errorCategory || null,
       metrics: status.networkStats ? {
         packetLoss: status.networkStats.packetLoss || 0,
         latency: status.networkStats.latency || 0,
@@ -2949,10 +4073,10 @@ app.get("/api/channels/:id/metrics", authenticateToken, async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channel.id) || {
-      status: "offline",
-      networkStats: null
-    };
+    const status = channelStatus.get(channel.id) || generateDummyChannelStatus(channel.id);
+    if (!channelStatus.has(channel.id)) {
+      channelStatus.set(channel.id, status);
+    }
 
     if (!status.networkStats) {
       const fallbackMetrics = {
@@ -3019,9 +4143,12 @@ app.get("/api/channels/:id/history", authenticateToken, async (req, res) => {
       });
     }
 
-    const status = channelStatus.get(channel.id) || { status: "offline" };
+    const status = channelStatus.get(channel.id) || generateDummyChannelStatus(channel.id);
+    if (!channelStatus.has(channel.id)) {
+      channelStatus.set(channel.id, status);
+    }
     const isOnline = status.status === "online";
-    const historicalData = generateHistoricalNetworkData(timeRange, isOnline);
+    const historicalData = generateHistoricalNetworkData(timeRange, isOnline, status.networkStats);
 
     res.json({
       success: true,
@@ -3391,12 +4518,10 @@ app.get("/api/hospitality/tvs/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const tvStatusData = tvStatus.get(tv.roomNo) || {
-      status: "offline",
-      responseTime: null,
-      error: "Not checked",
-      lastChecked: null,
-    };
+    const tvStatusData = tvStatus.get(tv.roomNo) || generateDummyTVStatus(tv.roomNo);
+    if (!tvStatus.has(tv.roomNo)) {
+      tvStatus.set(tv.roomNo, tvStatusData);
+    }
 
     const enhancedTV = {
       ...tv,
@@ -3411,6 +4536,23 @@ app.get("/api/hospitality/tvs/:id", authenticateToken, async (req, res) => {
       isOnline: tvStatusData.status === "online",
       isPingable: tvStatusData.status === "online",
       statusText: tvStatusData.status === "online" ? "Online" : "Offline",
+      networkStats: tvStatusData.networkStats || null,
+      labeledMetrics: tvStatusData.labeledMetrics || null,
+      performanceProfile: tvStatusData.performanceProfile || (tvStatusData.status === "online" ? "good" : "offline"),
+      errorCategory: tvStatusData.errorCategory || null,
+      metrics: tvStatusData.networkStats ? {
+        packetLoss: tvStatusData.networkStats.packetLoss || 0,
+        latency: tvStatusData.networkStats.latency || 0,
+        jitter: tvStatusData.networkStats.jitter || 0,
+        error: tvStatusData.networkStats.error || 0,
+        recoveryTime: tvStatusData.networkStats.recoveryTime || 0,
+      } : {
+        packetLoss: 0,
+        latency: 0,
+        jitter: 0,
+        error: 0,
+        recoveryTime: 0,
+      },
       lastCheckedFormatted: tvStatusData.lastChecked ?
         new Date(tvStatusData.lastChecked).toLocaleString() : "Never"
     };
@@ -3606,45 +4748,26 @@ app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) 
       });
     }
 
-    const tvStatusData = tvStatus.get(tv.roomNo);
-    const isOnline = tvStatusData?.status === "online";
+    const tvStatusData = tvStatus.get(tv.roomNo) || generateDummyTVStatus(tv.roomNo);
+    if (!tvStatus.has(tv.roomNo)) {
+      tvStatus.set(tv.roomNo, tvStatusData);
+    }
 
-    const generateTVNetworkMetrics = (isOnline) => {
-      if (!isOnline) {
-        return {
-          sent: "0.00",
-          received: "0.00",
-          latency: 0,
-          jitter: 0,
-          ttl: 0,
-          packetLoss: 100,
-          bandwidth: 0,
-          hops: 0,
-          error: 0,
-          recoveryTime: 0
-        };
-      }
-
-      const baseLatency = Math.floor(Math.random() * 35) + 8; // 8-43ms
-      const baseJitter = Math.max(1, Math.floor(baseLatency * 0.15) + Math.floor(Math.random() * 8)); // 15% of latency + variation
-      const baseBandwidth = Math.floor(Math.random() * 70) + 25; // 25-95 Mbps
-      const basePacketLoss = parseFloat((Math.random() * 1.2).toFixed(2)); // 0-1.2%
-
-      return {
-        sent: (Math.random() * 12 + 3).toFixed(2), // 3-15 GB
-        received: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
-        latency: baseLatency,
-        jitter: baseJitter,
-        ttl: Math.floor(Math.random() * 8) + 60, // 60-67 (realistic TTL)
-        packetLoss: basePacketLoss,
-        bandwidth: baseBandwidth,
-        hops: Math.floor(Math.random() * 12) + 10, // 10-21 hops
-        error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3% error rate
-        recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s recovery time
-      };
+    const metrics = tvStatusData.networkStats || {
+      sent: "0.00",
+      received: "0.00",
+      latency: 0,
+      jitter: 0,
+      ttl: 0,
+      packetLoss: 100,
+      bandwidth: 0,
+      hops: 0,
+      signalStrength: 0,
+      bitrate: 0,
+      error: 0,
+      recoveryTime: 0,
+      performanceProfile: "offline"
     };
-
-    const metrics = generateTVNetworkMetrics(isOnline);
 
     res.json({
       success: true,
@@ -3652,8 +4775,11 @@ app.get("/api/hospitality/tvs/:id/metrics", authenticateToken, async (req, res) 
         ...metrics,
         timestamp: new Date().toISOString(),
         roomNo: tv.roomNo,
-        isOnline: isOnline,
-        signalLevel: tvStatusData?.signalLevel || null
+        isOnline: tvStatusData.status === "online",
+        signalLevel: tvStatusData.signalLevel || null,
+        labeledMetrics: tvStatusData.labeledMetrics || null,
+        performanceProfile: tvStatusData.performanceProfile || metrics.performanceProfile || "offline",
+        errorCategory: tvStatusData.errorCategory || null
       }
     });
   } catch (error) {
@@ -3714,66 +4840,12 @@ app.get("/api/hospitality/tvs/:id/history", authenticateToken, async (req, res) 
       });
     }
 
-    const tvStatusData = tvStatus.get(tv.roomNo);
+    const tvStatusData = tvStatus.get(tv.roomNo) || generateDummyTVStatus(tv.roomNo);
+    if (!tvStatus.has(tv.roomNo)) {
+      tvStatus.set(tv.roomNo, tvStatusData);
+    }
     const isOnline = tvStatusData?.status === "online";
-
-    const generateTVHistoricalData = (timeRange, isOnline) => {
-      const now = new Date();
-      const data = [];
-
-      let points, intervalMs;
-      switch (timeRange) {
-        case '1h':
-          points = 60;
-          intervalMs = 60000; // 1 minute
-          break;
-        case '24h':
-          points = 24;
-          intervalMs = 3600000; // 1 hour
-          break;
-        case '7d':
-          points = 7;
-          intervalMs = 86400000; // 1 day
-          break;
-        default:
-          points = 24;
-          intervalMs = 3600000;
-      }
-
-      const baseLatency = isOnline ? 22 : 0;
-      const baseBandwidth = isOnline ? 65 : 0;
-      const baseJitter = isOnline ? 6 : 0;
-      const basePacketLoss = isOnline ? 0.3 : 0;
-      const baseSent = isOnline ? 4.5 : 0;
-      const baseReceived = isOnline ? 2.8 : 0;
-      const baseHops = isOnline ? 14 : 0;
-
-      for (let i = points - 1; i >= 0; i--) {
-        const time = new Date(now.getTime() - i * intervalMs);
-        const timeStr = timeRange === '1h'
-          ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
-          : timeRange === '24h'
-            ? `${String(time.getHours()).padStart(2, '0')}:00`
-            : time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-        const variation = 0.2;
-        data.push({
-          time: timeStr,
-          timestamp: time.toISOString(),
-          latency: Math.max(0, Math.floor(baseLatency + (Math.random() - 0.5) * baseLatency * variation)),
-          bandwidth: Math.max(0, Math.floor(baseBandwidth + (Math.random() - 0.5) * baseBandwidth * variation)),
-          jitter: Math.max(0, Math.floor(baseJitter + (Math.random() - 0.5) * baseJitter * variation)),
-          packetLoss: Math.max(0, parseFloat((basePacketLoss + (Math.random() - 0.5) * basePacketLoss * variation).toFixed(2))),
-          sent: Math.max(0, parseFloat((baseSent + (Math.random() - 0.5) * baseSent * variation).toFixed(2))),
-          received: Math.max(0, parseFloat((baseReceived + (Math.random() - 0.5) * baseReceived * variation).toFixed(2))),
-          hops: Math.max(0, Math.floor(baseHops + (Math.random() - 0.5) * baseHops * variation))
-        });
-      }
-
-      return data;
-    };
-
-    const historicalData = generateTVHistoricalData(timeRange, isOnline);
+    const historicalData = generateHistoricalNetworkData(timeRange, isOnline, tvStatusData.networkStats);
 
     res.json({
       success: true,
@@ -4207,16 +5279,10 @@ app.get("/api/chromecast/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    const deviceStatus = chromecastStatus.get(device.idCast) || {
-      isPingable: false,
-      isOnline: false,
-      signalLevel: null,
-      speed: null,
-      responseTime: null,
-      lastSeen: null,
-      error: "Not checked",
-      lastChecked: null,
-    };
+    const deviceStatus = chromecastStatus.get(device.idCast) || generateDummyChromecastStatus(device.idCast);
+    if (!chromecastStatus.has(device.idCast)) {
+      chromecastStatus.set(device.idCast, deviceStatus);
+    }
 
     const enhancedDevice = {
       ...device,
@@ -4225,6 +5291,23 @@ app.get("/api/chromecast/:id", authenticateToken, async (req, res) => {
       type: device.type || "Chromecast",
       model: device.model || "Google Chromecast",
       statusText: deviceStatus.isOnline ? "Online" : "Offline",
+      networkStats: deviceStatus.networkStats || null,
+      labeledMetrics: deviceStatus.labeledMetrics || null,
+      performanceProfile: deviceStatus.performanceProfile || (deviceStatus.isOnline ? "good" : "offline"),
+      errorCategory: deviceStatus.errorCategory || null,
+      metrics: deviceStatus.networkStats ? {
+        packetLoss: deviceStatus.networkStats.packetLoss || 0,
+        latency: deviceStatus.networkStats.latency || 0,
+        jitter: deviceStatus.networkStats.jitter || 0,
+        error: deviceStatus.networkStats.error || 0,
+        recoveryTime: deviceStatus.networkStats.recoveryTime || 0,
+      } : {
+        packetLoss: 0,
+        latency: 0,
+        jitter: 0,
+        error: 0,
+        recoveryTime: 0,
+      },
       signalQuality: deviceStatus.signalLevel ?
         (deviceStatus.signalLevel > -50 ? "Excellent" :
           deviceStatus.signalLevel > -60 ? "Good" :
@@ -4463,52 +5546,42 @@ app.get("/api/chromecast/:id/metrics", authenticateToken, async (req, res) => {
       });
     }
 
-    // Perform real-time connectivity check
-    const result = await checkChromecastConnectivity(device.ipAddr);
-    const statusInfo = {
-      ...result,
-      lastChecked: new Date().toISOString(),
-    };
-
-    // Update device status in memory
-    chromecastStatus.set(device.idCast, statusInfo);
-
-    // Enhanced response with network stats integration
-    let networkStats = null;
-
-    if (result.isOnline && CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
-      // Generate realistic network stats when device is online
-      networkStats = {
-        sent: (Math.random() * 8 + 2).toFixed(2), // 2-10 GB
-        received: (Math.random() * 6 + 1).toFixed(2), // 1-7 GB
-        latency: result.responseTime || Math.floor(Math.random() * 40) + 8, // 8-48ms
-        jitter: Math.floor(Math.random() * 15) + 1, // 1-16ms
-        ttl: Math.floor(Math.random() * 8) + 60, // 60-67
-        packetLoss: parseFloat((Math.random() * 1.5).toFixed(2)), // 0-1.5%
-        bandwidth: Math.floor(Math.random() * 60) + 30, // 30-90 Mbps
-        hops: Math.floor(Math.random() * 15) + 12, // 12-26 hops
-        signalStrength: result.signalLevel || Math.floor(Math.random() * 50) - 70, // -70 to -20 dBm
-        speed: result.speed || Math.max(1, (result.signalLevel || -50) + Math.floor(Math.random() * 20) - 10),
-        error: parseFloat((Math.random() * 3).toFixed(2)), // 0-3% error rate
-        recoveryTime: parseFloat((Math.random() * 8 + 1).toFixed(1)) // 1-9s recovery time
-      };
+    const statusInfo = chromecastStatus.get(device.idCast) || generateDummyChromecastStatus(device.idCast);
+    if (!chromecastStatus.has(device.idCast)) {
+      chromecastStatus.set(device.idCast, statusInfo);
     }
 
-    const enhancedResponse = {
-      ...device,
-      ...statusInfo,
-      id: device.idCast,
-      deviceName: device.deviceName,
-      isOnline: result.isOnline,
-      isPingable: result.isPingable,
-      statusText: result.isOnline ? "Online" : "Offline",
-      networkStats: networkStats
+    const networkStats = statusInfo.networkStats || {
+      sent: "0.00",
+      received: "0.00",
+      latency: 0,
+      jitter: 0,
+      ttl: 0,
+      packetLoss: 100,
+      bandwidth: 0,
+      hops: 0,
+      signalStrength: 0,
+      bitrate: 0,
+      error: 0,
+      recoveryTime: 0,
+      performanceProfile: "offline"
     };
 
     res.json({
       success: true,
       message: "Chromecast device metrics retrieved successfully",
-      data: enhancedResponse,
+      data: {
+        ...networkStats,
+        timestamp: new Date().toISOString(),
+        id: device.idCast,
+        deviceName: device.deviceName,
+        isOnline: statusInfo.isOnline,
+        isPingable: statusInfo.isPingable,
+        signalLevel: statusInfo.signalLevel || null,
+        labeledMetrics: statusInfo.labeledMetrics || null,
+        performanceProfile: statusInfo.performanceProfile || networkStats.performanceProfile || "offline",
+        errorCategory: statusInfo.errorCategory || null
+      },
       checkedAt: new Date().toISOString()
     });
 
@@ -4616,66 +5689,16 @@ app.get("/api/chromecast/:id/history", authenticateToken, async (req, res) => {
       });
     }
 
-    const deviceStatus = chromecastStatus.get(device.idCast);
+    const deviceStatus = chromecastStatus.get(device.idCast) || generateDummyChromecastStatus(device.idCast);
+    if (!chromecastStatus.has(device.idCast)) {
+      chromecastStatus.set(device.idCast, deviceStatus);
+    }
     const isOnline = deviceStatus?.isOnline || false;
-
-    const generateHistoricalData = (timeRange, isOnline) => {
-      const now = new Date();
-      const data = [];
-
-      let points, intervalMs;
-      switch (timeRange) {
-        case '1h':
-          points = 60;
-          intervalMs = 60000; // 1 minute
-          break;
-        case '24h':
-          points = 24;
-          intervalMs = 3600000; // 1 hour
-          break;
-        case '7d':
-          points = 7;
-          intervalMs = 86400000; // 1 day
-          break;
-        default:
-          points = 24;
-          intervalMs = 3600000;
-      }
-
-      const baseLatency = isOnline ? 25 : 0;
-      const baseBandwidth = isOnline ? 75 : 0;
-      const baseJitter = isOnline ? 8 : 0;
-      const basePacketLoss = isOnline ? 0.5 : 0;
-      const baseSent = isOnline ? 3.2 : 0;
-      const baseReceived = isOnline ? 2.1 : 0;
-      const baseSpeed = isOnline ? 85 : 0;
-
-      for (let i = points - 1; i >= 0; i--) {
-        const time = new Date(now.getTime() - i * intervalMs);
-        const timeStr = timeRange === '1h'
-          ? `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`
-          : timeRange === '24h'
-            ? `${String(time.getHours()).padStart(2, '0')}:00`
-            : time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-        const variation = 0.3;
-        data.push({
-          time: timeStr,
-          timestamp: time.toISOString(),
-          latency: Math.max(0, Math.floor(baseLatency + (Math.random() - 0.5) * baseLatency * variation)),
-          bandwidth: Math.max(0, Math.floor(baseBandwidth + (Math.random() - 0.5) * baseBandwidth * variation)),
-          jitter: Math.max(0, Math.floor(baseJitter + (Math.random() - 0.5) * baseJitter * variation)),
-          packetLoss: Math.max(0, parseFloat((basePacketLoss + (Math.random() - 0.5) * basePacketLoss * variation).toFixed(2))),
-          sent: Math.max(0, parseFloat((baseSent + (Math.random() - 0.5) * baseSent * variation).toFixed(2))),
-          received: Math.max(0, parseFloat((baseReceived + (Math.random() - 0.5) * baseReceived * variation).toFixed(2))),
-          speed: Math.max(0, Math.floor(baseSpeed + (Math.random() - 0.5) * baseSpeed * variation))
-        });
-      }
-
-      return data;
-    };
-
-    const historicalData = generateHistoricalData(timeRange, isOnline);
+    const historicalData = generateHistoricalNetworkData(timeRange, isOnline, {
+      ...deviceStatus.networkStats,
+      signalStrength: deviceStatus.networkStats?.signalStrength || deviceStatus.signalLevel,
+      speed: deviceStatus.speed,
+    });
 
     res.json({
       success: true,
@@ -4883,7 +5906,7 @@ app.post("/api/telegram/test-notification", authenticateToken, async (req, res) 
 });
 
 // ==================== INTERNAL ENDPOINTS (FOR TELEGRAM BOT) ====================
-app.get("/api/internal/channels", async (req, res) => {
+app.get("/api/internal/channels", requireInternalOrAuth, async (req, res) => {
   try {
     const userAgent = req.get('User-Agent');
     if (!userAgent || !userAgent.includes('node')) {
@@ -4918,7 +5941,7 @@ app.get("/api/internal/channels", async (req, res) => {
   }
 });
 
-app.get("/api/internal/chromecast", async (req, res) => {
+app.get("/api/internal/chromecast", requireInternalOrAuth, async (req, res) => {
   try {
     const userAgent = req.get('User-Agent');
     if (!userAgent || !userAgent.includes('node')) {
@@ -4957,7 +5980,7 @@ app.get("/api/internal/chromecast", async (req, res) => {
   }
 });
 
-app.get("/api/internal/hospitality/tvs", async (req, res) => {
+app.get("/api/internal/hospitality/tvs", requireInternalOrAuth, async (req, res) => {
   try {
     const userAgent = req.get('User-Agent');
     if (!userAgent || !userAgent.includes('node')) {
@@ -5124,7 +6147,7 @@ app.get("/api/config", authenticateToken, async (req, res) => {
   });
 });
 
-app.post("/api/config/tv-status-mode", async (req, res) => {
+app.post("/api/config/tv-status-mode", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
 
@@ -5159,7 +6182,7 @@ app.post("/api/config/tv-status-mode", async (req, res) => {
   }
 });
 
-app.post("/api/config/channel-status-mode", async (req, res) => {
+app.post("/api/config/channel-status-mode", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
 
@@ -5195,7 +6218,7 @@ app.post("/api/config/channel-status-mode", async (req, res) => {
   }
 });
 
-app.post("/api/config/chromecast-status-mode", async (req, res) => {
+app.post("/api/config/chromecast-status-mode", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { useDummyStatus } = req.body;
 
@@ -5246,7 +6269,7 @@ const {
  * POST /api/chromecast/:id/auto-fix
  * Execute auto-fix for a Chromecast device using ML prediction
  */
-app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
+app.post("/api/chromecast/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id: deviceId } = req.params;
     const { text, issue, category } = req.body;
@@ -5309,8 +6332,13 @@ app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
     const fixLog = await createAutoFixLog({
       notificationId: notificationId,
       mlPredictionId: null,
+      deviceType: 'chromecast',
+      deviceId: String(device.idCast || device._id),
+      deviceName: device.deviceName || (device.roomNo ? `Room ${device.roomNo}` : null),
+      roomNo: device.roomNo != null ? device.roomNo : null,
+      source: 'chromecast',
       fixType: 'automatic',
-      category: mlResult.predicted_label,
+      category: resolveLogCategory(mlResult.predicted_label, category),
       action: recommendedFix.action,
       description: recommendedFix.description,
       confidence: mlResult.probabilities?.[0]?.probability || 0,
@@ -5386,7 +6414,7 @@ app.post("/api/chromecast/:id/auto-fix", async (req, res) => {
  * GET /api/chromecast/:id/auto-fix?history=true
  * Get auto-fix history for a Chromecast device
  */
-app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
+app.get("/api/chromecast/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { history } = req.query;
 
@@ -5421,10 +6449,16 @@ app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
     const { client } = await connectDB();
     const db = client.db('iptv');
 
-    // Find all auto-fix logs for this chromecast
+    // Find all auto-fix logs for this chromecast.
+    // Primary lookup by stable device key; fall back to the legacy synthetic
+    // notificationId pattern so existing logs remain visible.
+    const chromecastKey = String(device.idCast || device._id);
     const autoFixLogs = await db.collection('auto_fix_logs')
       .find({
-        notificationId: { $regex: `^chromecast-${device.idCast || device._id}-` }
+        $or: [
+          { deviceType: 'chromecast', deviceId: chromecastKey },
+          { notificationId: { $regex: `^chromecast-${device.idCast || device._id}-` } }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -5465,7 +6499,7 @@ app.get("/api/chromecast/:id/auto-fix", async (req, res) => {
  * POST /api/channels/:id/auto-fix
  * Execute auto-fix for a Channel using ML prediction
  */
-app.post("/api/channels/:id/auto-fix", async (req, res) => {
+app.post("/api/channels/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id: channelId } = req.params;
     const { text, issue, category } = req.body;
@@ -5523,8 +6557,13 @@ app.post("/api/channels/:id/auto-fix", async (req, res) => {
     const fixLog = await createAutoFixLog({
       notificationId: notificationId,
       mlPredictionId: null,
+      deviceType: 'channel',
+      deviceId: String(channel.id),
+      deviceName: channel.channelName || channel.name || null,
+      roomNo: null,
+      source: 'channel',
       fixType: 'automatic',
-      category: mlResult.predicted_label,
+      category: resolveLogCategory(mlResult.predicted_label, category),
       action: recommendedFix.action,
       description: recommendedFix.description,
       confidence: mlResult.probabilities?.[0]?.probability || 0,
@@ -5602,7 +6641,7 @@ app.post("/api/channels/:id/auto-fix", async (req, res) => {
  * GET /api/channels/:id/auto-fix?history=true
  * Get auto-fix history for a Channel
  */
-app.get("/api/channels/:id/auto-fix", async (req, res) => {
+app.get("/api/channels/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { history } = req.query;
 
@@ -5633,10 +6672,15 @@ app.get("/api/channels/:id/auto-fix", async (req, res) => {
     const { client } = await connectDB();
     const db = client.db('iptv');
 
-    // Find all auto-fix logs for this channel
+    // Find all auto-fix logs for this channel.
+    // Primary lookup by stable device key; legacy notificationId pattern as fallback.
+    const channelKey = String(channel.id);
     const autoFixLogs = await db.collection('auto_fix_logs')
       .find({
-        notificationId: { $regex: `^channel-${channel.id}-` }
+        $or: [
+          { deviceType: 'channel', deviceId: channelKey },
+          { notificationId: { $regex: `^channel-${channel.id}-` } }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -5678,7 +6722,7 @@ app.get("/api/channels/:id/auto-fix", async (req, res) => {
  * POST /api/hospitality/tvs/:id/auto-fix
  * Execute auto-fix for a TV device using ML prediction
  */
-app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
+app.post("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id: tvId } = req.params;
     const { text, issue, category } = req.body;
@@ -5741,8 +6785,13 @@ app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
     const fixLog = await createAutoFixLog({
       notificationId: notificationId,
       mlPredictionId: null,
+      deviceType: 'tv',
+      deviceId: String(tv._id),
+      deviceName: tv.roomNo != null ? `Room ${tv.roomNo}` : (tv.deviceName || null),
+      roomNo: tv.roomNo != null ? tv.roomNo : null,
+      source: 'hospitality',
       fixType: 'automatic',
-      category: mlResult.predicted_label,
+      category: resolveLogCategory(mlResult.predicted_label, category),
       action: recommendedFix.action,
       description: recommendedFix.description,
       confidence: mlResult.probabilities?.[0]?.probability || 0,
@@ -5821,7 +6870,7 @@ app.post("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
  * GET /api/hospitality/tvs/:id/auto-fix?history=true
  * Get auto-fix history for a TV device
  */
-app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
+app.get("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { history } = req.query;
 
@@ -5856,10 +6905,15 @@ app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
     const { client } = await connectDB();
     const db = client.db('iptv');
 
-    // Find all auto-fix logs for this TV
+    // Find all auto-fix logs for this TV.
+    // Primary lookup by stable device key; legacy notificationId pattern as fallback.
+    const tvKey = String(tv._id);
     const autoFixLogs = await db.collection('auto_fix_logs')
       .find({
-        notificationId: { $regex: `^tv-${tv._id}-` }
+        $or: [
+          { deviceType: 'tv', deviceId: tvKey },
+          { notificationId: { $regex: `^tv-${tv._id}-` } }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -5897,6 +6951,17 @@ app.get("/api/hospitality/tvs/:id/auto-fix", async (req, res) => {
 });
 
 // ==================== HEALTH & DEBUG ENDPOINTS ====================
+app.get("/metrics", async (req, res) => {
+  try {
+    await updatePrometheusMetrics();
+    res.set("Content-Type", metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
+  } catch (error) {
+    console.error("Prometheus metrics error:", error);
+    res.status(500).send("# Failed to collect metrics\n");
+  }
+});
+
 app.get("/api/health", authenticateToken, async (req, res) => {
   try {
     res.json({
@@ -5935,7 +7000,7 @@ app.get("/api/status", (req, res) => {
   });
 });
 
-app.get("/api/debug/routes", (req, res) => {
+app.get("/api/debug/routes", authenticateToken, requireAdmin, (req, res) => {
   const routes = [];
   app._router.stack.forEach((middleware) => {
     if (middleware.route) {
@@ -5979,27 +7044,39 @@ app.use((error, req, res, next) => {
 
 // ==================== PERIODIC TASKS ====================
 const startPeriodicChecks = () => {
+  let statusCheckInProgress = false;
+
   // Status checks with improved logging
   if (typeof checkAllChannelsStatus === 'function' &&
     typeof checkAllTVsStatus === 'function' &&
     typeof checkAllChromecastsStatus === 'function') {
 
-    setInterval(() => {
+    setInterval(async () => {
+      if (statusCheckInProgress) {
+        console.warn("Skipping periodic status check because the previous run is still in progress");
+        return;
+      }
+
       if (CHANNEL_STATUS_CONFIG.USE_DUMMY_STATUS ||
         TV_STATUS_CONFIG.USE_DUMMY_STATUS ||
         CHROMECAST_STATUS_CONFIG.USE_DUMMY_STATUS) {
 
-        Promise.all([
-          checkAllChannelsStatus().catch(error => {
-            console.error("Error in channel status check:", error)
-          }),
-          checkAllTVsStatus().catch(error => {
-            console.error("Error in TV status check:", error);
-          }),
-          checkAllChromecastsStatus().catch(error => {
-            console.error("Error in Chromecast status check:", error);
-          })
-        ]);
+        statusCheckInProgress = true;
+        try {
+          await Promise.all([
+            checkAllChannelsStatus().catch(error => {
+              console.error("Error in channel status check:", error)
+            }),
+            checkAllTVsStatus().catch(error => {
+              console.error("Error in TV status check:", error);
+            }),
+            checkAllChromecastsStatus().catch(error => {
+              console.error("Error in Chromecast status check:", error);
+            })
+          ]);
+        } finally {
+          statusCheckInProgress = false;
+        }
       }
     }, Math.min(
       CHANNEL_STATUS_CONFIG.UPDATE_INTERVAL,
@@ -6010,9 +7087,9 @@ const startPeriodicChecks = () => {
 
   // Cleanup Telegram bot subscribers every hour
   if (telegramBot) {
-    setInterval(() => {
+    setInterval(async () => {
       try {
-        telegramBot.cleanupSubscribers();
+        await telegramBot.cleanupSubscribers();
       } catch (error) {
         console.error("Error cleaning up Telegram subscribers:", error);
       }

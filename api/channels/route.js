@@ -4,6 +4,7 @@ const { ObjectId } = require('mongodb');
 const { connectDB } = require('../../db');
 const autoFixService = require('../../services/autoFixService');
 const { Logger } = require('../../utils/logger.util');
+const { requireAdmin } = require('../../middleware/authMiddleware');
 
 const logger = new Logger('ChannelAPI');
 
@@ -65,7 +66,7 @@ function createSlug(channelName) {
  * GET /api/channels/:channelId/auto-fix?history=true
  * Get auto-fix history for a specific channel
  */
-router.get('/:channelId/auto-fix', async (req, res) => {
+router.get('/:channelId/auto-fix', requireAdmin, async (req, res) => {
   try {
     const { channelId } = req.params;
     const { history } = req.query;
@@ -190,7 +191,7 @@ router.get('/:channelId/auto-fix', async (req, res) => {
  * POST /api/channels/:channelId/auto-fix
  * Trigger auto-fix for a specific channel
  */
-router.post('/:channelId/auto-fix', async (req, res) => {
+router.post('/:channelId/auto-fix', requireAdmin, async (req, res) => {
   try {
     const { channelId } = req.params;
     const { issueDescription, category } = req.body;

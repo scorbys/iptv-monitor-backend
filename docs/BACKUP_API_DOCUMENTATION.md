@@ -1,5 +1,9 @@
 # Backup & Sync API Documentation
 
+> Status: legacy compatibility. Endpoint `/api/backup/*` saat ini mengarah ke
+> optional Supabase mirror/sync, bukan strategi backup production. Gunakan
+> MongoDB Atlas backup/snapshot sebagai backup utama.
+
 ## Base URL
 ```
 http://localhost:3001/api/backup

@@ -1,5 +1,7 @@
 require('dotenv').config();
 const { Bot, GrammyError } = require('grammy');
+const { getInternalToken } = require('../../../utils/internalAuth');
+const { connectDB } = require('../../../autofix-db');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -29,6 +31,7 @@ class IPTVTelegramBot {
 
         // Initialize fetch dynamically
         this.initializeFetch();
+        this.loadSubscribersFromDB();
 
         // Setup commands and handlers
         this.setupCommands();
@@ -66,6 +69,65 @@ class IPTVTelegramBot {
         return `http://localhost:${port}`;
     }
 
+    async getSubscribersCollection() {
+        const db = await connectDB();
+        return db.telegramSubscribers || db.client.db('iptv').collection('telegram_subscribers');
+    }
+
+    async loadSubscribersFromDB() {
+        try {
+            const collection = await this.getSubscribersCollection();
+            const subscribers = await collection.find({ active: true }).toArray();
+
+            subscribers.forEach((subscriber) => {
+                const chatId = Number(subscriber.chatId);
+                this.subscribers.set(Number.isNaN(chatId) ? subscriber.chatId : chatId, {
+                    active: subscriber.active !== false,
+                    pausedUntil: subscriber.pausedUntil ? new Date(subscriber.pausedUntil) : null,
+                    userName: subscriber.userName || 'User'
+                });
+            });
+
+            console.log(`✅ Loaded ${subscribers.length} Telegram subscriber(s) from MongoDB`);
+        } catch (error) {
+            console.error('⚠️ Failed to load Telegram subscribers from MongoDB:', error.message);
+        }
+    }
+
+    async persistSubscriber(chatId, data) {
+        try {
+            const collection = await this.getSubscribersCollection();
+            const now = new Date();
+            await collection.updateOne(
+                { chatId: String(chatId) },
+                {
+                    $set: {
+                        chatId: String(chatId),
+                        chatIdNumeric: typeof chatId === 'number' ? chatId : Number(chatId),
+                        userName: data.userName || 'User',
+                        active: data.active !== false,
+                        pausedUntil: data.pausedUntil || null,
+                        lastSeenAt: now,
+                        updatedAt: now
+                    },
+                    $setOnInsert: {
+                        createdAt: now
+                    }
+                },
+                { upsert: true }
+            );
+        } catch (error) {
+            console.error(`⚠️ Failed to persist Telegram subscriber ${chatId}:`, error.message);
+        }
+    }
+
+    async updateSubscriber(chatId, updates) {
+        const existing = this.subscribers.get(chatId) || { active: true, pausedUntil: null, userName: 'User' };
+        const next = { ...existing, ...updates };
+        this.subscribers.set(chatId, next);
+        await this.persistSubscriber(chatId, next);
+    }
+
     getIndonesianTime() {
         return new Date().toLocaleString('id-ID', {
             timeZone: 'Asia/Makassar', // WITA timezone
@@ -79,6 +141,52 @@ class IPTVTelegramBot {
         });
     }
 
+    escapeMarkdown(value) {
+        return String(value ?? 'N/A').replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+    }
+
+    inferCategory(notification) {
+        if (notification.errorCategory) return notification.errorCategory;
+
+        const source = notification.source;
+        const text = `${notification.message || ''} ${notification.error || ''}`.toLowerCase();
+
+        if (source === 'chromecast') return 'Kategori-1';
+        if (source === 'tv') {
+            if (text.includes('lan') || text.includes('cable') || text.includes('not responding')) return 'Kategori-3';
+            return 'Kategori-9';
+        }
+        if (source === 'channel') {
+            if (text.includes('connection') || text.includes('multicast')) return 'Kategori-7';
+            if (text.includes('playing') || text.includes('stream')) return 'Kategori-5';
+            return 'Kategori-11';
+        }
+
+        return 'Uncategorized';
+    }
+
+    getActionHint(category) {
+        const hints = {
+            'Kategori-1': 'Check Chromecast power/network, then restart device if reachable',
+            'Kategori-3': 'On-site LAN cable/device check required',
+            'Kategori-5': 'Check stream playback and channel source',
+            'Kategori-7': 'Check multicast/network path',
+            'Kategori-9': 'Check TV signal/login state',
+            'Kategori-11': 'Verify channel mapping/source availability'
+        };
+
+        return hints[category] || 'Review in dashboard';
+    }
+
+    formatOfflineLine(notification) {
+        const category = this.inferCategory(notification);
+        const message = this.escapeMarkdown(notification.message || notification.deviceName || 'Unknown device');
+        const ip = this.escapeMarkdown(notification.ipAddr || notification.ipAddress || 'N/A');
+        const actionHint = this.escapeMarkdown(this.getActionHint(category));
+
+        return `• ${message}\n  IP: ${ip}\n  Category: ${this.escapeMarkdown(category)}\n  Action: ${actionHint}\n`;
+    }
+
     setupCommands() {
         // Command /start
         this.bot.command('start', async (ctx) => {
@@ -86,6 +194,11 @@ class IPTVTelegramBot {
             const userName = ctx.from.first_name || ctx.from.username || 'User';
 
             this.subscribers.set(chatId, {
+                active: true,
+                pausedUntil: null,
+                userName: userName
+            });
+            await this.persistSubscriber(chatId, {
                 active: true,
                 pausedUntil: null,
                 userName: userName
@@ -155,7 +268,7 @@ Sedang mengecek perangkat offline...
             const chatId = ctx.chat.id;
 
             if (this.subscribers.has(chatId)) {
-                this.subscribers.get(chatId).active = false;
+                await this.updateSubscriber(chatId, { active: false, pausedUntil: null });
                 await ctx.reply(
                     '🔕 *Notifikasi dihentikan*\n\nAnda tidak akan menerima notifikasi lagi.\nKetik /start untuk mengaktifkan kembali.',
                     {
@@ -173,7 +286,7 @@ Sedang mengecek perangkat offline...
 
             if (this.subscribers.has(chatId)) {
                 const pausedUntil = new Date(Date.now() + 60 * 60 * 1000); // 1 jam
-                this.subscribers.get(chatId).pausedUntil = pausedUntil;
+                await this.updateSubscriber(chatId, { pausedUntil });
 
                 await ctx.reply(
                     `⏸️ *Notifikasi dijeda selama 1 jam*\n\nNotifikasi akan kembali aktif pada:\n${new Date(Date.now() + 60 * 60 * 1000).toLocaleString('id-ID', { timeZone: 'Asia/Makassar', hour12: false })}`,
@@ -385,7 +498,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                     case 'pause_1h':
                         if (this.subscribers.has(chatId)) {
                             const pausedUntil = new Date(Date.now() + 60 * 60 * 1000);
-                            this.subscribers.get(chatId).pausedUntil = pausedUntil;
+                            await this.updateSubscriber(chatId, { pausedUntil });
 
                             await ctx.answerCallbackQuery({
                                 text: '⏸️ Notifikasi dijeda selama 1 jam'
@@ -410,7 +523,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 
                     case 'resume_notifications':
                         if (this.subscribers.has(chatId)) {
-                            this.subscribers.get(chatId).pausedUntil = null;
+                            await this.updateSubscriber(chatId, { pausedUntil: null });
 
                             await ctx.answerCallbackQuery({
                                 text: '✅ Notifikasi diaktifkan kembali'
@@ -429,7 +542,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
 
                     case 'stop_notifications':
                         if (this.subscribers.has(chatId)) {
-                            this.subscribers.get(chatId).active = false;
+                            await this.updateSubscriber(chatId, { active: false, pausedUntil: null });
 
                             await ctx.answerCallbackQuery({
                                 text: '🔕 Notifikasi dihentikan'
@@ -478,7 +591,8 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             const response = await this.fetch(`${baseUrl}/api/internal/channels`, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                    'User-Agent': 'TelegramBot/1.0 node-fetch',
+                    'x-internal-token': getInternalToken()
                 },
                 timeout: 10000 // 10 second timeout
             });
@@ -510,7 +624,8 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             const response = await this.fetch(`${baseUrl}/api/internal/chromecast`, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                    'User-Agent': 'TelegramBot/1.0 node-fetch',
+                    'x-internal-token': getInternalToken()
                 },
                 timeout: 10000
             });
@@ -542,7 +657,8 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
             const response = await this.fetch(`${baseUrl}/api/internal/hospitality/tvs`, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': 'TelegramBot/1.0 node-fetch'
+                    'User-Agent': 'TelegramBot/1.0 node-fetch',
+                    'x-internal-token': getInternalToken()
                 },
                 timeout: 10000
             });
@@ -652,10 +768,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                 message += `${sourceEmoji[source] || '🔧'} *${source.toUpperCase()}:*\n`;
 
                 notifs.slice(0, 5).forEach(notif => {
-                    message += `• ${notif.message}\n`;
-                    if (notif.ipAddr) {
-                        message += `  IP: ${notif.ipAddr}\n`;
-                    }
+                    message += this.formatOfflineLine(notif);
                 });
 
                 if (notifs.length > 5) {
@@ -722,10 +835,7 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
                     message += `${sourceEmoji[source] || '🔧'} *${source.toUpperCase()}:*\n`;
 
                     notifs.slice(0, 5).forEach(notif => {
-                        message += `• ${notif.message}\n`;
-                        if (notif.ipAddr) {
-                            message += `  IP: ${notif.ipAddr}\n`;
-                        }
+                        message += this.formatOfflineLine(notif);
                     });
 
                     if (notifs.length > 5) {
@@ -829,15 +939,16 @@ ${totalOffline > 0 ? '⚠️ *Perangkat yang perlu perhatian:* ' + totalOffline 
     }
 
     // Method untuk cleanup subscriber yang tidak aktif
-    cleanupSubscribers() {
+    async cleanupSubscribers() {
         const now = new Date();
         let cleaned = 0;
 
         for (const [chatId, sub] of this.subscribers.entries()) {
             // Remove paused status if time has passed
             if (sub.pausedUntil && now > sub.pausedUntil) {
-                sub.pausedUntil = null;
+                await this.updateSubscriber(chatId, { pausedUntil: null });
                 console.log(`⏰ Resumed notifications for user ${chatId}`);
+                cleaned++;
             }
         }
 
