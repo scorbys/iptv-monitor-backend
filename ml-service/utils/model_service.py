@@ -1,4 +1,5 @@
 import os
+import re
 import pickle
 import numpy as np
 import pandas as pd
@@ -459,6 +460,10 @@ class MLModelService:
 
     def _get_default_fix_for_category(self, category: str) -> Dict[str, Any]:
         """Get default fix mapping for a category"""
+        # Dataset labels use the "Katagori-" spelling; the fix table (and the rest
+        # of the app) use the canonical "Kategori-". Normalize so the lookup hits
+        # the category-specific fix instead of falling back to manual.
+        category = re.sub(r'^Katagori-', 'Kategori-', str(category), flags=re.IGNORECASE)
         default_fixes = {
             "Kategori-1": {
                 "action": "deactivate_whitelist",
