@@ -1416,7 +1416,37 @@ async function ensureStatusCacheForChat(deviceType) {
   }
 }
 
+// Pertanyaan "cara mengatasi / bagaimana / langkah perbaikan" adalah troubleshooting,
+// bukan permintaan ringkasan status — harus diteruskan ke Gemini AI agar dijawab
+// dengan bahasa bebas + konteks FAQ/project.
+function hasTroubleshootingIntent(message) {
+  const lowerMsg = String(message || '').toLowerCase();
+  return (
+    lowerMsg.includes('cara') ||
+    lowerMsg.includes('bagaimana') ||
+    lowerMsg.includes('gimana') ||
+    lowerMsg.includes('menangani') ||
+    lowerMsg.includes('tangani') ||
+    lowerMsg.includes('mengatasi') ||
+    lowerMsg.includes('atasi') ||
+    lowerMsg.includes('solusi') ||
+    lowerMsg.includes('perbaiki') ||
+    lowerMsg.includes('memperbaiki') ||
+    lowerMsg.includes('perbaikan') ||
+    lowerMsg.includes('langkah') ||
+    lowerMsg.includes('kenapa') ||
+    lowerMsg.includes('mengapa') ||
+    lowerMsg.includes('how to') ||
+    lowerMsg.includes('how do') ||
+    lowerMsg.includes('fix')
+  );
+}
+
 async function buildDeviceStatusChatResponse(message, conversationHistory = [], systemContext = null) {
+  // Jika user bertanya "cara/gimana/mengatasi/perbaiki ...", jangan balas ringkasan
+  // status (mis. "Chromecast: 8 offline/mati dari 135"). Teruskan ke Gemini AI.
+  if (hasTroubleshootingIntent(message)) return null;
+
   const deviceType = detectDeviceType(message, conversationHistory);
   const asksList = hasListIntent(message);
   const asksCount = hasCountIntent(message);
