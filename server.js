@@ -3017,10 +3017,14 @@ app.post("/api/chat/query", authenticateToken, async (req, res) => {
     } catch (aiError) {
       console.error('Gemini API error:', aiError);
 
-      // Fallback natural (BUKAN format list)
+      // Fallback natural, language-aware (mirror the user language)
+      const fbLang = detectLanguage(message);
       if (relatedFAQs.length > 0) {
         const topFAQ = relatedFAQs[0];
-        aiResponse = `Untuk masalah ${topFAQ.device} ini, biasanya bisa dicoba: ${topFAQ.solutions.slice(0, 2).join(', atau ')}. Kalau masih belum solve, coba langkah lainnya di tombol Detail Lengkap.`;
+        const fbSolutions = topFAQ.solutions.slice(0, 2);
+        aiResponse = fbLang === 'en'
+          ? `For this ${topFAQ.device} issue, you can usually try: ${fbSolutions.join(', or ')}. If it is still not solved, try the other steps under the Full Details button.`
+          : `Untuk masalah ${topFAQ.device} ini, biasanya bisa dicoba: ${fbSolutions.join(', atau ')}. Kalau masih belum solve, coba langkah lainnya di tombol Detail Lengkap.`;
 
         detailedInfo = {
           detailedSteps: topFAQ.detailedSteps || [],
@@ -3029,7 +3033,9 @@ app.post("/api/chat/query", authenticateToken, async (req, res) => {
           priority: topFAQ.priority
         };
       } else {
-        aiResponse = 'Hmm, tidak ada solusi spesifik untuk kasus ini. Coba restart device dulu, atau hubungi technical support kalau masih bermasalah.';
+        aiResponse = fbLang === 'en'
+          ? 'Hmm, there is no specific solution for this case. Try restarting the device first, or contact technical support if the problem persists.'
+          : 'Hmm, tidak ada solusi spesifik untuk kasus ini. Coba restart device dulu, atau hubungi technical support kalau masih bermasalah.';
       }
     }
 
@@ -3197,6 +3203,17 @@ IPTV Monitoring System technical knowledge:
 - Notifications vs totals: total notifications can include historical/resolved records, while active counts only represent current unresolved/offline/error records.
 - Grafana/Prometheus: infrastructure dashboards show container health, CPU, memory, network, backend metrics, notification error categories, and affected devices/channels. Grafana does not replace the app UI; it is for ops observability.
 `;
+
+// Detect whether the user wrote in English or Indonesian, so non-AI fallback
+// replies can mirror the user language (Indonesian wins ties for this hotel).
+function detectLanguage(text) {
+  const t = ` ${String(text || '').toLowerCase()} `;
+  const idMarkers = [' yang ', ' tidak ', ' saya ', ' bisa ', ' kenapa ', ' mengapa ', ' bagaimana ', ' gimana ', ' kok ', ' dengan ', ' untuk ', ' apa ', ' ada ', ' ini ', ' itu ', ' tolong ', ' perbaiki ', ' rusak ', ' mati ', ' nyala ', ' gak ', ' nggak ', ' dong ', ' di ', ' ke ', ' dari ', ' sudah ', ' belum '];
+  const enMarkers = [' the ', ' is ', ' how ', ' why ', ' what ', ' fix ', ' not ', ' working ', ' please ', ' my ', ' can ', ' broken ', ' screen ', ' help ', ' there ', ' channel ', ' device ', ' no ', ' and ', ' with ', ' on ', ' off '];
+  const idScore = idMarkers.filter(w => t.includes(w)).length;
+  const enScore = enMarkers.filter(w => t.includes(w)).length;
+  return enScore > idScore ? 'en' : 'id';
+}
 
 function buildGeminiPrompt(userMessage, relatedFAQs, systemContext, conversationHistory) {
   const lowerMsg = userMessage.toLowerCase();
