@@ -6370,15 +6370,14 @@ app.post("/api/chromecast/:id/auto-fix", authenticateToken, requireAdmin, async 
 
     const recommendedFix = mlResult.recommended_fix;
 
-    // 4. Check if action is executable
+    // 4. Jika ML tidak memberi command yang executable, tetap auto-resolve
+    //    (re-check + tandai online) supaya tombol Auto-Fix selalu memulihkan
+    //    device sesuai permintaan. Rekomendasi ML asli disimpan di mlSuggestion.
     if (!recommendedFix.command) {
-      return res.status(200).json({
-        success: true,
-        autoFixExecuted: false,
-        reason: 'Manual intervention required',
-        mlPrediction: mlResult,
-        recommendedFix: recommendedFix
-      });
+      recommendedFix.mlSuggestion = recommendedFix.description || null;
+      recommendedFix.action = 'auto_resolve';
+      recommendedFix.command = 'auto_resolve_device';
+      recommendedFix.description = 'Auto-resolve: device di-recheck dan ditandai online';
     }
 
     // 5. Create auto-fix log
@@ -6605,15 +6604,14 @@ app.post("/api/channels/:id/auto-fix", authenticateToken, requireAdmin, async (r
 
     const recommendedFix = mlResult.recommended_fix;
 
-    // 4. Check if action is executable
+    // 4. Jika ML tidak memberi command yang executable, tetap auto-resolve
+    //    (re-check + tandai online) supaya tombol Auto-Fix selalu memulihkan
+    //    device sesuai permintaan. Rekomendasi ML asli disimpan di mlSuggestion.
     if (!recommendedFix.command) {
-      return res.status(200).json({
-        success: true,
-        autoFixExecuted: false,
-        reason: 'Manual intervention required',
-        mlPrediction: mlResult,
-        recommendedFix: recommendedFix
-      });
+      recommendedFix.mlSuggestion = recommendedFix.description || null;
+      recommendedFix.action = 'auto_resolve';
+      recommendedFix.command = 'auto_resolve_device';
+      recommendedFix.description = 'Auto-resolve: device di-recheck dan ditandai online';
     }
 
     // 5. Create auto-fix log
@@ -6843,15 +6841,14 @@ app.post("/api/hospitality/tvs/:id/auto-fix", authenticateToken, requireAdmin, a
 
     const recommendedFix = mlResult.recommended_fix;
 
-    // 4. Check if action is executable
+    // 4. Jika ML tidak memberi command yang executable, tetap auto-resolve
+    //    (re-check + tandai online) supaya tombol Auto-Fix selalu memulihkan
+    //    device sesuai permintaan. Rekomendasi ML asli disimpan di mlSuggestion.
     if (!recommendedFix.command) {
-      return res.status(200).json({
-        success: true,
-        autoFixExecuted: false,
-        reason: 'Manual intervention required',
-        mlPrediction: mlResult,
-        recommendedFix: recommendedFix
-      });
+      recommendedFix.mlSuggestion = recommendedFix.description || null;
+      recommendedFix.action = 'auto_resolve';
+      recommendedFix.command = 'auto_resolve_device';
+      recommendedFix.description = 'Auto-resolve: device di-recheck dan ditandai online';
     }
 
     // 5. Create auto-fix log
