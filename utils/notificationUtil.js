@@ -639,9 +639,9 @@ async function cleanupOldNotifications() {
     const db = client.db('iptv');
     const notifications = db.collection('notifications');
 
-    // Delete notifications older than 7 days (matches frontend cleanup)
+    // Delete notifications older than 30 days (matches frontend cleanup)
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - 7);
+    cutoffDate.setDate(cutoffDate.getDate() - 30);
 
     // Find old notifications first (for logging)
     const oldNotifications = await notifications.find({
@@ -654,7 +654,7 @@ async function cleanupOldNotifications() {
         createdAt: { $lt: cutoffDate }
       });
 
-      console.log(`[Notification] Cleaned up ${deleteResult.deletedCount} old notifications (older than 7 days)`);
+      console.log(`[Notification] Cleaned up ${deleteResult.deletedCount} old notifications (older than 30 days)`);
 
       return {
         success: true,
