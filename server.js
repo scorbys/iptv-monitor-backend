@@ -4336,7 +4336,16 @@ app.get("/api/hospitality/tvs", trackRequestMetrics('hospitality'), authenticate
             tvStatusData.signalLevel > 70 ? "Good" :
               tvStatusData.signalLevel > 50 ? "Fair" : "Poor") : null,
         lastCheckedFormatted: tvStatusData.lastChecked ?
-          new Date(tvStatusData.lastChecked).toLocaleString() : "Never"
+          new Date(tvStatusData.lastChecked).toLocaleString() : "Never",
+        // Sertakan metrik jaringan supaya export CSV TV tidak 0.00 (sama spt channels)
+        metrics: tvStatusData.networkStats ? {
+          packetLoss: tvStatusData.networkStats.packetLoss,
+          latency: tvStatusData.networkStats.latency,
+          jitter: tvStatusData.networkStats.jitter,
+          error: tvStatusData.networkStats.error,
+          recoveryTime: tvStatusData.networkStats.recoveryTime
+        } : undefined,
+        labeledMetrics: tvStatusData.labeledMetrics || null
       };
     });
 
@@ -5092,6 +5101,14 @@ app.get("/api/chromecast", trackRequestMetrics('chromecast'), authenticateToken,
         id: device.idCast,
         type: device.type,
         model: device.model || "Google Chromecast",
+        // Sertakan metrik jaringan supaya export CSV Chromecast tidak 0.00
+        metrics: deviceStatus.networkStats ? {
+          packetLoss: deviceStatus.networkStats.packetLoss,
+          latency: deviceStatus.networkStats.latency,
+          jitter: deviceStatus.networkStats.jitter,
+          error: deviceStatus.networkStats.error,
+          recoveryTime: deviceStatus.networkStats.recoveryTime
+        } : undefined,
       };
     });
 
