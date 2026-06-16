@@ -3637,13 +3637,18 @@ async function callGeminiAPI(prompt) {
     throw new Error('GEMINI_API_KEY not configured in environment variables');
   }
 
+  // Mirror the user language: reply in whatever language the user wrote in
+  // (Indonesian staff -> Indonesian, foreign staff -> English, etc.).
+  const languageDirective = 'LANGUAGE RULE (highest priority): Detect the language of the user message and reply ENTIRELY in that same language. If the user writes in Indonesian, answer in Indonesian; if in English, answer in English; otherwise mirror their language. Keep device names, error codes, and category names (e.g. "Kategori-1") unchanged.\n\n';
+  const finalPrompt = languageDirective + prompt;
+
   try {
     const response = await axios.post(
       `${GEMINI_CONFIG.endpoint}?key=${apiKey}`,
       {
         contents: [{
           parts: [{
-            text: prompt
+            text: finalPrompt
           }]
         }],
         generationConfig: {
