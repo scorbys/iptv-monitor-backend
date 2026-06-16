@@ -296,6 +296,20 @@ class MLModelService:
         except Exception as e:
             raise Exception(f"Error training model: {e}")
 
+    def _is_kategori(self, label) -> bool:
+        return bool(re.match(r'^Kat[ae]gori-\d+$', str(label), re.IGNORECASE))
+
+    def _coerce_to_kategori(self, label, probs):
+        """Never output 'External'/non-numbered: remap to the highest-probability
+        Kategori class so every prediction maps to a concrete error category."""
+        if self._is_kategori(label) or probs is None:
+            return label
+        for i in np.argsort(probs)[::-1]:
+            cand = self.label_encoder.inverse_transform([int(i)])[0]
+            if self._is_kategori(cand):
+                return cand
+        return label
+
     def predict(self, text: str) -> Dict[str, Any]:
         """Make prediction on single text"""
         if not self.is_trained:
@@ -319,10 +333,14 @@ class MLModelService:
             pred_idx = self.model.predict(X_input)[0]
             label = self.label_encoder.inverse_transform([pred_idx])[0]
 
-            # Get probabilities
+            # Probabilities (computed once, reused for the no-External remap)
+            probs = self.model.predict_proba(X_input)[0] if hasattr(self.model, "predict_proba") else None
+
+            # Force a concrete numbered category (no "External")
+            label = self._coerce_to_kategori(label, probs)
+
             probabilities = None
-            if hasattr(self.model, "predict_proba"):
-                probs = self.model.predict_proba(X_input)[0]
+            if probs is not None:
                 top_indices = np.argsort(probs)[::-1][:5]
                 probabilities = [
                     {
