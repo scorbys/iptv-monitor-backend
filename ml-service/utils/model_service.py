@@ -336,8 +336,8 @@ class MLModelService:
             # Probabilities (computed once, reused for the no-External remap)
             probs = self.model.predict_proba(X_input)[0] if hasattr(self.model, "predict_proba") else None
 
-            # Force a concrete numbered category (no "External")
-            label = self._coerce_to_kategori(label, probs)
+            # Keep the raw label (including "External" = infrastructure/network
+            # issues) so it shows as a real category in Analytics/QoS/Notifications.
 
             probabilities = None
             if probs is not None:
